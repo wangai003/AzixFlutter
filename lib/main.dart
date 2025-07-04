@@ -1,9 +1,8 @@
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 import 'package:provider/provider.dart';
 
-import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
 import 'providers/stellar_provider.dart';
 import 'providers/chat_provider.dart';
@@ -18,29 +17,24 @@ import 'screens/all_transactions_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // Set preferred orientations for mobile devices
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-    DeviceOrientation.landscapeLeft,
-    DeviceOrientation.landscapeRight,
-  ]);
-  
+
+  // Global error handler for Flutter framework errors
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.dumpErrorToConsole(details);
+    // Optionally, send to a logging service
+  };
+
   try {
-    // Check if Firebase app is already initialized
-    if (Firebase.apps.isEmpty) {
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
-    } else {
-      Firebase.app(); // if already initialized, use existing app
-    }
-  } catch (e) {
-    // For demo purposes, we'll continue even if Firebase initialization fails
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e, stack) {
+    // Print and optionally log the error
     print('Failed to initialize Firebase: $e');
+    print(stack);
+    // Optionally, show a fallback UI or error page
   }
-  
+
   runApp(const MyApp());
 }
 
