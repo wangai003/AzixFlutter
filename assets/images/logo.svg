@@ -1,0 +1,6 @@
+<svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="100" cy="100" r="90" fill="black"/>
+  <circle cx="100" cy="100" r="75" fill="#FFD700"/>
+  <path d="M70 70 L130 70 L100 130 Z" fill="black"/>
+  <text x="100" y="160" text-anchor="middle" font-family="Arial" font-weight="bold" font-size="24" fill="black">AZIX</text>
+</svg>
