@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'providers/auth_provider.dart';
 import 'providers/stellar_provider.dart';
@@ -15,8 +16,9 @@ import 'utils/responsive_layout.dart';
 import 'wrapper.dart';
 import 'screens/all_transactions_screen.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load();
 
   // Global error handler for Flutter framework errors
   FlutterError.onError = (FlutterErrorDetails details) {

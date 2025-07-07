@@ -1,10 +1,19 @@
 // WARNING: Never commit this file to version control or use in production!
 // This is for testnet/demo only.
 
-const Map<String, String> assetIssuerSecrets = {
-  'AKOFA': 'SATTJCBNQLGSA4TXFCMOWOWDXEOIRY2VGSEBQOH2HWY5RV72YN6AE6FP', // TODO: Replace with actual AKOFA issuer secret key
-  'USDC': 'SB...USDC_ISSUER_SECRET...',
-  'BTC': 'SB...BTC_ISSUER_SECRET...',
-  'ETH': 'SB...ETH_ISSUER_SECRET...',
-  // Add more as needed
-}; 
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+class Secrets {
+  static String get akofaIssuerSecret => dotenv.env['AKOFA_ISSUER_SECRET'] ?? '';
+  static String get usdcIssuerSecret => dotenv.env['USDC_ISSUER_SECRET'] ?? '';
+  static String get btcIssuerSecret => dotenv.env['BTC_ISSUER_SECRET'] ?? '';
+  static String get ethIssuerSecret => dotenv.env['ETH_ISSUER_SECRET'] ?? '';
+
+  static Map<String, String> get assetIssuerSecrets => {
+    'AKOFA': akofaIssuerSecret,
+    'USDC': usdcIssuerSecret,
+    'BTC': btcIssuerSecret,
+    'ETH': ethIssuerSecret,
+    // Add more as needed
+  };
+} 

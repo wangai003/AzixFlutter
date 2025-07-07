@@ -308,6 +308,38 @@ class ChatProvider with ChangeNotifier {
     }
   }
   
+  // Mark all messages as read in a channel for the current user
+  Future<void> markMessagesAsRead(String communityId, String channelId, String userId) async {
+    final messagesRef = _firestore
+        .collection('communities')
+        .doc(communityId)
+        .collection('channels')
+        .doc(channelId)
+        .collection('messages');
+    final snapshot = await messagesRef.where('readBy', whereNotIn: [userId]).get();
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
+      final readBy = List<String>.from(data['readBy'] ?? []);
+      if (!readBy.contains(userId)) {
+        await doc.reference.update({
+          'readBy': FieldValue.arrayUnion([userId])
+        });
+      }
+    }
+  }
+
+  // Get unread count for a channel
+  Future<int> getUnreadCount(String communityId, String channelId, String userId) async {
+    final messagesRef = _firestore
+        .collection('communities')
+        .doc(communityId)
+        .collection('channels')
+        .doc(channelId)
+        .collection('messages');
+    final snapshot = await messagesRef.where('readBy', whereNotIn: [userId]).get();
+    return snapshot.docs.length;
+  }
+  
   // Send a text or image message
   Future<void> sendMessage(String content, {File? imageFile}) async {
     if ((content.isEmpty && imageFile == null) || selectedCommunity == null || selectedChannel == null) {
@@ -339,6 +371,7 @@ class ChatProvider with ChangeNotifier {
         'replyToId': _replyToMessage?.id,
         'replyToContent': _replyToMessage?.content,
         'replyToSenderName': _replyToMessage?.senderName,
+        'readBy': [_chatService.currentUserId], // Mark as read by sender
       });
       _replyToMessage = null;
       notifyListeners();

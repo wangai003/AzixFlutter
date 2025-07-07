@@ -145,70 +145,51 @@ class AuthService {
       String email, String password, String name, String phoneNumber, {String? referralCode}) async {
     try {
       print('Starting registration process for: $email');
-      
       // Input validation
       if (email.isEmpty || password.isEmpty || name.isEmpty || phoneNumber.isEmpty) {
         throw Exception('All fields are required');
       }
-      
-      // Email validation
-      if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email)) {
+      if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}\$').hasMatch(email)) {
         throw Exception('Please enter a valid email address');
       }
-      
-      // Password validation
       if (password.length < 6) {
         throw Exception('Password must be at least 6 characters long');
       }
-      
-      // Name validation
       if (name.length < 2) {
         throw Exception('Name must be at least 2 characters long');
       }
-      
-      // Phone number validation
       final isValidPhone = await _validatePhoneNumber(phoneNumber);
       if (!isValidPhone) {
         throw Exception('Invalid phone number format. Please ensure your phone number includes the country code and is between 7-15 digits (e.g., +254725280695)');
       }
-
       // Check if phone number is already in use
       final isPhoneInUse = await _isPhoneNumberInUse(phoneNumber);
       if (isPhoneInUse) {
         throw Exception('Phone number is already registered with another account');
       }
-
       // Check if email is already in use
       try {
-        await _auth.fetchSignInMethodsForEmail(email);
         final methods = await _auth.fetchSignInMethodsForEmail(email);
         if (methods.isNotEmpty) {
           throw Exception('Email is already registered with another account');
         }
       } catch (e) {
-        // If fetchSignInMethodsForEmail fails, continue (might be a new email)
         print('Email check failed, continuing: $e');
       }
-
       // Get device ID
       final deviceId = await _getDeviceId();
-      
-      // Check if device ID is already in use (optional - can be disabled for testing)
+      // Check if device ID is already in use (strict enforcement)
       final isDeviceInUse = await _isDeviceIdInUse(deviceId);
       if (isDeviceInUse) {
-        print('Warning: Device already registered, but continuing for development');
-        // throw Exception('This device is already registered with another account');
+        throw Exception('This device is already registered with another account. Please use a different device or contact support.');
       }
-
       // Create user with email and password
       final UserCredential userCredential =
           await _auth.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
-
       final uid = userCredential.user!.uid;
-      
       // Prepare user data
       final userData = {
         'displayName': name,
@@ -228,7 +209,6 @@ class AuthService {
         'akofaBalance': 0.0,
         'lastLogin': FieldValue.serverTimestamp(),
       };
-
       // Handle referral if provided
       if (referralCode != null && referralCode.isNotEmpty) {
         try {
@@ -236,8 +216,6 @@ class AuthService {
           if (refQuery.docs.isNotEmpty) {
             final referrerDoc = refQuery.docs.first;
             userData['referredBy'] = referrerDoc.id;
-
-            // Update referrer's data
             await _firestore.runTransaction((transaction) async {
               final snapshot = await transaction.get(referrerDoc.reference);
               if (snapshot.exists) {
@@ -247,14 +225,11 @@ class AuthService {
                   referrals.add(uid);
                   final referralCount = (data['referralCount'] ?? 0) + 1;
                   final miningRateBoosted = referralCount >= 5;
-                  
                   transaction.update(referrerDoc.reference, {
                     'referrals': referrals,
                     'referralCount': referralCount,
                     'miningRateBoosted': miningRateBoosted,
                   });
-                  
-                  // Credit Akofa coins to referrer
                   await _creditAkofaToUser(referrerDoc.id, 5.0);
                 }
               }
@@ -262,21 +237,47 @@ class AuthService {
           }
         } catch (e) {
           print('Referral processing error: $e');
-          // Continue without referral if there's an error
         }
       }
-
       // Save user data to Firestore
       await _firestore.collection('USERS').doc(uid).set(userData);
-
       // Update display name
       await userCredential.user!.updateDisplayName(name);
-
       print('User registration completed successfully for: $email');
       return userCredential;
     } catch (e) {
       print('Registration error: $e');
-      rethrow;
+      // User-friendly error mapping
+      String userMessage = 'Registration failed. Please try again.';
+      final error = e.toString();
+      if (error.contains('All fields are required')) {
+        userMessage = 'Please fill in all required fields.';
+      } else if (error.contains('valid email')) {
+        userMessage = 'Please enter a valid email address (e.g., user@example.com).';
+      } else if (error.contains('Password must be at least')) {
+        userMessage = 'Your password must be at least 6 characters long.';
+      } else if (error.contains('Name must be at least')) {
+        userMessage = 'Your name must be at least 2 characters.';
+      } else if (error.contains('Invalid phone number format')) {
+        userMessage = 'Please enter a valid phone number with country code (e.g., +254725280695).';
+      } else if (error.contains('already registered with another account')) {
+        if (error.contains('Phone number')) {
+          userMessage = 'This phone number is already registered. Try logging in or use a different number.';
+        } else if (error.contains('Email')) {
+          userMessage = 'This email is already registered. Try logging in or use a different email.';
+        }
+      } else if (error.contains('device is already registered')) {
+        userMessage = 'This device is already registered with another account. Please use a different device or contact support.';
+      } else if (error.contains('network') || error.contains('timeout')) {
+        userMessage = 'Network error. Please check your internet connection and try again.';
+      } else if (error.contains('permission-denied')) {
+        userMessage = 'Registration is currently unavailable. Please contact support.';
+      } else if (error.contains('Failed to create new user account')) {
+        userMessage = 'Could not create your account. Please check your details and try again.';
+      } else if (error.contains('Failed to complete Google user registration')) {
+        userMessage = 'Could not complete Google registration. Please try again or use email/password.';
+      }
+      throw Exception(userMessage);
     }
   }
 

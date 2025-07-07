@@ -21,6 +21,7 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
   late TabController _tabController;
   final TextEditingController _messageController = TextEditingController();
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   
   // Loading state for message sending
   bool _isSendingMessage = false;
@@ -51,6 +52,7 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
     _tabController.dispose();
     _messageController.dispose();
     _searchController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -208,6 +210,12 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
     }
     final currentUserId = Provider.of<local_auth.AuthProvider>(context).user?.uid;
     final selectedChannel = chatProvider.selectedChannel;
+    // Mark messages as read when entering chat
+    if (selectedChannel != null && currentUserId != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        chatProvider.markMessagesAsRead(selectedCommunity.id, selectedChannel.id, currentUserId);
+      });
+    }
     return Column(
       children: [
         // Header section (scrollable if needed)
@@ -231,27 +239,60 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
                       onTap: () {
                         chatProvider.setSelectedCommunity(index);
                       },
-                      child: Container(
-                        margin: const EdgeInsets.only(right: 16.0),
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: isSelected ? AppTheme.primaryGold : AppTheme.darkGrey,
-                          borderRadius: BorderRadius.circular(16.0),
-                          border: Border.all(
-                            color: isSelected ? AppTheme.primaryGold : Colors.transparent,
-                            width: 2,
-                          ),
-                        ),
-                        child: Center(
-                          child: Text(
-                            community.name.substring(0, 2).toUpperCase(),
-                            style: AppTheme.bodyMedium.copyWith(
-                              color: isSelected ? AppTheme.black : AppTheme.white,
-                              fontWeight: FontWeight.bold,
+                      child: Stack(
+                        children: [
+                          Container(
+                            margin: const EdgeInsets.only(right: 16.0),
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: isSelected ? AppTheme.primaryGold : AppTheme.darkGrey,
+                              borderRadius: BorderRadius.circular(16.0),
+                              border: Border.all(
+                                color: isSelected ? AppTheme.primaryGold : Colors.transparent,
+                                width: 2,
+                              ),
+                            ),
+                            child: Center(
+                              child: Text(
+                                community.name.substring(0, 2).toUpperCase(),
+                                style: AppTheme.bodyMedium.copyWith(
+                                  color: isSelected ? AppTheme.black : AppTheme.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ),
                           ),
-                        ),
+                          // Unread badge
+                          if (currentUserId != null)
+                            Positioned(
+                              right: 0,
+                              top: 0,
+                              child: FutureBuilder<int>(
+                                future: chatProvider.getUnreadCount(
+                                  community.id,
+                                  community.channels.isNotEmpty ? community.channels[0].id : 'general',
+                                  currentUserId,
+                                ),
+                                builder: (context, snapshot) {
+                                  if (snapshot.hasData && snapshot.data! > 0) {
+                                    return Container(
+                                      padding: const EdgeInsets.all(6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.red,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Text(
+                                        '${snapshot.data}',
+                                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                      ),
+                                    );
+                                  }
+                                  return const SizedBox.shrink();
+                                },
+                              ),
+                            ),
+                        ],
                       ),
                     );
                   },
@@ -392,7 +433,32 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
                       );
                     }
                     final messages = snapshot.data!.docs;
+                    // Find first unread message
+                    int firstUnread = 0;
+                    if (currentUserId != null) {
+                      for (int i = 0; i < messages.length; i++) {
+                        final data = messages[i].data() as Map<String, dynamic>;
+                        final readBy = List<String>.from(data['readBy'] ?? []);
+                        if (!readBy.contains(currentUserId)) {
+                          firstUnread = i;
+                          break;
+                        } else {
+                          firstUnread = messages.length - 1;
+                        }
+                      }
+                    }
+                    // Scroll to first unread or latest
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (_scrollController.hasClients) {
+                        _scrollController.animateTo(
+                          (firstUnread) * 100.0, // Approximate height per message
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeInOut,
+                        );
+                      }
+                    });
                     return ListView.builder(
+                      controller: _scrollController,
                       padding: const EdgeInsets.all(16.0),
                       itemCount: messages.length,
                       itemBuilder: (context, index) {
@@ -962,6 +1028,9 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
   }
 
   void _showChannelsBottomSheet(Community community) {
+    final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+    final currentUserId = Provider.of<local_auth.AuthProvider>(context).user?.uid;
+    
     showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.darkGrey,
@@ -984,33 +1053,44 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
               ),
             ),
             const SizedBox(height: 16),
-            ...community.channels.asMap().entries.map((entry) {
-              final index = entry.key;
-              final channel = entry.value;
-              final chatProvider = Provider.of<ChatProvider>(context, listen: false);
-              final isSelected = chatProvider.selectedChannelIndex == index;
-              
-              return ListTile(
-                leading: Icon(
-                  Icons.tag,
-                  color: isSelected ? AppTheme.primaryGold : AppTheme.grey,
-                ),
-                title: Text(
-                  channel.name,
-                  style: AppTheme.bodyMedium.copyWith(
-                    color: isSelected ? AppTheme.primaryGold : AppTheme.white,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                  ),
-                ),
-                trailing: isSelected 
-                    ? const Icon(Icons.check, color: AppTheme.primaryGold)
+            ListView.builder(
+              itemCount: community.channels.length,
+              itemBuilder: (context, index) {
+                final channel = community.channels[index];
+                return ListTile(
+                  title: Text(channel.name, style: AppTheme.bodyMedium.copyWith(color: AppTheme.white)),
+                  trailing: currentUserId != null
+                    ? FutureBuilder<int>(
+                        future: chatProvider.getUnreadCount(
+                          community.id,
+                          channel.id,
+                          currentUserId,
+                        ),
+                        builder: (context, snapshot) {
+                          if (snapshot.hasData && snapshot.data! > 0) {
+                            return Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: Colors.red,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Text(
+                                '${snapshot.data}',
+                                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                              ),
+                            );
+                          }
+                          return const SizedBox.shrink();
+                        },
+                      )
                     : null,
-                onTap: () {
-                  Navigator.pop(context);
-                  chatProvider.setSelectedChannel(index);
-                },
-              );
-            }).toList(),
+                  onTap: () {
+                    chatProvider.setSelectedChannel(index);
+                    Navigator.pop(context);
+                  },
+                );
+              },
+            ),
             const SizedBox(height: 16),
             Text(
               'Members',
