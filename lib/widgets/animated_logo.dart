@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
 class AnimatedLogo extends StatelessWidget {
   final double size;
@@ -12,7 +11,7 @@ class AnimatedLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SvgPicture.asset(
+    return Image.asset(
       'assets/images/logo.png',
       width: size,
       height: size,

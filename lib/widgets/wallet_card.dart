@@ -60,21 +60,24 @@ class WalletCard extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              'Wallet', 
-              style: AppTheme.headingMedium.copyWith(
-                color: AppTheme.black,
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-              )
+            Expanded(
+              child: Text(
+                'Wallet', 
+                style: AppTheme.headingMedium.copyWith(
+                  color: AppTheme.black,
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                )
+              ),
             ),
             Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 if (publicKey != null)
                   TextButton.icon(
                     icon: const Icon(Icons.copy, color: AppTheme.black),
                     label: Text(
-                      'Copy Address',
+                      'Copy',
                       style: AppTheme.bodyMedium.copyWith(color: AppTheme.black),
                     ),
                     onPressed: () {
@@ -84,7 +87,7 @@ class WalletCard extends StatelessWidget {
                       );
                     },
                   ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 8),
                 IconButton(
                   icon: const Icon(Icons.qr_code, color: AppTheme.black, size: 32),
                   tooltip: 'Show QR',
@@ -189,12 +192,14 @@ class WalletCard extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              'Wallet', 
-              style: AppTheme.headingMedium.copyWith(
-                color: AppTheme.black,
-                fontSize: isTablet ? 24 : null,
-              )
+            Expanded(
+              child: Text(
+                'Wallet', 
+                style: AppTheme.headingMedium.copyWith(
+                  color: AppTheme.black,
+                  fontSize: isTablet ? 24 : null,
+                )
+              ),
             ),
             IconButton(
               icon: const Icon(Icons.qr_code, color: AppTheme.black, size: 28),

@@ -96,7 +96,7 @@ class AuthProvider extends ChangeNotifier {
     _setError(null);
     
     try {
-      await _authService.registerWithEmailAndPassword(email, password, name, referralCode: referralCode);
+      await _authService.registerWithEmailAndPassword(email, password, name, '', referralCode: referralCode);
       _setLoading(false);
       return true;
     } on FirebaseAuthException catch (e) {
@@ -209,7 +209,7 @@ class AuthProvider extends ChangeNotifier {
     if (_pendingUserUid == null) return false;
     _setLoading(true);
     try {
-      await _authService.completeGoogleUserSetup(_pendingUserUid!, referralCode);
+      await _authService.completeGoogleUserRegistration(_pendingUserUid!, '', referralCode: referralCode);
       _isNewUser = false;
       _pendingUserUid = null;
       _setLoading(false);
@@ -217,6 +217,86 @@ class AuthProvider extends ChangeNotifier {
     } catch (e) {
       _setLoading(false);
       _setError('Failed to apply referral code.');
+      return false;
+    }
+  }
+
+  // Register with email and password (enhanced version with phone)
+  Future<bool> registerWithEmailAndPassword(String email, String password, String name, String phoneNumber, {String? referralCode}) async {
+    _setLoading(true);
+    _setError(null);
+    
+    try {
+      await _authService.registerWithEmailAndPassword(email, password, name, phoneNumber, referralCode: referralCode);
+      _setLoading(false);
+      return true;
+    } on FirebaseAuthException catch (e) {
+      _setLoading(false);
+      
+      switch (e.code) {
+        case 'email-already-in-use':
+          _setError('The email address is already in use.');
+          break;
+        case 'invalid-email':
+          _setError('The email address is not valid.');
+          break;
+        case 'weak-password':
+          _setError('The password is too weak.');
+          break;
+        case 'operation-not-allowed':
+          _setError('Email/password accounts are not enabled.');
+          break;
+        default:
+          _setError('An error occurred: ${e.message}');
+      }
+      
+      return false;
+    } catch (e) {
+      _setLoading(false);
+      _setError('An unexpected error occurred: $e');
+      return false;
+    }
+  }
+
+  // Complete Google user registration
+  Future<bool> completeGoogleUserRegistration(String uid, String phoneNumber, {String? referralCode}) async {
+    _setLoading(true);
+    _setError(null);
+    
+    try {
+      await _authService.completeGoogleUserRegistration(uid, phoneNumber, referralCode: referralCode);
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _setLoading(false);
+      _setError('Failed to complete registration: $e');
+      return false;
+    }
+  }
+
+  // Check if user needs registration
+  Future<bool> needsRegistration(String uid) async {
+    try {
+      return await _authService.needsRegistration(uid);
+    } catch (e) {
+      return true;
+    }
+  }
+
+  // Check if user exists in USER collection
+  Future<bool> userExistsInCollection(String uid) async {
+    try {
+      return await _authService.userExistsInCollection(uid);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Check if user has completed registration
+  Future<bool> hasCompletedRegistration(String uid) async {
+    try {
+      return await _authService.hasCompletedRegistration(uid);
+    } catch (e) {
       return false;
     }
   }

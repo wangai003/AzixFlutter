@@ -17,6 +17,7 @@ import '../screens/user_notifications_screen.dart';
 import '../providers/admin_provider.dart';
 import 'wallet_screen.dart';
 import 'all_transactions_screen.dart';
+import '../widgets/app_logo.dart';
 
 class MainNavigation extends StatefulWidget {
   const MainNavigation({Key? key}) : super(key: key);
@@ -115,11 +116,18 @@ class _MainNavigationState extends State<MainNavigation> {
     return Scaffold(
       appBar: showAppBar ? AppBar(
         backgroundColor: AppTheme.black,
-        title: Text(
-          screenTitle,
-          style: AppTheme.headingSmall.copyWith(
-            color: AppTheme.primaryGold,
-          ),
+        title: Row(
+          children: [
+            const AppLogo(width: 32, height: 32),
+            const SizedBox(width: 12),
+            Text(
+              'AZIX',
+              style: AppTheme.headingSmall.copyWith(
+                color: AppTheme.primaryGold,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
         ),
         elevation: 0,
         actions: [
@@ -223,11 +231,7 @@ class _MainNavigationState extends State<MainNavigation> {
                 const SizedBox(height: 20),
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 16.0),
-                  child: Icon(
-                    Icons.account_balance_wallet,
-                    color: AppTheme.primaryGold,
-                    size: 32,
-                  ),
+                  child: const AppLogo(width: 32, height: 32),
                 ),
                 const SizedBox(height: 40),
                 Expanded(
@@ -279,11 +283,7 @@ class _MainNavigationState extends State<MainNavigation> {
                   padding: const EdgeInsets.all(16.0),
                   child: Row(
                     children: [
-                      Icon(
-                        Icons.account_balance_wallet,
-                        color: AppTheme.primaryGold,
-                        size: 32,
-                      ),
+                      const AppLogo(width: 32, height: 32),
                       const SizedBox(width: 12),
                       Text(
                         'AZIX',

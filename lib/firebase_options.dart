@@ -23,20 +23,11 @@ class DefaultFirebaseOptions {
       case TargetPlatform.android:
         return android;
       case TargetPlatform.iOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for ios - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return ios;
       case TargetPlatform.macOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for macos - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return macos;
       case TargetPlatform.windows:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for windows - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return windows;
       case TargetPlatform.linux:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for linux - '
@@ -55,7 +46,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '40354643169',
     projectId: 'azix-7ffe4',
     authDomain: 'azix-7ffe4.firebaseapp.com',
-    storageBucket: 'azix-7ffe4.appspot.com',
+    storageBucket: 'azix-7ffe4.firebasestorage.app',
     measurementId: 'G-MEXZBM9804',
   );
 
@@ -64,6 +55,37 @@ class DefaultFirebaseOptions {
     appId: '1:40354643169:android:0c10c7558961e6b236cba0',
     messagingSenderId: '40354643169',
     projectId: 'azix-7ffe4',
-    storageBucket: 'azix-7ffe4.appspot.com',
+    storageBucket: 'azix-7ffe4.firebasestorage.app',
   );
+
+  static const FirebaseOptions macos = FirebaseOptions(
+    apiKey: 'AIzaSyAUBp3qbELaha81-T96w0YMGmC1o7uCYJA',
+    appId: '1:40354643169:ios:d86fd00f1410a72e36cba0',
+    messagingSenderId: '40354643169',
+    projectId: 'azix-7ffe4',
+    storageBucket: 'azix-7ffe4.firebasestorage.app',
+    iosClientId: '40354643169-1uq0js9oh1e57krd9hfitc8377uddpbd.apps.googleusercontent.com',
+    iosBundleId: 'com.example.azixflutter',
+  );
+
+  static const FirebaseOptions ios = FirebaseOptions(
+    apiKey: 'AIzaSyAUBp3qbELaha81-T96w0YMGmC1o7uCYJA',
+    appId: '1:40354643169:ios:d86fd00f1410a72e36cba0',
+    messagingSenderId: '40354643169',
+    projectId: 'azix-7ffe4',
+    storageBucket: 'azix-7ffe4.firebasestorage.app',
+    iosClientId: '40354643169-1uq0js9oh1e57krd9hfitc8377uddpbd.apps.googleusercontent.com',
+    iosBundleId: 'com.example.azixflutter',
+  );
+
+  static const FirebaseOptions windows = FirebaseOptions(
+    apiKey: 'AIzaSyDGIpNJ2hl0TwtksSNcmIQ97DuyJZTY7SA',
+    appId: '1:40354643169:web:0e62b4d85b9d6df336cba0',
+    messagingSenderId: '40354643169',
+    projectId: 'azix-7ffe4',
+    authDomain: 'azix-7ffe4.firebaseapp.com',
+    storageBucket: 'azix-7ffe4.firebasestorage.app',
+    measurementId: 'G-MEXZBM9804',
+  );
+
 }

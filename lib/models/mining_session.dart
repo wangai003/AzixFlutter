@@ -21,18 +21,53 @@ class MiningSession {
     required this.miningRate,
   });
 
-  factory MiningSession.newSession({required double miningRate}) {
+  factory MiningSession.newSession({required double miningRate, int? durationMinutes}) {
     final now = DateTime.now();
+    final duration = durationMinutes != null 
+        ? Duration(minutes: durationMinutes)
+        : const Duration(hours: 24);
+    
     return MiningSession(
       sessionId: now.millisecondsSinceEpoch.toString(),
       sessionStart: now,
-      sessionEnd: now.add(const Duration(hours: 24)),
+      sessionEnd: now.add(duration),
       isPaused: false,
       pausedAt: null,
       accumulatedSeconds: 0,
       lastResume: now,
       miningRate: miningRate,
     );
+  }
+
+  // Start mining
+  void startMining() {
+    if (isPaused) {
+      resumeMining();
+    } else {
+      isPaused = false;
+      lastResume = DateTime.now();
+      pausedAt = null;
+    }
+  }
+
+  // Pause mining
+  void pauseMining() {
+    if (!isPaused && isActive) {
+      isPaused = true;
+      pausedAt = DateTime.now();
+      // Add accumulated time from last resume to now
+      final timeSinceResume = DateTime.now().difference(lastResume).inSeconds;
+      accumulatedSeconds += timeSinceResume;
+    }
+  }
+
+  // Resume mining
+  void resumeMining() {
+    if (isPaused && !isExpired) {
+      isPaused = false;
+      lastResume = DateTime.now();
+      pausedAt = null;
+    }
   }
 
   double get earnedAkofa {

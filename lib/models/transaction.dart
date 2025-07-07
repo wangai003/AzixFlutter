@@ -43,6 +43,21 @@ class Transaction {
   factory Transaction.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     
+    // Handle timestamp conversion safely
+    DateTime timestamp;
+    try {
+      if (data['timestamp'] is Timestamp) {
+        timestamp = (data['timestamp'] as Timestamp).toDate();
+      } else if (data['timestamp'] is DateTime) {
+        timestamp = data['timestamp'] as DateTime;
+      } else {
+        timestamp = DateTime.now(); // Fallback
+      }
+    } catch (e) {
+      print('Error parsing timestamp for transaction ${doc.id}: $e');
+      timestamp = DateTime.now(); // Fallback
+    }
+    
     return Transaction(
       id: doc.id,
       userId: data['userId'] ?? '',
@@ -52,7 +67,7 @@ class Transaction {
       type: _parseTransactionType(data['type']),
       status: _parseTransactionStatus(data['status']),
       hash: data['hash'],
-      timestamp: (data['timestamp'] as Timestamp).toDate(),
+      timestamp: timestamp,
       memo: data['memo'],
       assetCode: data['assetCode'] ?? 'AKOFA',
     );

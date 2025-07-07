@@ -67,6 +67,27 @@ class _AllTransactionsScreenState extends State<AllTransactionsScreen> {
             icon: const Icon(Icons.refresh),
             onPressed: () => stellarProvider.loadTransactions(),
           ),
+          IconButton(
+            icon: const Icon(Icons.bug_report),
+            onPressed: () async {
+              final success = await stellarProvider.createTestTransaction();
+              if (success) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Test transaction created!'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Failed to create test transaction: ${stellarProvider.error}'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+          ),
         ],
       ),
       backgroundColor: AppTheme.black,
@@ -200,10 +221,61 @@ class _AllTransactionsScreenState extends State<AllTransactionsScreen> {
             ),
           ),
           const Divider(height: 1, color: AppTheme.grey),
+          // Debug info (only show if no transactions)
+          if (filtered.isEmpty && allTransactions.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                children: [
+                  Text(
+                    'Debug Info:',
+                    style: TextStyle(color: AppTheme.primaryGold, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'User Public Key: ${userPublicKey ?? 'Not available'}',
+                    style: TextStyle(color: AppTheme.grey, fontSize: 12),
+                  ),
+                  Text(
+                    'Total Transactions Found: ${allTransactions.length}',
+                    style: TextStyle(color: AppTheme.grey, fontSize: 12),
+                  ),
+                  Text(
+                    'Filtered Transactions: ${filtered.length}',
+                    style: TextStyle(color: AppTheme.grey, fontSize: 12),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () => stellarProvider.loadTransactions(),
+                    child: Text('Reload Transactions'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryGold,
+                      foregroundColor: AppTheme.black,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Expanded(
             child: filtered.isEmpty
               ? Center(
-                  child: Text('No transactions found.', style: TextStyle(color: AppTheme.grey)),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.history, size: 64, color: AppTheme.grey.withOpacity(0.5)),
+                      const SizedBox(height: 16),
+                      Text(
+                        'No transactions found.',
+                        style: TextStyle(color: AppTheme.grey, fontSize: 18),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Try creating a test transaction or mining some AKOFA coins.',
+                        style: TextStyle(color: AppTheme.grey.withOpacity(0.7), fontSize: 14),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
                 )
               : TransactionList(transactions: filtered),
           ),

@@ -8,6 +8,7 @@ import '../services/mpesa_service.dart';
 import '../models/transaction.dart' as app_transaction;
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class StellarProvider extends ChangeNotifier {
   final StellarService _stellarService = StellarService();
@@ -708,18 +709,59 @@ class StellarProvider extends ChangeNotifier {
   Future<bool> recordMiningReward(double amount) async {
     _setLoading(true);
     _setError(null);
+    try {
+      final result = await _stellarService.recordMiningReward(amount);
+      await loadTransactions();
+      _setLoading(false);
+      return result['success'] == true;
+    } catch (e) {
+      _setLoading(false);
+      _setError('Failed to record mining reward: $e');
+      return false;
+    }
+  }
+
+  // Reconcile uncredited mining sessions for the current user
+  Future<void> reconcileUncreditedMiningSessions(String userId) async {
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final sessionsRef = firestore.collection('mining_history').doc(userId).collection('sessions');
+      final sessions = await sessionsRef.get();
+      for (final doc in sessions.docs) {
+        final data = doc.data();
+        final status = data['status'] ?? '';
+        final amount = (data['earned'] ?? 0).toDouble();
+        if (status != 'completed' && amount > 0) {
+          // Try to credit the reward again
+          final result = await recordMiningReward(amount);
+          if (result) {
+            await doc.reference.update({'status': 'completed'});
+          } else {
+            await doc.reference.update({'status': 'failed'});
+          }
+        }
+      }
+    } catch (e) {
+      print('Error reconciling mining sessions: $e');
+    }
+  }
+
+  // Create a test transaction for debugging
+  Future<bool> createTestTransaction() async {
+    _setLoading(true);
+    _setError(null);
     
     try {
-      await _stellarService.recordMiningReward(amount);
+      await _stellarService.createTestTransaction();
       
-      // Refresh transactions after recording mining reward
+      // Refresh transactions after creating test transaction
       await loadTransactions();
       
       _setLoading(false);
       return true;
     } catch (e) {
       _setLoading(false);
-      _setError('Failed to record mining reward: $e');
+      _setError('Failed to create test transaction: $e');
       return false;
     }
   }

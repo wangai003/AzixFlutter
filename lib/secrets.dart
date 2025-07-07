@@ -2,7 +2,7 @@
 // This is for testnet/demo only.
 
 const Map<String, String> assetIssuerSecrets = {
-  'AKOFA': 'SB...AKOFA_ISSUER_SECRET...',
+  'AKOFA': 'SATTJCBNQLGSA4TXFCMOWOWDXEOIRY2VGSEBQOH2HWY5RV72YN6AE6FP', // TODO: Replace with actual AKOFA issuer secret key
   'USDC': 'SB...USDC_ISSUER_SECRET...',
   'BTC': 'SB...BTC_ISSUER_SECRET...',
   'ETH': 'SB...ETH_ISSUER_SECRET...',

@@ -49,21 +49,29 @@ class ChatProvider with ChangeNotifier {
     return selectedCommunity!.channels[_selectedChannelIndex];
   }
   
-  // Load communities from Firestore
+  // Load communities from Firestore - ONLY communities user has joined
   Future<void> loadCommunities() async {
     _isLoading = true;
     notifyListeners();
     try {
-      _firestore.collection('communities').snapshots().listen((snapshot) {
+      final currentUserId = _chatService.currentUserId;
+      
+      // Listen to communities where user is a member
+      _firestore
+          .collection('communities')
+          .where('members', arrayContains: currentUserId)
+          .snapshots()
+          .listen((snapshot) {
         _communities = snapshot.docs.map((doc) {
           final data = doc.data();
-          // Parse channels and members as needed
           return Community(
             id: doc.id,
             name: data['name'] ?? '',
             description: data['description'] ?? '',
             members: (data['members'] as List?)?.length ?? 0,
             isPrivate: data['isPrivate'] ?? false,
+            createdBy: data['createdBy'] ?? '',
+            imageUrl: data['imageUrl'],
             channels: (data['channels'] as List?)?.map((c) => Channel(
               id: c['id'],
               name: c['name'],
@@ -73,11 +81,53 @@ class ChatProvider with ChangeNotifier {
         }).toList();
         notifyListeners();
       });
+      
+      // Load discover communities (communities user hasn't joined)
+      _loadDiscoverCommunities();
+      
       _isLoading = false;
     } catch (e) {
       print('Error loading communities: $e');
       _isLoading = false;
       notifyListeners();
+    }
+  }
+  
+  // Load discover communities (communities user hasn't joined)
+  Future<void> _loadDiscoverCommunities() async {
+    try {
+      final currentUserId = _chatService.currentUserId;
+      
+      _firestore
+          .collection('communities')
+          .where('isPrivate', isEqualTo: false) // Only public communities
+          .snapshots()
+          .listen((snapshot) {
+        _discoverCommunities = snapshot.docs.where((doc) {
+          final data = doc.data();
+          final members = List<String>.from(data['members'] ?? []);
+          return !members.contains(currentUserId); // Not already joined
+        }).map((doc) {
+          final data = doc.data();
+          return Community(
+            id: doc.id,
+            name: data['name'] ?? '',
+            description: data['description'] ?? '',
+            members: (data['members'] as List?)?.length ?? 0,
+            isPrivate: data['isPrivate'] ?? false,
+            createdBy: data['createdBy'] ?? '',
+            imageUrl: data['imageUrl'],
+            channels: (data['channels'] as List?)?.map((c) => Channel(
+              id: c['id'],
+              name: c['name'],
+              messages: [],
+            )).toList() ?? [],
+          );
+        }).toList();
+        notifyListeners();
+      });
+    } catch (e) {
+      print('Error loading discover communities: $e');
     }
   }
   
@@ -126,13 +176,15 @@ class ChatProvider with ChangeNotifier {
         final uploadTask = await ref.putFile(imageFile);
         imageUrl = await uploadTask.ref.getDownloadURL();
       }
+      
+      final currentUserId = _chatService.currentUserId;
       final docRef = await _firestore.collection('communities').add({
         'name': name,
         'description': description,
         'isPrivate': isPrivate,
         'createdAt': DateTime.now().toIso8601String(),
-        'createdBy': _chatService.currentUserId,
-        'members': [_chatService.currentUserId],
+        'createdBy': currentUserId,
+        'members': [currentUserId], // Creator automatically joins
         'channels': [
           {
             'id': 'general',
@@ -141,8 +193,9 @@ class ChatProvider with ChangeNotifier {
         ],
         'imageUrl': imageUrl,
       });
-      // Optionally auto-join the creator
-      await joinCommunityById(docRef.id);
+      
+      // Refresh communities list
+      await loadCommunities();
     } catch (e) {
       print('Error creating community: $e');
       rethrow;
@@ -152,10 +205,24 @@ class ChatProvider with ChangeNotifier {
   // Join a community by ID
   Future<void> joinCommunityById(String communityId) async {
     try {
+      final currentUserId = _chatService.currentUserId;
       final doc = _firestore.collection('communities').doc(communityId);
-      await doc.update({
-        'members': FieldValue.arrayUnion([_chatService.currentUserId])
-      });
+      
+      // Check if user is already a member
+      final snapshot = await doc.get();
+      if (snapshot.exists) {
+        final data = snapshot.data()!;
+        final members = List<String>.from(data['members'] ?? []);
+        
+        if (!members.contains(currentUserId)) {
+          await doc.update({
+            'members': FieldValue.arrayUnion([currentUserId])
+          });
+          
+          // Refresh communities list
+          await loadCommunities();
+        }
+      }
     } catch (e) {
       print('Error joining community: $e');
       rethrow;
@@ -167,12 +234,43 @@ class ChatProvider with ChangeNotifier {
     await joinCommunityById(community.id);
   }
   
+  // Leave a community
+  Future<void> leaveCommunity(String communityId) async {
+    try {
+      final currentUserId = _chatService.currentUserId;
+      final doc = _firestore.collection('communities').doc(communityId);
+      
+      // Check if user is the creator
+      final snapshot = await doc.get();
+      if (snapshot.exists) {
+        final data = snapshot.data()!;
+        final createdBy = data['createdBy'];
+        
+        if (createdBy == currentUserId) {
+          throw Exception('Cannot leave a community you created. Delete it instead.');
+        }
+        
+        await doc.update({
+          'members': FieldValue.arrayRemove([currentUserId])
+        });
+        
+        // Refresh communities list
+        await loadCommunities();
+      }
+    } catch (e) {
+      print('Error leaving community: $e');
+      rethrow;
+    }
+  }
+  
   // Delete a community (only by creator)
   Future<void> deleteCommunity(String communityId, {String? imageUrl}) async {
     try {
+      final currentUserId = _chatService.currentUserId;
       final doc = _firestore.collection('communities').doc(communityId);
       final snapshot = await doc.get();
-      if (snapshot.exists && snapshot.data()?['createdBy'] == _chatService.currentUserId) {
+      
+      if (snapshot.exists && snapshot.data()?['createdBy'] == currentUserId) {
         // Delete image from storage if exists
         if (imageUrl != null && imageUrl.isNotEmpty) {
           try {
@@ -182,9 +280,27 @@ class ChatProvider with ChangeNotifier {
             print('Error deleting image from storage: $e');
           }
         }
-        // Delete all messages (optional: implement if storing messages in subcollections)
-        // ...
+        
+        // Delete all messages in subcollections
+        final channelsSnapshot = await _firestore
+            .collection('communities')
+            .doc(communityId)
+            .collection('channels')
+            .get();
+        for (final channelDoc in channelsSnapshot.docs) {
+          final messagesSnapshot = await channelDoc.reference.collection('messages').get();
+          for (final messageDoc in messagesSnapshot.docs) {
+            await messageDoc.reference.delete();
+          }
+          await channelDoc.reference.delete();
+        }
+        
         await doc.delete();
+        
+        // Refresh communities list
+        await loadCommunities();
+      } else {
+        throw Exception('You can only delete communities you created.');
       }
     } catch (e) {
       print('Error deleting community: $e');

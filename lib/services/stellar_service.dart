@@ -728,7 +728,8 @@ class StellarService {
     app_transaction.TransactionStatus status,
     String? hash,
     String? memo,
-    String assetCode
+    String assetCode,
+    {String? errorReason}
   ) async {
     final String uid = _auth.currentUser!.uid;
     
@@ -743,6 +744,7 @@ class StellarService {
       'timestamp': FieldValue.serverTimestamp(),
       'memo': memo,
       'assetCode': assetCode,
+      'errorReason': errorReason,
     });
   }
   
@@ -807,24 +809,132 @@ The AZIX Team
         throw Exception('Failed to retrieve wallet credentials');
       }
       final publicKey = credentials['publicKey'];
-      // Query transactions where the user is either sender or recipient
+      
+      print('Loading transactions for user: $uid, public key: $publicKey');
+      
+      // Use the fallback approach since the index query requires a composite index
+      // This is more reliable and works without requiring Firestore index setup
       final querySnapshot = await _firestore.collection('transactions')
-        .where(Filter.or(
-          Filter('senderAddress', isEqualTo: publicKey),
-          Filter('recipientAddress', isEqualTo: publicKey),
-        ))
         .orderBy('timestamp', descending: true)
+        .limit(1000) // Limit to prevent memory issues
         .get();
-      return querySnapshot.docs
+      
+      print('Found ${querySnapshot.docs.length} total transactions');
+      
+      final allTransactions = querySnapshot.docs
         .map((doc) => app_transaction.Transaction.fromFirestore(doc))
         .toList();
+      
+      // Filter by user ID and public key
+      final userTransactions = allTransactions.where((tx) => 
+        tx.userId == uid && (tx.senderAddress == publicKey || tx.recipientAddress == publicKey)
+      ).toList();
+      
+      print('Filtered to ${userTransactions.length} user transactions');
+      return userTransactions;
     } catch (e) {
+      print('Error in getTransactionHistory: $e');
       throw Exception('Failed to get transaction history: $e');
     }
   }
   
   // Record a mining reward transaction
-  Future<DocumentReference> recordMiningReward(double amount) async {
+  Future<Map<String, dynamic>> recordMiningReward(double amount) async {
+    try {
+      final credentials = await getWalletCredentials();
+      if (credentials == null) {
+        throw Exception('Failed to retrieve wallet credentials');
+      }
+      final publicKey = credentials['publicKey'];
+      if (publicKey == null) {
+        throw Exception('Public key is null');
+      }
+      final issuerSecret = assetIssuerSecrets[AKOFA_ASSET_CODE];
+      if (issuerSecret == null || issuerSecret.contains('...') || issuerSecret.isEmpty) {
+        // Issuer secret not configured - record transaction as failed
+        print('Warning: AKOFA issuer secret not configured. Recording mining reward as failed transaction.');
+        await _recordTransaction(
+          AKOFA_ISSUER_ACCOUNT,
+          publicKey,
+          amount,
+          app_transaction.TransactionType.mining,
+          app_transaction.TransactionStatus.failed,
+          null,
+          'Mining Reward (Failed - Issuer not configured)',
+          AKOFA_ASSET_CODE,
+          errorReason: 'Issuer secret not configured'
+        );
+        return {'success': false, 'error': 'Issuer secret not configured'};
+      }
+      // Actually send the AKOFA coins from issuer to user
+      final result = await sendAssetFromIssuer(
+        AKOFA_ASSET_CODE,
+        publicKey,
+        amount.toString(),
+        memo: 'Mining Reward'
+      );
+      if (result['success'] != true) {
+        // Record as failed
+        await _recordTransaction(
+          AKOFA_ISSUER_ACCOUNT,
+          publicKey,
+          amount,
+          app_transaction.TransactionType.mining,
+          app_transaction.TransactionStatus.failed,
+          null,
+          'Mining Reward (Failed - ${result['message']})',
+          AKOFA_ASSET_CODE,
+          errorReason: result['message'] ?? 'Unknown error'
+        );
+        throw Exception('Failed to send mining reward: ${result['message']}');
+      }
+      // Record the transaction in Firestore as completed
+      await _recordTransaction(
+        AKOFA_ISSUER_ACCOUNT,
+        publicKey,
+        amount,
+        app_transaction.TransactionType.mining,
+        app_transaction.TransactionStatus.completed,
+        result['hash'],
+        'Mining Reward',
+        AKOFA_ASSET_CODE
+      );
+      // Send email receipt for mining reward
+      await _sendTransactionReceipt(
+        AKOFA_ISSUER_ACCOUNT,
+        publicKey,
+        amount,
+        app_transaction.TransactionType.mining,
+        result['hash'],
+        'Mining Reward',
+        AKOFA_ASSET_CODE
+      );
+      return {'success': true, 'hash': result['hash']};
+    } catch (e) {
+      // Record as failed
+      try {
+        final credentials = await getWalletCredentials();
+        final publicKey = credentials?['publicKey'];
+        if (publicKey != null) {
+          await _recordTransaction(
+            AKOFA_ISSUER_ACCOUNT,
+            publicKey,
+            amount,
+            app_transaction.TransactionType.mining,
+            app_transaction.TransactionStatus.failed,
+            null,
+            'Mining Reward (Failed - $e)',
+            AKOFA_ASSET_CODE,
+            errorReason: e.toString()
+          );
+        }
+      } catch (_) {}
+      throw Exception('Failed to record mining reward: $e');
+    }
+  }
+
+  // Create a test transaction for debugging
+  Future<DocumentReference> createTestTransaction() async {
     try {
       final credentials = await getWalletCredentials();
       if (credentials == null) {
@@ -836,18 +946,21 @@ The AZIX Team
         throw Exception('Public key is null');
       }
       
+      print('Creating test transaction for public key: $publicKey');
+      
+      // Create a test transaction
       return await _recordTransaction(
-        AKOFA_ISSUER_ACCOUNT, // Sender is the issuer account
+        'TEST_SENDER_ADDRESS',
         publicKey,
-        amount,
-        app_transaction.TransactionType.mining,
+        1.0,
+        app_transaction.TransactionType.receive,
         app_transaction.TransactionStatus.completed,
-        null, // No hash for mining rewards
-        'Mining Reward',
-        AKOFA_ASSET_CODE
+        'test_hash_123',
+        'Test Transaction',
+        'AKOFA'
       );
     } catch (e) {
-      throw Exception('Failed to record mining reward: $e');
+      throw Exception('Failed to create test transaction: $e');
     }
   }
 
