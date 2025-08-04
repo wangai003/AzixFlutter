@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
@@ -18,6 +19,8 @@ import '../widgets/app_logo.dart';
 import '../widgets/custom_button.dart';
 import '../models/mining_session.dart';
 import '../providers/stellar_provider.dart';
+import '../models/user_model.dart';
+import '../widgets/transaction_list.dart';
 
 class PiHomeScreen extends StatefulWidget {
   const PiHomeScreen({Key? key}) : super(key: key);
@@ -912,99 +915,353 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<local_auth.AuthProvider>(context);
+    final stellarProvider = Provider.of<StellarProvider>(context);
     final user = authProvider.user;
     final screenSize = MediaQuery.of(context).size;
     
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            AppTheme.black,
-            Color(0xFF212121),
-          ],
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              AppTheme.black,
+              Color(0xFF212121),
+            ],
+          ),
         ),
-      ),
-      child: SafeArea(
-        child: Column(
-          children: [
-            // Main Content
-            Expanded(
-              child: SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                child: ResponsiveContainer(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                  child: ResponsiveLayoutBuilder(
-                    // Mobile layout (stacked)
-                    mobileBuilder: (context, constraints) => Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: 20),
-                        _buildMiningAnalytics(),
-                        const SizedBox(height: 24),
-                        _buildMiningSection(),
-                        const SizedBox(height: 24),
-                        _buildMiningHistorySection(),
-                        const SizedBox(height: 40),
-                      ],
-                    ),
-                    // Tablet layout (2 columns)
-                    tabletBuilder: (context, constraints) => Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: 20),
-                        _buildMiningAnalytics(),
-                        const SizedBox(height: 24),
-                        Row(
+        child: SafeArea(
+          child: ResponsiveContainer(
+            padding: EdgeInsets.symmetric(
+              horizontal: ResponsiveLayout.getValueForScreenType<double>(
+                context: context,
+                mobile: 24.0,
+                tablet: 48.0,
+                desktop: 64.0,
+                largeDesktop: 80.0,
+              ),
+              vertical: 24.0,
+            ),
+            child: Column(
+              children: [
+                // Main Content
+                Expanded(
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: ResponsiveContainer(
+                      padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                      child: ResponsiveLayoutBuilder(
+                        // Mobile layout (stacked)
+                        mobileBuilder: (context, constraints) => Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  _buildMiningSection(),
-                                  const SizedBox(height: 24),
-                                  _buildMiningHistorySection(),
-                                ],
-                              ),
-                            ),
+                            const SizedBox(height: 20),
+                            _buildMiningAnalytics(),
+                            const SizedBox(height: 24),
+                            _buildMiningSection(),
+                            const SizedBox(height: 24),
+                            _buildMiningHistorySection(),
+                            const SizedBox(height: 40),
                           ],
                         ),
-                        const SizedBox(height: 40),
-                      ],
-                    ),
-                    // Desktop layout (3 columns)
-                    desktopBuilder: (context, constraints) => Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: 20),
-                        _buildMiningAnalytics(),
-                        const SizedBox(height: 24),
-                        Row(
+                        // Tablet layout (2 columns)
+                        tabletBuilder: (context, constraints) => Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Expanded(
-                              flex: 2,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  _buildMiningSection(),
-                                  const SizedBox(height: 24),
-                                  _buildMiningHistorySection(),
-                                ],
-                              ),
+                            const SizedBox(height: 20),
+                            _buildMiningAnalytics(),
+                            const SizedBox(height: 24),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      _buildMiningSection(),
+                                      const SizedBox(height: 24),
+                                      _buildMiningHistorySection(),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
+                            const SizedBox(height: 40),
                           ],
                         ),
-                        const SizedBox(height: 40),
-                      ],
+                        // Desktop layout (3 columns)
+                        desktopBuilder: (context, constraints) => Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 20),
+                            _buildMiningAnalytics(),
+                            const SizedBox(height: 24),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  flex: 2,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      _buildMiningSection(),
+                                      const SizedBox(height: 24),
+                                      _buildMiningHistorySection(),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 40),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
+                
+                // Modern Glass-like Referral Section at Bottom
+                FutureBuilder<Map<String, dynamic>?>(
+                  future: user != null ? authProvider.authService.getUserDetails(user.uid) : null,
+                  builder: (context, snapshot) {
+                    final userData = snapshot.data;
+                    final referralCode = userData?['referralCode'] ?? '';
+                    final referrals = (userData?['referrals'] as List<dynamic>?)?.length ?? 0;
+                    final referralCount = userData?['referralCount'] ?? 0;
+                    final referralTransactions = stellarProvider.transactions.where((tx) =>
+                      tx.typeLabel == 'Mining Reward' && (tx.memo?.toLowerCase().contains('referral') ?? false)
+                    ).toList();
+                    
+                    return Container(
+                      margin: const EdgeInsets.only(top: 24),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(24),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(
+                              color: Colors.white.withOpacity(0.1),
+                              width: 1,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.2),
+                                blurRadius: 20,
+                                offset: const Offset(0, 10),
+                              ),
+                            ],
+                          ),
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                            child: Padding(
+                              padding: const EdgeInsets.all(24.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Header with icon
+                                  Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.primaryGold.withOpacity(0.2),
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: Icon(
+                                          Icons.share,
+                                          color: AppTheme.primaryGold,
+                                          size: 20,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Text(
+                                        'Referral Program',
+                                        style: AppTheme.headingMedium.copyWith(
+                                          color: AppTheme.white,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 20),
+                                  
+                                  // Referral Code Section
+                                  Container(
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.05),
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                        color: Colors.white.withOpacity(0.1),
+                                      ),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Your Referral Code',
+                                          style: AppTheme.bodySmall.copyWith(
+                                            color: AppTheme.grey,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: SelectableText(
+                                                referralCode,
+                                                style: AppTheme.headingMedium.copyWith(
+                                                  color: AppTheme.primaryGold,
+                                                  fontWeight: FontWeight.w700,
+                                                  letterSpacing: 1.2,
+                                                ),
+                                              ),
+                                            ),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                              decoration: BoxDecoration(
+                                                color: AppTheme.primaryGold.withOpacity(0.2),
+                                                borderRadius: BorderRadius.circular(20),
+                                              ),
+                                              child: Text(
+                                                'Copy',
+                                                style: AppTheme.bodySmall.copyWith(
+                                                  color: AppTheme.primaryGold,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  
+                                  // Stats Grid
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: _buildReferralStatCard(
+                                          'Referrals',
+                                          '$referrals',
+                                          Icons.people,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: _buildReferralStatCard(
+                                          'Total Count',
+                                          '$referralCount',
+                                          Icons.trending_up,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  
+                                  // Earnings Card
+                                  Container(
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        colors: [
+                                          AppTheme.primaryGold.withOpacity(0.2),
+                                          AppTheme.primaryGold.withOpacity(0.1),
+                                        ],
+                                        begin: Alignment.topLeft,
+                                        end: Alignment.bottomRight,
+                                      ),
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                        color: AppTheme.primaryGold.withOpacity(0.3),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            color: AppTheme.primaryGold.withOpacity(0.2),
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                          child: Icon(
+                                            Icons.monetization_on,
+                                            color: AppTheme.primaryGold,
+                                            size: 20,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                'Earned from Referrals',
+                                                style: AppTheme.bodySmall.copyWith(
+                                                  color: AppTheme.grey,
+                                                ),
+                                              ),
+                                              Text(
+                                                '${referralTransactions.fold<double>(0, (sum, tx) => sum + (tx.amount ?? 0)).toStringAsFixed(2)} AKOFA',
+                                                style: AppTheme.bodyLarge.copyWith(
+                                                  color: AppTheme.primaryGold,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  
+                                  // Transaction History (if any)
+                                  if (referralTransactions.isNotEmpty) ...[
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      'Recent Referral Rewards',
+                                      style: AppTheme.bodyMedium.copyWith(
+                                        color: AppTheme.white,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Container(
+                                      height: 120,
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withOpacity(0.05),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: TransactionList(transactions: referralTransactions),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ).animate().fadeIn(
+                      duration: const Duration(milliseconds: 1000),
+                      delay: const Duration(milliseconds: 800),
+                    ).slideY(
+                      begin: 0.3,
+                      end: 0,
+                      curve: Curves.easeOut,
+                      duration: const Duration(milliseconds: 1000),
+                    );
+                  },
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -1180,32 +1437,66 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
     );
   }
 
-  Widget _buildAnalyticsItem({required IconData icon, required String label, required String value, required Color color}) {
+  Widget _buildAnalyticsItem({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
     return Column(
-      mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.13),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, color: color, size: 28),
+        Icon(
+          icon,
+          color: color,
+          size: 32,
         ),
-        const SizedBox(height: 10),
-        Text(
-          value,
-          style: AppTheme.headingSmall.copyWith(
-            color: color,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 8),
         Text(
           label,
-          style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+          style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
+        ),
+        Text(
+          value,
+          style: AppTheme.bodyMedium.copyWith(
+            color: AppTheme.white,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ],
+    );
+  }
+
+  Widget _buildReferralStatCard(String title, String value, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.1),
+        ),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: AppTheme.primaryGold, size: 24),
+          const SizedBox(height: 8),
+          Text(
+            title,
+            style: AppTheme.bodySmall.copyWith(
+              color: AppTheme.grey,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: AppTheme.headingMedium.copyWith(
+              color: AppTheme.primaryGold,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
     );
   }
 

@@ -20,19 +20,28 @@ class AuthProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _user != null;
   String? get error => _error;
+  AuthService get authService => _authService;
 
   // Constructor
   AuthProvider() {
-    _init();
+    // Delay initialization to ensure Firebase is ready
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _init();
+    });
   }
 
   // Initialize the provider
   void _init() {
-    _user = _authService.currentUser;
-    _authService.authStateChanges.listen((User? user) {
-      _user = user;
-      notifyListeners();
-    });
+    try {
+      _user = _authService.currentUser;
+      _authService.authStateChanges.listen((User? user) {
+        _user = user;
+        notifyListeners();
+      });
+    } catch (e) {
+      print('DEBUG: Error initializing AuthProvider: $e');
+      // Don't crash the app, just log the error
+    }
   }
 
   // Set loading state
@@ -60,6 +69,13 @@ class AuthProvider extends ChangeNotifier {
     
     try {
       await _authService.signInWithEmailAndPassword(email, password);
+      final user = _authService.currentUser;
+      if (user != null && !user.emailVerified) {
+        await user.sendEmailVerification();
+        _setLoading(false);
+        _setError('Please verify your email address. A verification link has been sent.');
+        return false;
+      }
       _setLoading(false);
       return true;
     } on FirebaseAuthException catch (e) {
@@ -97,6 +113,13 @@ class AuthProvider extends ChangeNotifier {
     
     try {
       await _authService.registerWithEmailAndPassword(email, password, name, '', referralCode: referralCode);
+      final user = _authService.currentUser;
+      if (user != null && !user.emailVerified) {
+        await user.sendEmailVerification();
+        _setLoading(false);
+        _setError('Please verify your email address. A verification link has been sent.');
+        return false;
+      }
       _setLoading(false);
       return true;
     } on FirebaseAuthException catch (e) {
@@ -127,16 +150,74 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  // Check Firestore verification status
+  Future<Map<String, bool>> getFirestoreVerificationStatus(String uid) async {
+    try {
+      final doc = await _authService.getUserDetails(uid);
+      return {
+        'isEmailVerified': doc?['isEmailVerified'] == true,
+        'isPhoneVerified': doc?['isPhoneVerified'] == true,
+      };
+    } catch (e) {
+      return {'isEmailVerified': false, 'isPhoneVerified': false};
+    }
+  }
+
+  // Update Firestore verification status
+  Future<void> setFirestoreVerificationStatus(String uid, {bool? email, bool? phone}) async {
+    final data = <String, dynamic>{};
+    if (email != null) data['isEmailVerified'] = email;
+    if (phone != null) data['isPhoneVerified'] = phone;
+    await _authService.updateUserFields(uid, data);
+  }
+
   // Sign out
   Future<void> signOut() async {
     _setLoading(true);
-    
     try {
+      final user = _authService.currentUser;
+      if (user != null) {
+        print('DEBUG: Signing out user ${user.uid}, resetting verification status');
+        await setFirestoreVerificationStatus(user.uid, email: false, phone: false);
+        print('DEBUG: Verification status reset to false for user ${user.uid}');
+      }
       await _authService.signOut();
+      print('DEBUG: User signed out successfully');
     } catch (e) {
+      print('DEBUG: Error during sign out: $e');
       _setError('Failed to sign out.');
     } finally {
       _setLoading(false);
+    }
+  }
+
+  // Reset verification status when session ends (for session expiration, app closure, etc.)
+  Future<void> resetVerificationStatusOnSessionEnd() async {
+    try {
+      final user = _authService.currentUser;
+      if (user != null) {
+        print('DEBUG: Session ended for user ${user.uid}, resetting verification status');
+        await setFirestoreVerificationStatus(user.uid, email: false, phone: false);
+        print('DEBUG: Verification status reset due to session end for user ${user.uid}');
+      }
+    } catch (e) {
+      print('DEBUG: Error resetting verification status on session end: $e');
+    }
+  }
+
+  // Handle token refresh and session expiration
+  Future<void> handleTokenRefresh() async {
+    try {
+      final user = _authService.currentUser;
+      if (user != null) {
+        print('DEBUG: Token refreshed for user ${user.uid}, checking if verification status should be reset');
+        // Check if the user has been inactive for too long (optional enhancement)
+        // For now, we'll reset verification status on token refresh to ensure security
+        await setFirestoreVerificationStatus(user.uid, email: false, phone: false);
+        print('DEBUG: Verification status reset due to token refresh for user ${user.uid}');
+      }
+    } catch (e) {
+      print('DEBUG: Error handling token refresh: $e');
     }
   }
 
@@ -177,9 +258,14 @@ class AuthProvider extends ChangeNotifier {
     _setError(null);
     try {
       final result = await _authService.signInWithGoogle();
-      // Check if user doc was just created (i.e., new user)
       final user = _authService.currentUser;
+      
       if (user != null) {
+        // For Google sign-in users, always set isEmailVerified to false in Firestore
+        // This ensures they must go through our app's verification process
+        await setFirestoreVerificationStatus(user.uid, email: false, phone: false);
+        
+        // Check if user doc was just created (i.e., new user)
         final userDoc = await _authService.getUserDetails(user.uid);
         // If userDoc has only minimal fields, treat as new user
         if (userDoc != null && userDoc['referralCode'] == null) {
@@ -190,6 +276,7 @@ class AuthProvider extends ChangeNotifier {
           _pendingUserUid = null;
         }
       }
+      
       _setLoading(false);
       return true;
     } on FirebaseAuthException catch (e) {

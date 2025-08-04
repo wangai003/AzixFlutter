@@ -7,6 +7,9 @@ import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/responsive_layout.dart';
 import '../wrapper.dart';
+import 'auth/verify_email_screen.dart';
+import 'auth/phone_verification_screen.dart';
+import 'auth/choose_verification_screen.dart';
 
 class UserRegistrationScreen extends StatefulWidget {
   final String? referralCode;
@@ -24,6 +27,7 @@ class _UserRegistrationScreenState extends State<UserRegistrationScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _referralCodeController = TextEditingController();
   
   bool _isLoading = false;
   bool _isPhoneVerified = false;
@@ -49,6 +53,7 @@ class _UserRegistrationScreenState extends State<UserRegistrationScreen> {
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _referralCodeController.dispose();
     super.dispose();
   }
   
@@ -159,11 +164,34 @@ class _UserRegistrationScreenState extends State<UserRegistrationScreen> {
   
   Future<void> _registerUser() async {
     if (!_formKey.currentState!.validate()) return;
-    if (!_isPhoneVerified) {
-      setState(() {
-        _errorMessage = 'Please verify your phone number first';
-      });
-      return;
+    final email = _emailController.text.trim();
+    final phone = _registrationPhoneNumber;
+    final authProvider = Provider.of<local_auth.AuthProvider>(context, listen: false);
+    final user = FirebaseAuth.instance.currentUser;
+    String? uid = user?.uid;
+    Map<String, bool> status = {'isEmailVerified': false, 'isPhoneVerified': false};
+    if (uid != null) {
+      status = await authProvider.getFirestoreVerificationStatus(uid);
+    }
+    if (!status['isEmailVerified']! && !status['isPhoneVerified']!) {
+      final result = await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => ChooseVerificationScreen(email: email, phoneNumber: phone),
+        ),
+      );
+      if (result == null || result['verified'] != true) {
+        setState(() {
+          _errorMessage = 'Verification required to complete registration.';
+        });
+        return;
+      }
+      if (uid != null) {
+        if (result['method'] == 'email') {
+          await authProvider.setFirestoreVerificationStatus(uid, email: true);
+        } else if (result['method'] == 'phone') {
+          await authProvider.setFirestoreVerificationStatus(uid, phone: true);
+        }
+      }
     }
     
     setState(() {
@@ -172,11 +200,11 @@ class _UserRegistrationScreenState extends State<UserRegistrationScreen> {
     });
     
     try {
-      final authProvider = Provider.of<local_auth.AuthProvider>(context, listen: false);
       final currentUser = FirebaseAuth.instance.currentUser;
       
       // Get the phone number
       final phoneNumber = _registrationPhoneNumber;
+      final enteredReferralCode = _referralCodeController.text.trim().isEmpty ? null : _referralCodeController.text.trim();
       print('=== REGISTRATION DEBUG ===');
       print('Current user: ${currentUser?.uid}');
       print('Provider data: ${currentUser?.providerData}');
@@ -204,7 +232,7 @@ class _UserRegistrationScreenState extends State<UserRegistrationScreen> {
         final success = await authProvider.completeGoogleUserRegistration(
           currentUser.uid,
           phoneNumber,
-          referralCode: widget.referralCode,
+          referralCode: enteredReferralCode,
         );
         
         if (!success) {
@@ -226,7 +254,7 @@ class _UserRegistrationScreenState extends State<UserRegistrationScreen> {
           _passwordController.text,
           _nameController.text,
           phoneNumber,
-          referralCode: widget.referralCode,
+          referralCode: enteredReferralCode,
         );
         
         if (!success) {
@@ -238,16 +266,33 @@ class _UserRegistrationScreenState extends State<UserRegistrationScreen> {
       
       // Success - let the wrapper handle navigation
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Registration completed successfully! Welcome to AZIX! 🎉'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 2),
-          ),
-        );
-        
-        // Let the wrapper handle the navigation by popping this screen
-        Navigator.of(context).pop();
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null && !user.emailVerified) {
+          final verified = await Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => VerifyEmailScreen(email: user.email ?? ''),
+            ),
+          );
+          if (verified == true) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Registration completed successfully! Welcome to AZIX! 🎉'),
+                backgroundColor: Colors.green,
+                duration: Duration(seconds: 2),
+              ),
+            );
+            Navigator.of(context).pop();
+          }
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Registration completed successfully! Welcome to AZIX! 🎉'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+          Navigator.of(context).pop();
+        }
       }
     } catch (e) {
       print('Registration error: $e');
@@ -744,6 +789,29 @@ class _UserRegistrationScreenState extends State<UserRegistrationScreen> {
                 }
                 return null;
               },
+            ),
+            const SizedBox(height: 20),
+            // Referral Code Field (optional)
+            TextFormField(
+              controller: _referralCodeController,
+              style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
+              decoration: InputDecoration(
+                labelText: 'Referral Code (optional)',
+                labelStyle: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: AppTheme.grey.withOpacity(0.3)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: AppTheme.grey.withOpacity(0.3)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: AppTheme.primaryGold),
+                ),
+                prefixIcon: const Icon(Icons.card_giftcard, color: AppTheme.grey),
+              ),
             ),
             const SizedBox(height: 20),
             

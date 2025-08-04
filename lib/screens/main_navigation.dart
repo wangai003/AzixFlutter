@@ -10,7 +10,7 @@ import '../utils/responsive_layout.dart';
 import '../widgets/stellar_wallet_prompt.dart';
 import 'pi_home_screen.dart';
 import 'explore_screen.dart';
-import 'market_screen.dart';
+import 'marketplace_home_screen.dart';
 import 'community_screen.dart';
 import 'settings_screen.dart';
 import '../screens/user_notifications_screen.dart';
@@ -18,6 +18,13 @@ import '../providers/admin_provider.dart';
 import 'wallet_screen.dart';
 import 'all_transactions_screen.dart';
 import '../widgets/app_logo.dart';
+import 'wishlist_screen.dart';
+import 'order_history_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'vendor/vendor_dashboard_screen.dart';
+import 'transaction_test_screen.dart';
+import 'referral_screen.dart';
 
 class MainNavigation extends StatefulWidget {
   const MainNavigation({Key? key}) : super(key: key);
@@ -30,15 +37,7 @@ class _MainNavigationState extends State<MainNavigation> {
   int _currentIndex = 0;
   final PageController _pageController = PageController();
 
-  final List<Widget> _screens = [
-    const PiHomeScreen(),
-    const ExploreScreen(),
-    const MarketScreen(),
-    const WalletScreen(),
-    const CommunityScreen(),
-    const AllTransactionsScreen(),
-    const SettingsScreen(),
-  ];
+  // Screens and navItems are now built dynamically in build()
 
   @override
   void dispose() {
@@ -69,21 +68,19 @@ class _MainNavigationState extends State<MainNavigation> {
     return result == true;
   }
 
-  void _onTabTapped(int index) async {
+  void _onTabTapped(int index, List<Widget> screens, int vendorIndex, bool isVendor) async {
     // If navigating to the wallet tab, check wallet existence first
-    if (index == 3) {
+    // Wallet index is dynamic if vendor is present
+    int walletIndex = isVendor ? (vendorIndex < 3 ? 3 : 4) : 3;
+    if (index == walletIndex) {
       final allowed = await _checkWalletAndPrompt();
       if (!allowed) {
-        // If not allowed, do not switch to the wallet tab
         return;
       }
     }
-    // First update the state to ensure UI reflects the change
     setState(() {
       _currentIndex = index;
     });
-    
-    // Then animate to the selected page
     if (_pageController.hasClients) {
       _pageController.animateToPage(
         index,
@@ -91,7 +88,6 @@ class _MainNavigationState extends State<MainNavigation> {
         curve: Curves.easeInOut,
       );
     } else {
-      // If controller doesn't have clients yet, use a post-frame callback
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_pageController.hasClients) {
           _pageController.jumpToPage(index);
@@ -102,88 +98,247 @@ class _MainNavigationState extends State<MainNavigation> {
 
   @override
   Widget build(BuildContext context) {
-    // Check if we're running in a web browser using Flutter's kIsWeb constant
     final bool isWebPlatform = kIsWeb;
-    
-    // Determine if we need to show the app bar (only on web for mobile/tablet portrait)
     final bool showAppBar = isWebPlatform && (ResponsiveLayout.isMobile(context) || 
                            (ResponsiveLayout.isTablet(context) && 
                             MediaQuery.of(context).orientation == Orientation.portrait));
-    
-    // Get the current screen title
     final String screenTitle = _getScreenTitle(_currentIndex);
-    
-    return Scaffold(
-      appBar: showAppBar ? AppBar(
-        backgroundColor: AppTheme.black,
-        title: Row(
-          children: [
-            const AppLogo(width: 32, height: 32),
-            const SizedBox(width: 12),
-            Text(
-              'AZIX',
-              style: AppTheme.headingSmall.copyWith(
-                color: AppTheme.primaryGold,
-                fontWeight: FontWeight.bold,
-              ),
+
+    return FutureBuilder<DocumentSnapshot>(
+      future: FirebaseAuth.instance.currentUser == null
+          ? null
+          : FirebaseFirestore.instance.collection('USER').doc(FirebaseAuth.instance.currentUser!.uid).get(),
+      builder: (context, snapshot) {
+        String? userRole;
+        if (snapshot.hasData && snapshot.data != null && snapshot.data!.exists) {
+          userRole = (snapshot.data!.data() as Map<String, dynamic>?)?['role'] as String?;
+        }
+        final isVendor = userRole == 'vendor' || userRole == 'goods_vendor' || userRole == 'service_vendor';
+
+        // --- Build screens and nav items dynamically, with vendor nav in a clean order ---
+        final List<Widget> screens = [
+          const PiHomeScreen(),
+          const ExploreScreen(),
+          const MarketplaceHomeScreen(),
+          if (isVendor) const VendorDashboardScreen(),
+          const WalletScreen(),
+          const ReferralScreen(),
+          const CommunityScreen(),
+          const AllTransactionsScreen(),
+          const SettingsScreen(),
+        ];
+        // Indexes: 0=Home, 1=Explore, 2=Market, 3=Vendor (if present), 4/3=Wallet, 5/4=Referral, ...
+        final int vendorIndex = isVendor ? 3 : -1;
+        final int walletIndex = isVendor ? 4 : 3;
+        final int referralIndex = isVendor ? 5 : 4;
+        final int communityIndex = isVendor ? 6 : 5;
+        final int transactionsIndex = isVendor ? 7 : 6;
+        final int settingsIndex = isVendor ? 8 : 7;
+        final List<Widget> navItems = [
+          _buildNavItem(Icons.home, 'Home', 0, screens, vendorIndex, isVendor),
+          _buildNavItem(Icons.explore, 'Explore', 1, screens, vendorIndex, isVendor),
+          _buildNavItem(Icons.shopping_cart, 'Market', 2, screens, vendorIndex, isVendor),
+          if (isVendor) _buildNavItem(Icons.store, 'Vendor', vendorIndex, screens, vendorIndex, isVendor),
+          _buildNavItem(Icons.account_balance_wallet, 'Wallet', walletIndex, screens, vendorIndex, isVendor),
+          _buildNavItem(Icons.share, 'Referrals', referralIndex, screens, vendorIndex, isVendor),
+          _buildNavItem(Icons.people, 'Community', communityIndex, screens, vendorIndex, isVendor),
+          _buildNavItem(Icons.history, 'Transactions', transactionsIndex, screens, vendorIndex, isVendor),
+          _buildNotificationNavItem(),
+          _buildNavItem(Icons.settings, 'Settings', settingsIndex, screens, vendorIndex, isVendor),
+        ];
+        int effectiveIndex = _currentIndex;
+        if (isVendor && _currentIndex > 2 && _currentIndex < screens.length) effectiveIndex = _currentIndex;
+        return Scaffold(
+          appBar: showAppBar ? AppBar(
+            backgroundColor: AppTheme.black,
+            title: Row(
+              children: [
+                const AppLogo(width: 32, height: 32),
+                const SizedBox(width: 12),
+                Text(
+                  'AZIX',
+                  style: AppTheme.headingSmall.copyWith(
+                    color: AppTheme.primaryGold,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-        elevation: 0,
-        actions: [
-          // Add any additional app bar actions here if needed
-        ],
-      ) : null,
-      body: ResponsiveLayoutBuilder(
-        // Mobile layout (stacked)
-        mobileBuilder: (context, constraints) => PageView(
-          controller: _pageController,
-          physics: const NeverScrollableScrollPhysics(), // Disable swiping
-          children: _screens,
-          onPageChanged: (index) {
-            setState(() {
-              _currentIndex = index;
-            });
-          },
-        ),
-        // Tablet layout (side navigation for landscape)
-        tabletBuilder: (context, constraints) {
-          // Use side navigation in landscape, bottom navigation in portrait
-          final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
-          
-          if (isLandscape && !isWebPlatform) {
-            return _buildTabletLayout();
-          } else {
-            return PageView(
+            elevation: 0,
+            actions: [],
+          ) : null,
+          body: ResponsiveLayoutBuilder(
+            mobileBuilder: (context, constraints) => PageView(
               controller: _pageController,
               physics: const NeverScrollableScrollPhysics(),
-              children: _screens,
+              children: screens,
               onPageChanged: (index) {
                 setState(() {
                   _currentIndex = index;
                 });
               },
-            );
-          }
-        },
-        // Desktop layout (side navigation)
-        desktopBuilder: (context, constraints) => _buildDesktopLayout(),
-      ),
-      // Show bottom navigation only on mobile or tablet portrait, and never on web
-      bottomNavigationBar: !isWebPlatform ? ResponsiveLayout.builder(
-        context: context,
-        mobile: _buildBottomNavigationBar(),
-        tablet: MediaQuery.of(context).orientation == Orientation.portrait 
-            ? _buildBottomNavigationBar() 
-            : null,
-        desktop: null,
-      ) : null,
-      // Show side drawer only on web platform for mobile and tablet portrait views
-      drawer: isWebPlatform && (ResponsiveLayout.isMobile(context) || 
-             (ResponsiveLayout.isTablet(context) && 
-              MediaQuery.of(context).orientation == Orientation.portrait)) 
-          ? _buildWebSideDrawer() 
-          : null,
+            ),
+            tabletBuilder: (context, constraints) {
+              final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+              if (isLandscape && !isWebPlatform) {
+                return Row(
+                  children: [
+                    Container(
+                      width: 80,
+                      decoration: BoxDecoration(
+                        color: AppTheme.black,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.3),
+                            blurRadius: 10,
+                            offset: const Offset(5, 0),
+                          ),
+                        ],
+                      ),
+                      child: SafeArea(
+                        child: Column(
+                          children: [
+                            const SizedBox(height: 20),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 16.0),
+                              child: const AppLogo(width: 32, height: 32),
+                            ),
+                            const SizedBox(height: 40),
+                            Expanded(
+                              child: ListView(
+                                children: navItems,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: screens[effectiveIndex],
+                    ),
+                  ],
+                );
+              } else {
+                return PageView(
+                  controller: _pageController,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: screens,
+                  onPageChanged: (index) {
+                    setState(() {
+                      _currentIndex = index;
+                    });
+                  },
+                );
+              }
+            },
+            desktopBuilder: (context, constraints) => Row(
+              children: [
+                Container(
+                  width: 240,
+                  decoration: BoxDecoration(
+                    color: AppTheme.black,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.3),
+                        blurRadius: 10,
+                        offset: const Offset(5, 0),
+                      ),
+                    ],
+                  ),
+                  child: SafeArea(
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 20),
+                        Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Row(
+                            children: [
+                              const AppLogo(width: 32, height: 32),
+                              const SizedBox(width: 12),
+                              Text(
+                                'AZIX',
+                                style: AppTheme.headingMedium.copyWith(
+                                  color: AppTheme.primaryGold,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 40),
+                        Expanded(
+                          child: ListView(
+                            children: navItems,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: screens[effectiveIndex],
+                ),
+              ],
+            ),
+          ),
+          bottomNavigationBar: !isWebPlatform ? ResponsiveLayout.builder(
+            context: context,
+            mobile: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: navItems,
+            ),
+            tablet: MediaQuery.of(context).orientation == Orientation.portrait 
+                ? Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: navItems,
+                  )
+                : null,
+            desktop: null,
+          ) : null,
+          drawer: isWebPlatform && (ResponsiveLayout.isMobile(context) || 
+                 (ResponsiveLayout.isTablet(context) && 
+                  MediaQuery.of(context).orientation == Orientation.portrait)) 
+              ? Drawer(
+                  child: Container(
+                    color: AppTheme.black,
+                    child: SafeArea(
+                      child: Column(
+                        children: [
+                          const SizedBox(height: 20),
+                          Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.account_balance_wallet,
+                                  color: AppTheme.primaryGold,
+                                  size: 32,
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  'AZIX',
+                                  style: AppTheme.headingMedium.copyWith(
+                                    color: AppTheme.primaryGold,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 40),
+                          Expanded(
+                            child: ListView(
+                              children: navItems,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                )
+              : null,
+        );
+      },
     );
   }
   
@@ -209,155 +364,7 @@ class _MainNavigationState extends State<MainNavigation> {
     }
   }
 
-  Widget _buildTabletLayout() {
-    return Row(
-      children: [
-        // Side Navigation
-        Container(
-          width: 80,
-          decoration: BoxDecoration(
-            color: AppTheme.black,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.3),
-                blurRadius: 10,
-                offset: const Offset(5, 0),
-              ),
-            ],
-          ),
-          child: SafeArea(
-            child: Column(
-              children: [
-                const SizedBox(height: 20),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 16.0),
-                  child: const AppLogo(width: 32, height: 32),
-                ),
-                const SizedBox(height: 40),
-                Expanded(
-                  child: ListView(
-                    children: [
-                      _buildSideNavItem(Icons.home, 'Home', 0),
-                      _buildSideNavItem(Icons.explore, 'Explore', 1),
-                      _buildSideNavItem(Icons.shopping_cart, 'Market', 2),
-                      _buildSideNavItem(Icons.account_balance_wallet, 'Wallet', 3),
-                      _buildSideNavItem(Icons.people, 'Community', 4),
-                      _buildSideNavItem(Icons.history, 'Transactions', 5),
-                      _buildSideNavItem(Icons.settings, 'Settings', 6),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        // Content
-        Expanded(
-          child: _screens[_currentIndex],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildDesktopLayout() {
-    return Row(
-      children: [
-        // Side Navigation
-        Container(
-          width: 240,
-          decoration: BoxDecoration(
-            color: AppTheme.black,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.3),
-                blurRadius: 10,
-                offset: const Offset(5, 0),
-              ),
-            ],
-          ),
-          child: SafeArea(
-            child: Column(
-              children: [
-                const SizedBox(height: 20),
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Row(
-                    children: [
-                      const AppLogo(width: 32, height: 32),
-                      const SizedBox(width: 12),
-                      Text(
-                        'AZIX',
-                        style: AppTheme.headingMedium.copyWith(
-                          color: AppTheme.primaryGold,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 40),
-                Expanded(
-                  child: ListView(
-                    children: [
-                      _buildDesktopNavItem(Icons.home, 'Home', 0),
-                      _buildDesktopNavItem(Icons.explore, 'Explore', 1),
-                      _buildDesktopNavItem(Icons.shopping_cart, 'Market', 2),
-                      _buildDesktopNavItem(Icons.account_balance_wallet, 'Wallet', 3),
-                      _buildDesktopNavItem(Icons.people, 'Community', 4),
-                      _buildDesktopNavItem(Icons.history, 'Transactions', 5),
-                      _buildDesktopNavItem(Icons.settings, 'Settings', 6),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        // Content
-        Expanded(
-          child: _screens[_currentIndex],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBottomNavigationBar() {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.black,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.3),
-            blurRadius: 10,
-            offset: const Offset(0, -5),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildNavItem(Icons.home, 'Home', 0),
-              _buildNavItem(Icons.explore, 'Explore', 1),
-              _buildNavItem(Icons.shopping_cart, 'Market', 2),
-              _buildNavItem(Icons.account_balance_wallet, 'Wallet', 3),
-              _buildNavItem(Icons.people, 'Community', 4),
-              _buildNavItem(Icons.history, 'Transactions', 5),
-              _buildNotificationNavItem(),
-              _buildNavItem(Icons.settings, 'Settings', 6),
-            ],
-          ),
-        ),
-      ),
-    )
-        .animate()
-        .fadeIn(
-          duration: const Duration(milliseconds: 800),
-          delay: const Duration(milliseconds: 800),
-        );
-  }
+  // _buildTabletLayout, _buildDesktopLayout, and _buildBottomNavigationBar are not needed since navigation is now dynamic in build().
 
   Widget _buildNotificationNavItem() {
     final unreadCount = Provider.of<AdminProvider>(context).unreadNotificationCount;
@@ -417,19 +424,11 @@ class _MainNavigationState extends State<MainNavigation> {
     );
   }
 
-  Widget _buildNavItem(IconData icon, String label, int index) {
+  Widget _buildNavItem(IconData icon, String label, int index, List<Widget> screens, int vendorIndex, bool isVendor) {
     final isActive = _currentIndex == index;
-    
     return InkWell(
       onTap: () async {
-        // If this is the wallet tab, check if user has a wallet first
-        if (index == 3) {
-          final canAccessWallet = await _checkWalletAndPrompt();
-          if (!canAccessWallet) {
-            return; // Don't navigate if user doesn't have a wallet
-          }
-        }
-        _onTabTapped(index);
+        _onTabTapped(index, screens, vendorIndex, isVendor);
       },
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -470,7 +469,7 @@ class _MainNavigationState extends State<MainNavigation> {
             return; // Don't navigate if user doesn't have a wallet
           }
         }
-        _onTabTapped(index);
+        _onTabTapped(index, [], -1, false); // Pass empty list for screens and -1 for vendorIndex
       },
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 16.0),
@@ -522,7 +521,7 @@ class _MainNavigationState extends State<MainNavigation> {
             return; // Don't navigate if user doesn't have a wallet
           }
         }
-        _onTabTapped(index);
+        _onTabTapped(index, [], -1, false); // Pass empty list for screens and -1 for vendorIndex
       },
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 24.0),
@@ -637,10 +636,10 @@ class _MainNavigationState extends State<MainNavigation> {
           }
           
           // Now navigate to the wallet screen
-          _onTabTapped(index);
+          _onTabTapped(index, [], -1, false);
         } else {
           // For other screens, just navigate normally
-          _onTabTapped(index);
+          _onTabTapped(index, [], -1, false);
           Navigator.pop(context); // Close the drawer after selection
         }
       },

@@ -5,6 +5,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'dart:io';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'dart:html' as html;
+import 'dart:math';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -12,10 +13,24 @@ class AuthService {
   final DeviceInfoPlugin _deviceInfo = DeviceInfoPlugin();
 
   // Get current user
-  User? get currentUser => _auth.currentUser;
+  User? get currentUser {
+    try {
+      return _auth.currentUser;
+    } catch (e) {
+      print('DEBUG: Error getting current user: $e');
+      return null;
+    }
+  }
 
   // Auth state changes stream
-  Stream<User?> get authStateChanges => _auth.authStateChanges();
+  Stream<User?> get authStateChanges {
+    try {
+      return _auth.authStateChanges();
+    } catch (e) {
+      print('DEBUG: Error getting auth state changes: $e');
+      return Stream.value(null);
+    }
+  }
 
   // Get device ID
   Future<String> _getDeviceId() async {
@@ -94,7 +109,7 @@ class AuthService {
   Future<bool> _isPhoneNumberInUse(String phoneNumber) async {
     try {
       final query = await _firestore
-          .collection('USERS')
+          .collection('USER')
           .where('phoneNumber', isEqualTo: phoneNumber)
           .limit(1)
           .get();
@@ -109,7 +124,7 @@ class AuthService {
   Future<bool> _isDeviceIdInUse(String deviceId) async {
     try {
       final query = await _firestore
-          .collection('USERS')
+          .collection('USER')
           .where('deviceId', isEqualTo: deviceId)
           .limit(1)
           .get();
@@ -138,6 +153,21 @@ class AuthService {
       print('Error signing in: $e');
       rethrow;
     }
+  }
+
+  // Generate a random 6-character referral code (uppercase letters and numbers)
+  Future<String> _generateUniqueReferralCode() async {
+    const length = 6;
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    final rand = Random.secure();
+    String code;
+    bool exists = true;
+    do {
+      code = List.generate(length, (_) => chars[rand.nextInt(chars.length)]).join();
+      final query = await _firestore.collection('USER').where('referralCode', isEqualTo: code).limit(1).get();
+      exists = query.docs.isNotEmpty;
+    } while (exists);
+    return code;
   }
 
   // Register with email and password - Robust implementation
@@ -190,6 +220,8 @@ class AuthService {
         password: password,
       );
       final uid = userCredential.user!.uid;
+      // Generate unique referral code
+      final generatedReferralCode = await _generateUniqueReferralCode();
       // Prepare user data
       final userData = {
         'displayName': name,
@@ -197,7 +229,7 @@ class AuthService {
         'phoneNumber': phoneNumber,
         'deviceId': deviceId,
         'createdAt': FieldValue.serverTimestamp(),
-        'referralCode': uid, // Use UID as referral code
+        'referralCode': generatedReferralCode, // Use generated code
         'referrals': [],
         'referralCount': 0,
         'miningRateBoosted': false,
@@ -212,7 +244,7 @@ class AuthService {
       // Handle referral if provided
       if (referralCode != null && referralCode.isNotEmpty) {
         try {
-          final refQuery = await _firestore.collection('USERS').where('referralCode', isEqualTo: referralCode).limit(1).get();
+          final refQuery = await _firestore.collection('USER').where('referralCode', isEqualTo: referralCode).limit(1).get();
           if (refQuery.docs.isNotEmpty) {
             final referrerDoc = refQuery.docs.first;
             userData['referredBy'] = referrerDoc.id;
@@ -240,7 +272,7 @@ class AuthService {
         }
       }
       // Save user data to Firestore
-      await _firestore.collection('USERS').doc(uid).set(userData);
+      await _firestore.collection('USER').doc(uid).set(userData);
       // Update display name
       await userCredential.user!.updateDisplayName(name);
       print('User registration completed successfully for: $email');
@@ -284,12 +316,29 @@ class AuthService {
   // Helper: Credit Akofa coins to a user (referrer)
   Future<void> _creditAkofaToUser(String uid, double amount) async {
     // You may want to use your wallet/stellar service for this in production
-    final userDoc = _firestore.collection('USERS').doc(uid);
+    final userDoc = _firestore.collection('USER').doc(uid);
     await userDoc.update({
       'akofaBalance': FieldValue.increment(amount),
     });
-    // Optionally, record a transaction in your transactions collection
-    // ...
+    // Record a transaction in your transactions collection for referral reward
+    // Get user's public key for proper transaction recording
+    final userDocSnapshot = await _firestore.collection('USER').doc(uid).get();
+    final userData = userDocSnapshot.data();
+    final publicKey = userData?['stellarPublicKey'];
+    
+    await _firestore.collection('transactions').add({
+      'userId': uid,
+      'senderAddress': 'SYSTEM_REFERRAL', // System account for referral rewards
+      'recipientAddress': publicKey ?? 'UNKNOWN',
+      'amount': amount,
+      'type': 'mining', // Mining reward type for referral bonuses
+      'status': 'completed',
+      'timestamp': FieldValue.serverTimestamp(),
+      'memo': 'Referral Reward',
+      'assetCode': 'AKOFA',
+      'senderAkofaTag': 'SYSTEM',
+      'recipientAkofaTag': userData?['akofaTag'],
+    });
   }
 
   // Sign out
@@ -306,7 +355,7 @@ class AuthService {
   Future<Map<String, dynamic>?> getUserDetails(String uid) async {
     try {
       DocumentSnapshot doc =
-          await _firestore.collection('USERS').doc(uid).get();
+          await _firestore.collection('USER').doc(uid).get();
       return doc.data() as Map<String, dynamic>?;
     } catch (e) {
       return null;
@@ -333,11 +382,11 @@ class AuthService {
       // Ensure user document exists in Firestore
       final user = userCredential.user;
       if (user != null) {
-        final userDoc = await _firestore.collection('USERS').doc(user.uid).get();
+        final userDoc = await _firestore.collection('USER').doc(user.uid).get();
         if (!userDoc.exists) {
           // This is a new Google user - they need to complete registration
           final deviceId = await _getDeviceId();
-          await _firestore.collection('USERS').doc(user.uid).set({
+          await _firestore.collection('USER').doc(user.uid).set({
             'displayName': user.displayName ?? '',
             'email': user.email ?? '',
             'phoneNumber': '', // Will be filled during registration
@@ -345,7 +394,7 @@ class AuthService {
             'createdAt': FieldValue.serverTimestamp(),
             'role': 'user', // Default role - not admin
             'isActive': true,
-            'isEmailVerified': true, // Google accounts are email verified
+            'isEmailVerified': false, // Force Google users to verify through our app
             'isPhoneVerified': false,
             'hasWallet': false,
             'akofaBalance': 0.0,
@@ -383,7 +432,7 @@ class AuthService {
       }
 
       // Verify user document exists
-      final userDoc = await _firestore.collection('USERS').doc(uid).get();
+      final userDoc = await _firestore.collection('USER').doc(uid).get();
       if (!userDoc.exists) {
         throw Exception('User document not found. Please try signing in again.');
       }
@@ -393,7 +442,6 @@ class AuthService {
       // Prepare update data
       final updateData = {
         'phoneNumber': phoneNumber,
-        'referralCode': uid,
         'referrals': [],
         'referralCount': 0,
         'miningRateBoosted': false,
@@ -401,11 +449,16 @@ class AuthService {
         'isPhoneVerified': true,
         'lastLogin': FieldValue.serverTimestamp(),
       };
+      // Only generate and assign referralCode if not already set
+      if (userData['referralCode'] == null || (userData['referralCode'] as String).isEmpty) {
+        final generatedReferralCode = await _generateUniqueReferralCode();
+        updateData['referralCode'] = generatedReferralCode;
+      }
 
       // Handle referral if provided
       if (referralCode != null && referralCode.isNotEmpty) {
         try {
-          final refQuery = await _firestore.collection('USERS').where('referralCode', isEqualTo: referralCode).limit(1).get();
+          final refQuery = await _firestore.collection('USER').where('referralCode', isEqualTo: referralCode).limit(1).get();
           if (refQuery.docs.isNotEmpty) {
             final referrerDoc = refQuery.docs.first;
             
@@ -444,7 +497,7 @@ class AuthService {
       }
       
       // Update user document
-      await _firestore.collection('USERS').doc(uid).update(updateData);
+      await _firestore.collection('USER').doc(uid).update(updateData);
       
       print('Google user registration completed successfully for: $uid');
     } catch (e) {
@@ -460,7 +513,7 @@ class AuthService {
     if (bio != null) data['bio'] = bio;
     if (photoUrl != null) data['photoUrl'] = photoUrl;
     if (preferences != null) data['preferences'] = preferences;
-    await _firestore.collection('USERS').doc(uid).update(data);
+    await _firestore.collection('USER').doc(uid).update(data);
   }
 
   // Upload profile image to Firebase Storage and return the download URL
@@ -472,7 +525,7 @@ class AuthService {
 
   // Verify phone number (for admin use)
   Future<void> verifyPhoneNumber(String uid) async {
-    await _firestore.collection('USERS').doc(uid).update({
+    await _firestore.collection('USER').doc(uid).update({
       'isPhoneVerified': true,
     });
   }
@@ -482,7 +535,7 @@ class AuthService {
     if (role != 'admin' && role != 'super_admin') {
       throw Exception('Invalid role. Must be "admin" or "super_admin"');
     }
-    await _firestore.collection('USERS').doc(uid).update({
+    await _firestore.collection('USER').doc(uid).update({
       'role': role,
     });
   }
@@ -490,7 +543,7 @@ class AuthService {
   // Check if user needs to complete registration
   Future<bool> needsRegistration(String uid) async {
     try {
-      final doc = await _firestore.collection('USERS').doc(uid).get();
+      final doc = await _firestore.collection('USER').doc(uid).get();
       if (!doc.exists) return true;
       final data = doc.data() as Map<String, dynamic>;
       return data['needsRegistration'] == true || data['phoneNumber']?.isEmpty == true;
@@ -502,7 +555,7 @@ class AuthService {
   // Check if user exists in USER collection
   Future<bool> userExistsInCollection(String uid) async {
     try {
-      final doc = await _firestore.collection('USERS').doc(uid).get();
+      final doc = await _firestore.collection('USER').doc(uid).get();
       return doc.exists;
     } catch (e) {
       print('Error checking if user exists in collection: $e');
@@ -513,7 +566,7 @@ class AuthService {
   // Check if user has completed registration (has phone number and other required fields)
   Future<bool> hasCompletedRegistration(String uid) async {
     try {
-      final doc = await _firestore.collection('USERS').doc(uid).get();
+      final doc = await _firestore.collection('USER').doc(uid).get();
       if (!doc.exists) return false;
       
       final data = doc.data() as Map<String, dynamic>;
@@ -530,5 +583,87 @@ class AuthService {
       print('Error checking if user has completed registration: $e');
       return false;
     }
+  }
+
+  // Update arbitrary fields in the USER document
+  Future<void> updateUserFields(String uid, Map<String, dynamic> data) async {
+    await _firestore.collection('USER').doc(uid).update(data);
+  }
+
+  // Get referral leaderboard data
+  Future<List<Map<String, dynamic>>> getReferralLeaderboard() async {
+    try {
+      final query = await _firestore
+          .collection('USER')
+          .where('referralCount', isGreaterThan: 0)
+          .orderBy('referralCount', descending: true)
+          .limit(10)
+          .get();
+
+      return query.docs.map((doc) {
+        final data = doc.data();
+        return {
+          'rank': 0, // Will be calculated below
+          'username': data['displayName'] ?? 'Unknown User',
+          'referrals': data['referralCount'] ?? 0,
+          'earnings': (data['referralCount'] ?? 0) * 5.0, // 5 AKOFA per referral
+          'avatar': _getUserAvatar(data['displayName'] ?? ''),
+          'userId': doc.id,
+        };
+      }).toList();
+    } catch (e) {
+      print('Error fetching referral leaderboard: $e');
+      return [];
+    }
+  }
+
+  // Get recent referrals for a specific user
+  Future<List<Map<String, dynamic>>> getRecentReferrals(String userId) async {
+    try {
+      final userDoc = await _firestore.collection('USER').doc(userId).get();
+      if (!userDoc.exists) return [];
+
+      final userData = userDoc.data() as Map<String, dynamic>;
+      final referrals = List<String>.from(userData['referrals'] ?? []);
+
+      if (referrals.isEmpty) return [];
+
+      // Get details for each referred user
+      final referralsData = <Map<String, dynamic>>[];
+      for (final referralId in referrals.take(10)) { // Limit to 10 most recent
+        try {
+          final referralDoc = await _firestore.collection('USER').doc(referralId).get();
+          if (referralDoc.exists) {
+            final referralData = referralDoc.data() as Map<String, dynamic>;
+            referralsData.add({
+              'username': referralData['displayName'] ?? 'Unknown User',
+              'joined': (referralData['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+              'status': referralData['isActive'] == true ? 'active' : 'inactive',
+              'userId': referralId,
+            });
+          }
+        } catch (e) {
+          print('Error fetching referral details for $referralId: $e');
+        }
+      }
+
+      // Sort by join date (most recent first)
+      referralsData.sort((a, b) => (b['joined'] as DateTime).compareTo(a['joined'] as DateTime));
+      
+      return referralsData;
+    } catch (e) {
+      print('Error fetching recent referrals: $e');
+      return [];
+    }
+  }
+
+  // Helper method to generate avatar emoji based on username
+  String _getUserAvatar(String username) {
+    if (username.isEmpty) return '👤';
+    
+    // Simple hash-based avatar selection
+    final hash = username.hashCode;
+    final avatars = ['👑', '👸', '⭐', '🚀', '🎯', '💎', '🔥', '🌟', '💫', '✨'];
+    return avatars[hash.abs() % avatars.length];
   }
 }

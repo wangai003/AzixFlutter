@@ -7,6 +7,9 @@ import '../../widgets/animated_logo.dart';
 import '../../widgets/google_sign_in_button.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'dart:ui';
+import 'verify_email_screen.dart';
+import 'phone_verification_screen.dart';
+import 'choose_verification_screen.dart';
 
 class ModernAuthScreen extends StatelessWidget {
   const ModernAuthScreen({Key? key}) : super(key: key);
@@ -165,7 +168,36 @@ class ModernAuthScreen extends StatelessWidget {
                           GoogleSignInButton(
                             onPressed: () async {
                               final success = await authProvider.signInWithGoogle();
-                              if (success && authProvider.isNewUser && context.mounted) {
+                              final user = authProvider.user;
+                              String? uid = user?.uid;
+                              Map<String, bool> status = {'isEmailVerified': false, 'isPhoneVerified': false};
+                              if (uid != null) {
+                                status = await authProvider.getFirestoreVerificationStatus(uid);
+                              }
+                              if (success && user != null && !status['isEmailVerified']! && !status['isPhoneVerified']! && context.mounted) {
+                                final result = await Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (context) => ChooseVerificationScreen(
+                                      email: user.email ?? '',
+                                      phoneNumber: user.phoneNumber ?? '',
+                                    ),
+                                  ),
+                                );
+                                if (result == null || result['verified'] != true) {
+                                  // Block access if not verified
+                                  return;
+                                }
+                                if (uid != null) {
+                                  if (result['method'] == 'email') {
+                                    await authProvider.setFirestoreVerificationStatus(uid, email: true);
+                                  } else if (result['method'] == 'phone') {
+                                    await authProvider.setFirestoreVerificationStatus(uid, phone: true);
+                                  }
+                                }
+                                if (authProvider.isNewUser && context.mounted) {
+                                  await _showReferralDialog();
+                                }
+                              } else if (success && authProvider.isNewUser && context.mounted) {
                                 await _showReferralDialog();
                               }
                             },

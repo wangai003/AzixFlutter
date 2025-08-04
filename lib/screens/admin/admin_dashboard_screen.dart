@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import '../../providers/admin_provider.dart';
-import '../../theme/app_theme.dart';
-import '../../utils/responsive_layout.dart';
-import 'notifications/admin_notifications_screen.dart';
-import 'announcements/admin_announcements_screen.dart';
-import 'content/admin_content_screen.dart';
-import 'users/admin_users_screen.dart';
-import 'analytics/admin_analytics_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../models/vendor_application.dart';
+import '../../services/admin_service.dart';
+import 'vendor_application_detail_screen.dart';
+import '../../models/payout_request.dart';
+import '../../models/notification.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({Key? key}) : super(key: key);
@@ -17,458 +14,408 @@ class AdminDashboardScreen extends StatefulWidget {
   State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
 }
 
-class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
+class _AdminDashboardScreenState extends State<AdminDashboardScreen> with SingleTickerProviderStateMixin {
+  bool _checkingAdmin = true;
+  bool _isAdmin = false;
+
+  String _statusFilter = 'pending';
+  String _typeFilter = 'all';
+  String _searchQuery = '';
+  late Future<List<VendorApplication>> _futureApplications;
+
+  late TabController _tabController;
+  final List<Tab> _tabs = const [
+    Tab(text: 'Vendor Applications'),
+    Tab(text: 'Payout Requests'),
+  ];
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final adminProvider = Provider.of<AdminProvider>(context, listen: false);
-      adminProvider.initializeAdminStatus();
+    _tabController = TabController(length: _tabs.length, vsync: this);
+    _checkAdmin();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _checkAdmin() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() {
+        _isAdmin = false;
+        _checkingAdmin = false;
+      });
+      return;
+    }
+    final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+    final role = doc.data()?['role'];
+    setState(() {
+      _isAdmin = role == 'admin';
+      _checkingAdmin = false;
+      if (_isAdmin) {
+        _futureApplications = AdminService.fetchVendorApplications(
+          status: _statusFilter,
+          type: _typeFilter,
+          searchQuery: _searchQuery,
+        );
+      }
+    });
+  }
+
+  void _refetchApplications() {
+    setState(() {
+      _futureApplications = AdminService.fetchVendorApplications(
+        status: _statusFilter,
+        type: _typeFilter,
+        searchQuery: _searchQuery,
+      );
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final adminProvider = Provider.of<AdminProvider>(context);
-    final isDesktop = ResponsiveLayout.isDesktop(context);
-    final isTablet = ResponsiveLayout.isTablet(context);
-
-    if (!adminProvider.isAdmin) {
+    if (_checkingAdmin) {
       return Scaffold(
-        body: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [AppTheme.black, Color(0xFF212121)],
-            ),
-          ),
-          child: Center(
+        appBar: AppBar(title: Text('Admin Dashboard')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (!_isAdmin) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Admin Dashboard')),
+        body: Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(
-                  Icons.admin_panel_settings,
-                  size: 80,
-                  color: AppTheme.primaryGold,
-                ),
+              const Text('Access denied. You are not an admin.', style: TextStyle(fontSize: 18, color: Colors.red)),
                 const SizedBox(height: 24),
-                Text(
-                  'Access Denied',
-                  style: AppTheme.headingLarge.copyWith(
-                    color: AppTheme.primaryGold,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'You do not have admin privileges.',
-                  style: AppTheme.bodyLarge.copyWith(color: AppTheme.white),
-                ),
-              ],
-            ),
+              ElevatedButton(
+                onPressed: () => Navigator.popUntil(context, (route) => route.isFirst),
+                child: const Text('Return to Home'),
+              ),
+            ],
           ),
         ),
       );
     }
-
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [AppTheme.black, Color(0xFF212121)],
-          ),
+      appBar: AppBar(
+        title: const Text('Admin Dashboard'),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: _tabs,
         ),
-        child: SafeArea(
-          child: ResponsiveContainer(
-            padding: EdgeInsets.symmetric(
-              horizontal: ResponsiveLayout.getValueForScreenType<double>(
-                context: context,
-                mobile: 16.0,
-                tablet: 24.0,
-                desktop: 32.0,
-                largeDesktop: 40.0,
-              ),
-              vertical: 24.0,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      ),
+      body: TabBarView(
+        controller: _tabController,
               children: [
-                _buildHeader(isDesktop),
-                const SizedBox(height: 32),
-                Expanded(
-                  child: isDesktop 
-                      ? _buildDesktopLayout()
-                      : _buildMobileTabletLayout(isTablet),
-                ),
-              ],
-            ),
-          ),
-        ),
+          _buildVendorApplicationsTab(),
+          _buildPayoutRequestsTab(),
+        ],
       ),
     );
   }
 
-  Widget _buildHeader(bool isDesktop) {
-    return Row(
+  Widget _buildVendorApplicationsTab() {
+    return Column(
       children: [
-        Icon(
-          Icons.admin_panel_settings,
-          color: AppTheme.primaryGold,
-          size: isDesktop ? 40 : 32,
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Row(
             children: [
-              Text(
-                'Admin Dashboard',
-                style: (isDesktop 
-                    ? AppTheme.headingLarge.copyWith(fontSize: 32)
-                    : AppTheme.headingLarge).copyWith(
-                  color: AppTheme.primaryGold,
-                  fontWeight: FontWeight.bold,
-                ),
+              // Status filter
+              DropdownButton<String>(
+                value: _statusFilter,
+                items: const [
+                  DropdownMenuItem(value: 'all', child: Text('All Statuses')),
+                  DropdownMenuItem(value: 'pending', child: Text('Pending')),
+                  DropdownMenuItem(value: 'approved', child: Text('Approved')),
+                  DropdownMenuItem(value: 'rejected', child: Text('Rejected')),
+                ],
+                onChanged: (val) {
+                  if (val != null) {
+                    setState(() => _statusFilter = val);
+                    _refetchApplications();
+                  }
+                },
               ),
-              Text(
-                'Manage your application',
-                style: AppTheme.bodyMedium.copyWith(
-                  color: AppTheme.grey,
-                  fontSize: isDesktop ? 18 : null,
+              const SizedBox(width: 12),
+              // Type filter
+              DropdownButton<String>(
+                value: _typeFilter,
+                items: const [
+                  DropdownMenuItem(value: 'all', child: Text('All Types')),
+                  DropdownMenuItem(value: 'goods', child: Text('Goods')),
+                  DropdownMenuItem(value: 'service', child: Text('Service')),
+                ],
+                onChanged: (val) {
+                  if (val != null) {
+                    setState(() => _typeFilter = val);
+                    _refetchApplications();
+                  }
+                },
+              ),
+              const SizedBox(width: 12),
+              // Search bar
+              Expanded(
+                child: TextField(
+                  decoration: const InputDecoration(hintText: 'Search by user ID...'),
+                  onChanged: (val) {
+                    setState(() => _searchQuery = val);
+                    _refetchApplications();
+                  },
                 ),
               ),
             ],
           ),
         ),
-        if (isDesktop)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryGold.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppTheme.primaryGold.withOpacity(0.3)),
-            ),
-            child: Text(
-              'Admin',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.primaryGold,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-      ],
-    ).animate().fadeIn(duration: const Duration(milliseconds: 600));
-  }
-
-  Widget _buildDesktopLayout() {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Left sidebar with navigation
-        Container(
-          width: 280,
-          margin: const EdgeInsets.only(right: 32),
-          child: _buildNavigationCards(),
-        ),
-        // Right content area
         Expanded(
-          child: _buildQuickStats(),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMobileTabletLayout(bool isTablet) {
-    return Column(
-      children: [
-        _buildQuickStats(),
-        const SizedBox(height: 24),
-        Expanded(child: _buildNavigationCards()),
-      ],
-    );
-  }
-
-  Widget _buildNavigationCards() {
-    final adminProvider = Provider.of<AdminProvider>(context);
-    
-    return GridView.count(
-      crossAxisCount: ResponsiveLayout.isDesktop(context) ? 1 : 2,
-      crossAxisSpacing: 16,
-      mainAxisSpacing: 16,
-      childAspectRatio: ResponsiveLayout.isDesktop(context) ? 4 : 1.2,
-      children: [
-        _buildNavigationCard(
-          icon: Icons.notifications,
-          title: 'Notifications',
-          subtitle: 'Send notifications to users',
-          color: Colors.blue,
-          onTap: () => Navigator.push(
+          child: FutureBuilder<List<VendorApplication>>(
+            future: _futureApplications,
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final applications = snapshot.data!;
+              if (applications.isEmpty) {
+                return const Center(child: Text('No applications found.'));
+              }
+              return ListView.builder(
+                itemCount: applications.length,
+                itemBuilder: (context, index) {
+                  final app = applications[index];
+                  return ListTile(
+                    title: Text('${app.type.toUpperCase()} Vendor'),
+                    subtitle: Text('User: ${app.uid}\nStatus: ${app.status}'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () {
+                      Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => const AdminNotificationsScreen(),
-            ),
-          ),
-        ),
-        _buildNavigationCard(
-          icon: Icons.announcement,
-          title: 'Announcements',
-          subtitle: 'Manage homepage announcements',
-          color: Colors.orange,
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const AdminAnnouncementsScreen(),
-            ),
-          ),
-        ),
-        _buildNavigationCard(
-          icon: Icons.article,
-          title: 'Content',
-          subtitle: 'Manage explore screen content',
-          color: Colors.green,
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const AdminContentScreen(),
-            ),
-          ),
-        ),
-        _buildNavigationCard(
-          icon: Icons.people,
-          title: 'Users',
-          subtitle: 'Manage user accounts',
-          color: Colors.purple,
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const AdminUsersScreen(),
-            ),
-          ),
-        ),
-        _buildNavigationCard(
-          icon: Icons.analytics,
-          title: 'Analytics',
-          subtitle: 'View app statistics',
-          color: Colors.red,
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const AdminAnalyticsScreen(),
-            ),
-          ),
-        ),
-        if (adminProvider.isSuperAdmin())
-          _buildNavigationCard(
-            icon: Icons.settings,
-            title: 'Settings',
-            subtitle: 'System configuration',
-            color: Colors.teal,
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Settings coming soon!')),
+                          builder: (_) => VendorApplicationDetailScreen(application: app),
+                        ),
+                      ).then((_) {
+                        _refetchApplications();
+                      });
+                    },
+                  );
+                },
               );
             },
           ),
+          ),
       ],
     );
   }
 
-  Widget _buildNavigationCard({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return Card(
-      elevation: 8,
-      shadowColor: color.withOpacity(0.3),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                color.withOpacity(0.1),
-                color.withOpacity(0.05),
-              ],
-            ),
-          ),
-          child: ResponsiveLayout.isDesktop(context)
-              ? Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: color.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(icon, color: color, size: 24),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            title,
-                            style: AppTheme.headingSmall.copyWith(
-                              color: AppTheme.black,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            subtitle,
-                            style: AppTheme.bodySmall.copyWith(
-                              color: AppTheme.black.withOpacity(0.7),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Icon(
-                      Icons.arrow_forward_ios,
-                      color: color,
-                      size: 16,
-                    ),
-                  ],
-                )
-              : Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: color.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(icon, color: color, size: 20),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      title,
-                      style: AppTheme.bodyMedium.copyWith(
-                        color: AppTheme.black,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-        ),
-      ),
-    ).animate().fadeIn(
-      duration: const Duration(milliseconds: 600),
-      delay: const Duration(milliseconds: 200),
-    );
+  Widget _buildPayoutRequestsTab() {
+    return _AdminPayoutRequestsTab();
   }
+}
 
-  Widget _buildQuickStats() {
+class _AdminPayoutRequestsTab extends StatefulWidget {
+  @override
+  State<_AdminPayoutRequestsTab> createState() => _AdminPayoutRequestsTabState();
+}
+
+class _AdminPayoutRequestsTabState extends State<_AdminPayoutRequestsTab> {
+  String _statusFilter = 'pending';
+
+  @override
+  Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Quick Stats',
-          style: AppTheme.headingMedium.copyWith(
-            color: AppTheme.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: AppTheme.darkGrey.withOpacity(0.5),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppTheme.grey.withOpacity(0.3)),
-          ),
+        Padding(
+          padding: const EdgeInsets.all(8.0),
           child: Row(
             children: [
-              Expanded(
-                child: _buildStatItem(
-                  icon: Icons.people,
-                  label: 'Total Users',
-                  value: '1,234',
-                  color: Colors.blue,
-                ),
-              ),
-              Expanded(
-                child: _buildStatItem(
-                  icon: Icons.notifications,
-                  label: 'Notifications',
-                  value: '56',
-                  color: Colors.orange,
-                ),
-              ),
-              Expanded(
-                child: _buildStatItem(
-                  icon: Icons.article,
-                  label: 'Content Items',
-                  value: '89',
-                  color: Colors.green,
-                ),
-              ),
-              Expanded(
-                child: _buildStatItem(
-                  icon: Icons.trending_up,
-                  label: 'Active Users',
-                  value: '789',
-                  color: Colors.purple,
-                ),
+              const Text('Status:'),
+              const SizedBox(width: 8),
+              DropdownButton<String>(
+                value: _statusFilter,
+                items: const [
+                  DropdownMenuItem(value: 'all', child: Text('All')),
+                  DropdownMenuItem(value: 'pending', child: Text('Pending')),
+                  DropdownMenuItem(value: 'approved', child: Text('Approved')),
+                  DropdownMenuItem(value: 'rejected', child: Text('Rejected')),
+                  DropdownMenuItem(value: 'paid', child: Text('Paid')),
+                ],
+                onChanged: (val) {
+                  if (val != null) setState(() => _statusFilter = val);
+                },
               ),
             ],
+                ),
+              ),
+              Expanded(
+          child: StreamBuilder<QuerySnapshot>(
+            stream: _statusFilter == 'all'
+                ? FirebaseFirestore.instance.collection('payout_requests').orderBy('requestedAt', descending: true).snapshots()
+                : FirebaseFirestore.instance.collection('payout_requests').where('status', isEqualTo: _statusFilter).orderBy('requestedAt', descending: true).snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                return const Center(child: Text('No payout requests found.'));
+              }
+              final requests = snapshot.data!.docs
+                  .map((doc) => PayoutRequest.fromMap(doc.data() as Map<String, dynamic>, doc.id))
+                  .toList();
+              return ListView.separated(
+                itemCount: requests.length,
+                separatorBuilder: (_, __) => const Divider(),
+                itemBuilder: (context, i) {
+                  final req = requests[i];
+                  return ListTile(
+                    leading: Icon(
+                      req.status == 'paid'
+                          ? Icons.check_circle
+                          : req.status == 'rejected'
+                              ? Icons.cancel
+                              : req.status == 'approved'
+                                  ? Icons.verified
+                                  : Icons.hourglass_top,
+                      color: req.status == 'paid'
+                          ? Colors.green
+                          : req.status == 'rejected'
+                              ? Colors.red
+                              : req.status == 'approved'
+                                  ? Colors.blue
+                                  : Colors.orange,
+                    ),
+                    title: Text('₳${req.amount.toStringAsFixed(2)} to ${req.destination.substring(0, 6)}...'),
+                    subtitle: Text('Vendor: ${req.vendorId}\nStatus: ${req.status}\nRequested: ${req.requestedAt.toLocal()}'),
+                    isThreeLine: true,
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (req.status == 'pending')
+                          IconButton(
+                            icon: const Icon(Icons.check, color: Colors.green),
+                            tooltip: 'Approve',
+                            onPressed: () => _updateStatus(req, 'approved'),
+                          ),
+                        if (req.status == 'pending')
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.red),
+                            tooltip: 'Reject',
+                            onPressed: () => _updateStatus(req, 'rejected'),
+                          ),
+                        if (req.status == 'approved')
+                          IconButton(
+                            icon: const Icon(Icons.attach_money, color: Colors.blue),
+                            tooltip: 'Mark as Paid',
+                            onPressed: () => _markAsPaid(req),
+                          ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
           ),
         ),
       ],
-    ).animate().fadeIn(
-      duration: const Duration(milliseconds: 600),
-      delay: const Duration(milliseconds: 400),
     );
   }
 
-  Widget _buildStatItem({
-    required IconData icon,
-    required String label,
-    required String value,
-    required Color color,
-  }) {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.2),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(icon, color: color, size: 24),
+  Future<void> _updateStatus(PayoutRequest req, String status) async {
+    String? adminNote;
+    if (status == 'rejected' || status == 'approved') {
+      adminNote = await _promptForNote(context, status == 'rejected' ? 'Reason for Rejection (optional)' : 'Note (optional)');
+    }
+    await FirebaseFirestore.instance.collection('payout_requests').doc(req.id).update({
+      'status': status,
+      if (status == 'rejected') 'processedAt': DateTime.now(),
+      if (adminNote != null && adminNote.isNotEmpty) 'adminNote': adminNote,
+    });
+    // Send notification
+    String title = 'Payout Request Update';
+    String message = '';
+    if (status == 'approved') {
+      message = 'Your payout request for ₳${req.amount.toStringAsFixed(2)} has been approved.';
+      if (adminNote != null && adminNote.isNotEmpty) {
+        message += '\nNote: $adminNote';
+      }
+    } else if (status == 'rejected') {
+      message = 'Your payout request for ₳${req.amount.toStringAsFixed(2)} was rejected.';
+      if (adminNote != null && adminNote.isNotEmpty) {
+        message += '\nReason: $adminNote';
+      }
+    }
+    if (message.isNotEmpty) {
+      final notification = NotificationModel(
+        id: '',
+        title: title,
+        message: message,
+        type: 'transaction',
+        createdAt: DateTime.now(),
+        isRead: false,
+        userId: req.vendorId,
+      );
+      await FirebaseFirestore.instance.collection('notifications').add(notification.toMap());
+    }
+  }
+
+  Future<void> _markAsPaid(PayoutRequest req) async {
+    final adminNote = await _promptForNote(context, 'Note for Vendor (optional)');
+    // Mark as paid and deduct from vendor's akofaBalance
+    final batch = FirebaseFirestore.instance.batch();
+    final payoutRef = FirebaseFirestore.instance.collection('payout_requests').doc(req.id);
+    final vendorRef = FirebaseFirestore.instance.collection('USERS').doc(req.vendorId);
+    batch.update(payoutRef, {
+      'status': 'paid',
+      'processedAt': DateTime.now(),
+      if (adminNote != null && adminNote.isNotEmpty) 'adminNote': adminNote,
+    });
+    batch.update(vendorRef, {
+      'akofaBalance': FieldValue.increment(-req.amount),
+    });
+    await batch.commit();
+    // Send notification
+    String message = 'Your payout of ₳${req.amount.toStringAsFixed(2)} has been sent to your Stellar wallet.';
+    if (adminNote != null && adminNote.isNotEmpty) {
+      message += '\nNote: $adminNote';
+    }
+    final notification = NotificationModel(
+      id: '',
+      title: 'Payout Sent',
+      message: message,
+      type: 'transaction',
+      createdAt: DateTime.now(),
+      isRead: false,
+      userId: req.vendorId,
+    );
+    await FirebaseFirestore.instance.collection('notifications').add(notification.toMap());
+  }
+
+  Future<String?> _promptForNote(BuildContext context, String label) async {
+    final controller = TextEditingController();
+    return await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(label),
+        content: TextField(
+          controller: controller,
+          decoration: InputDecoration(hintText: label),
+          maxLines: 3,
         ),
-        const SizedBox(height: 12),
-        Text(
-          value,
-          style: AppTheme.headingMedium.copyWith(
-            color: AppTheme.white,
-            fontWeight: FontWeight.bold,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: const Text('Cancel'),
           ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: AppTheme.bodySmall.copyWith(
-            color: AppTheme.grey,
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('OK'),
           ),
-          textAlign: TextAlign.center,
-        ),
-      ],
+        ],
+      ),
     );
   }
 } 

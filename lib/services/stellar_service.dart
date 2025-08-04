@@ -578,15 +578,17 @@ class StellarService {
       
       if (response.success) {
         // Create a transaction record in Firestore
-        final transactionRecord = await _recordTransaction(
-          sourceAccountId,
-          destinationAddress,
-          double.parse(amount),
-          app_transaction.TransactionType.send,
-          app_transaction.TransactionStatus.completed,
-          response.hash,
-          memo,
-          AKOFA_ASSET_CODE
+        final senderUid = _auth.currentUser!.uid;
+        await _recordForBothUsers(
+          senderUid: senderUid,
+          recipientAddress: destinationAddress,
+          senderAddress: sourceAccountId,
+          amount: double.parse(amount),
+          type: app_transaction.TransactionType.send,
+          status: app_transaction.TransactionStatus.completed,
+          hash: response.hash,
+          memo: memo,
+          assetCode: AKOFA_ASSET_CODE,
         );
         
         // Send email receipt
@@ -603,19 +605,22 @@ class StellarService {
         return {
           'success': true,
           'hash': response.hash,
-          'transactionId': transactionRecord.id
+          'transactionId': response.hash // Assuming hash is the transactionId for send
         };
       } else {
         // Record failed transaction
-        await _recordTransaction(
-          sourceAccountId,
-          destinationAddress,
-          double.parse(amount),
-          app_transaction.TransactionType.send,
-          app_transaction.TransactionStatus.failed,
-          null,
-          memo,
-          AKOFA_ASSET_CODE
+        final senderUid = _auth.currentUser!.uid;
+        await _recordForBothUsers(
+          senderUid: senderUid,
+          recipientAddress: destinationAddress,
+          senderAddress: sourceAccountId,
+          amount: double.parse(amount),
+          type: app_transaction.TransactionType.send,
+          status: app_transaction.TransactionStatus.failed,
+          hash: null,
+          memo: memo,
+          assetCode: AKOFA_ASSET_CODE,
+          errorReason: response.extras?.toString(),
         );
         
         throw Exception('Transaction failed: ${response.extras}');
@@ -672,15 +677,17 @@ class StellarService {
       
       if (response.success) {
         // Create a transaction record in Firestore
-        final transactionRecord = await _recordTransaction(
-          sourceAccountId,
-          destinationAddress,
-          double.parse(amount),
-          app_transaction.TransactionType.send,
-          app_transaction.TransactionStatus.completed,
-          response.hash,
-          memo,
-          "XLM" // XLM asset code
+        final senderUid = _auth.currentUser!.uid;
+        await _recordForBothUsers(
+          senderUid: senderUid,
+          recipientAddress: destinationAddress,
+          senderAddress: sourceAccountId,
+          amount: double.parse(amount),
+          type: app_transaction.TransactionType.send,
+          status: app_transaction.TransactionStatus.completed,
+          hash: response.hash,
+          memo: memo,
+          assetCode: "XLM", // XLM asset code
         );
         
         // Send email receipt
@@ -697,19 +704,22 @@ class StellarService {
         return {
           'success': true,
           'hash': response.hash,
-          'transactionId': transactionRecord.id
+          'transactionId': response.hash // Assuming hash is the transactionId for send
         };
       } else {
         // Record failed transaction
-        await _recordTransaction(
-          sourceAccountId,
-          destinationAddress,
-          double.parse(amount),
-          app_transaction.TransactionType.send,
-          app_transaction.TransactionStatus.failed,
-          null,
-          memo,
-          "XLM" // XLM asset code
+        final senderUid = _auth.currentUser!.uid;
+        await _recordForBothUsers(
+          senderUid: senderUid,
+          recipientAddress: destinationAddress,
+          senderAddress: sourceAccountId,
+          amount: double.parse(amount),
+          type: app_transaction.TransactionType.send,
+          status: app_transaction.TransactionStatus.failed,
+          hash: null,
+          memo: memo,
+          assetCode: "XLM", // XLM asset code
+          errorReason: response.extras?.toString(),
         );
         
         throw Exception('Transaction failed: ${response.extras}');
@@ -721,6 +731,7 @@ class StellarService {
   
   // Record a transaction in Firestore
   Future<DocumentReference> _recordTransaction(
+    String userId, // now explicit
     String senderAddress,
     String recipientAddress,
     double amount,
@@ -729,14 +740,17 @@ class StellarService {
     String? hash,
     String? memo,
     String assetCode,
-    {String? errorReason}
+    {String? errorReason,
+     String? senderAkofaTag,
+     String? recipientAkofaTag,
+    }
   ) async {
-    final String uid = _auth.currentUser!.uid;
-    
     return await _firestore.collection('transactions').add({
-      'userId': uid,
+      'userId': userId,
       'senderAddress': senderAddress,
       'recipientAddress': recipientAddress,
+      'senderAkofaTag': senderAkofaTag ?? '',
+      'recipientAkofaTag': recipientAkofaTag ?? '',
       'amount': amount,
       'type': type.toString().split('.').last,
       'status': status.toString().split('.').last,
@@ -746,6 +760,73 @@ class StellarService {
       'assetCode': assetCode,
       'errorReason': errorReason,
     });
+  }
+
+  Future<void> _recordForBothUsers({
+    required String senderUid,
+    required String recipientAddress,
+    required String senderAddress,
+    required double amount,
+    required app_transaction.TransactionType type,
+    required app_transaction.TransactionStatus status,
+    String? hash,
+    String? memo,
+    required String assetCode,
+    String? errorReason,
+  }) async {
+    // Look up Akofa tags for sender and recipient
+    String? senderAkofaTag;
+    String? recipientAkofaTag;
+    
+    // Get sender's Akofa tag
+    final senderQuery = await _firestore.collection('USER').where('stellarPublicKey', isEqualTo: senderAddress).limit(1).get();
+    if (senderQuery.docs.isNotEmpty) {
+      senderAkofaTag = senderQuery.docs.first.data()['akofaTag'] ?? '';
+    }
+    
+    // Get recipient's Akofa tag
+    final recipientQuery = await _firestore.collection('USER').where('stellarPublicKey', isEqualTo: recipientAddress).limit(1).get();
+    if (recipientQuery.docs.isNotEmpty) {
+      recipientAkofaTag = recipientQuery.docs.first.data()['akofaTag'] ?? '';
+    }
+    
+    // Record transaction for SENDER (type: send)
+    await _recordTransaction(
+      senderUid,
+      senderAddress,
+      recipientAddress,
+      amount,
+      app_transaction.TransactionType.send, // Sender always has type "send"
+      status,
+      hash,
+      memo,
+      assetCode,
+      errorReason: errorReason,
+      senderAkofaTag: senderAkofaTag,
+      recipientAkofaTag: recipientAkofaTag,
+    );
+    
+    // Find recipient UID by publicKey and record for RECIPIENT (type: receive)
+    final userQuery = await _firestore.collection('USER').where('stellarPublicKey', isEqualTo: recipientAddress).limit(1).get();
+    if (userQuery.docs.isNotEmpty) {
+      final recipientUid = userQuery.docs.first.id;
+      if (recipientUid != senderUid) { // Prevent self-transaction duplication
+        await _recordTransaction(
+          recipientUid,
+          senderAddress,
+          recipientAddress,
+          amount,
+          app_transaction.TransactionType.receive, // Recipient always has type "receive"
+          status,
+          hash,
+          memo,
+          assetCode,
+          errorReason: errorReason,
+          senderAkofaTag: senderAkofaTag,
+          recipientAkofaTag: recipientAkofaTag,
+        );
+      }
+    }
   }
   
   // Send an email receipt for a transaction
@@ -849,20 +930,24 @@ The AZIX Team
       if (publicKey == null) {
         throw Exception('Public key is null');
       }
-      final issuerSecret = assetIssuerSecrets[AKOFA_ASSET_CODE];
+      final issuerSecret = Secrets.assetIssuerSecrets[AKOFA_ASSET_CODE];
       if (issuerSecret == null || issuerSecret.contains('...') || issuerSecret.isEmpty) {
         // Issuer secret not configured - record transaction as failed
         print('Warning: AKOFA issuer secret not configured. Recording mining reward as failed transaction.');
+        final senderUid = _auth.currentUser!.uid;
         await _recordTransaction(
-          AKOFA_ISSUER_ACCOUNT,
-          publicKey,
+          senderUid, // This is the miner's UID
+          AKOFA_ISSUER_ACCOUNT, // System issuer account
+          publicKey, // Miner's public key
           amount,
           app_transaction.TransactionType.mining,
           app_transaction.TransactionStatus.failed,
           null,
           'Mining Reward (Failed - Issuer not configured)',
           AKOFA_ASSET_CODE,
-          errorReason: 'Issuer secret not configured'
+          errorReason: 'Issuer secret not configured',
+          senderAkofaTag: 'SYSTEM', // System account
+          recipientAkofaTag: null, // Will be looked up from public key
         );
         return {'success': false, 'error': 'Issuer secret not configured'};
       }
@@ -875,29 +960,38 @@ The AZIX Team
       );
       if (result['success'] != true) {
         // Record as failed
+        final senderUid = _auth.currentUser!.uid;
         await _recordTransaction(
-          AKOFA_ISSUER_ACCOUNT,
-          publicKey,
+          senderUid, // This is the miner's UID
+          AKOFA_ISSUER_ACCOUNT, // System issuer account
+          publicKey, // Miner's public key
           amount,
           app_transaction.TransactionType.mining,
           app_transaction.TransactionStatus.failed,
           null,
           'Mining Reward (Failed - ${result['message']})',
           AKOFA_ASSET_CODE,
-          errorReason: result['message'] ?? 'Unknown error'
+          errorReason: result['message'] ?? 'Unknown error',
+          senderAkofaTag: 'SYSTEM', // System account
+          recipientAkofaTag: null, // Will be looked up from public key
         );
         throw Exception('Failed to send mining reward: ${result['message']}');
       }
-      // Record the transaction in Firestore as completed
+      // Record the mining reward transaction in Firestore as completed
+      // Only record for the recipient (miner) since issuer is a system account
+      final senderUid = _auth.currentUser!.uid;
       await _recordTransaction(
-        AKOFA_ISSUER_ACCOUNT,
-        publicKey,
+        senderUid, // This is the miner's UID
+        AKOFA_ISSUER_ACCOUNT, // System issuer account
+        publicKey, // Miner's public key
         amount,
         app_transaction.TransactionType.mining,
         app_transaction.TransactionStatus.completed,
         result['hash'],
         'Mining Reward',
-        AKOFA_ASSET_CODE
+        AKOFA_ASSET_CODE,
+        senderAkofaTag: 'SYSTEM', // System account
+        recipientAkofaTag: null, // Will be looked up from public key
       );
       // Send email receipt for mining reward
       await _sendTransactionReceipt(
@@ -916,16 +1010,20 @@ The AZIX Team
         final credentials = await getWalletCredentials();
         final publicKey = credentials?['publicKey'];
         if (publicKey != null) {
+          final senderUid = _auth.currentUser!.uid;
           await _recordTransaction(
-            AKOFA_ISSUER_ACCOUNT,
-            publicKey,
+            senderUid, // This is the miner's UID
+            AKOFA_ISSUER_ACCOUNT, // System issuer account
+            publicKey, // Miner's public key
             amount,
             app_transaction.TransactionType.mining,
             app_transaction.TransactionStatus.failed,
             null,
             'Mining Reward (Failed - $e)',
             AKOFA_ASSET_CODE,
-            errorReason: e.toString()
+            errorReason: e.toString(),
+            senderAkofaTag: 'SYSTEM', // System account
+            recipientAkofaTag: null, // Will be looked up from public key
           );
         }
       } catch (_) {}
@@ -949,7 +1047,9 @@ The AZIX Team
       print('Creating test transaction for public key: $publicKey');
       
       // Create a test transaction
+      final senderUid = _auth.currentUser!.uid;
       return await _recordTransaction(
+        senderUid,
         'TEST_SENDER_ADDRESS',
         publicKey,
         1.0,
@@ -1065,27 +1165,32 @@ The AZIX Team
       
       if (response.success) {
         // Record transaction in Firestore
-        await _recordTransaction(
-          sourceAccountId,
-          destinationAddress,
-          double.parse(amount),
-          app_transaction.TransactionType.send,
-          app_transaction.TransactionStatus.completed,
-          response.hash,
-          memo,
-          assetCode
+        final senderUid = _auth.currentUser!.uid;
+        await _recordForBothUsers(
+          senderUid: senderUid,
+          recipientAddress: destinationAddress,
+          senderAddress: sourceAccountId,
+          amount: double.parse(amount),
+          type: app_transaction.TransactionType.send,
+          status: app_transaction.TransactionStatus.completed,
+          hash: response.hash,
+          memo: memo,
+          assetCode: assetCode
         );
         return {'success': true, 'hash': response.hash};
       } else {
-        await _recordTransaction(
-          sourceAccountId,
-          destinationAddress,
-          double.parse(amount),
-          app_transaction.TransactionType.send,
-          app_transaction.TransactionStatus.failed,
-          null,
-          memo,
-          assetCode
+        final senderUid = _auth.currentUser!.uid;
+        await _recordForBothUsers(
+          senderUid: senderUid,
+          recipientAddress: destinationAddress,
+          senderAddress: sourceAccountId,
+          amount: double.parse(amount),
+          type: app_transaction.TransactionType.send,
+          status: app_transaction.TransactionStatus.failed,
+          hash: null,
+          memo: memo,
+          assetCode: assetCode,
+          errorReason: response.extras?.toString()
         );
         throw Exception('Transaction failed: ${response.extras}');
       }
@@ -1101,7 +1206,7 @@ The AZIX Team
       final assetInfo = SwapService.supportedAssets[assetCode];
       if (assetInfo == null) throw Exception('Unsupported asset');
       // WARNING: This is for testnet/demo only! Never store secrets in production apps.
-      final issuerSecret = assetIssuerSecrets[assetCode];
+      final issuerSecret = Secrets.assetIssuerSecrets[assetCode];
       if (issuerSecret == null) throw Exception('No issuer secret for $assetCode');
       final issuerKeyPair = KeyPair.fromSecretSeed(issuerSecret);
       final issuerAccountId = issuerKeyPair.accountId;
@@ -1122,27 +1227,32 @@ The AZIX Team
       final response = await _sdk.submitTransaction(transaction);
       if (response.success) {
         // Record transaction in Firestore
-        await _recordTransaction(
-          issuerAccountId,
-          destinationAddress,
-          double.parse(amount),
-          app_transaction.TransactionType.send,
-          app_transaction.TransactionStatus.completed,
-          response.hash,
-          memo,
-          assetCode
+        final senderUid = _auth.currentUser!.uid;
+        await _recordForBothUsers(
+          senderUid: senderUid,
+          recipientAddress: destinationAddress,
+          senderAddress: issuerAccountId,
+          amount: double.parse(amount),
+          type: app_transaction.TransactionType.send,
+          status: app_transaction.TransactionStatus.completed,
+          hash: response.hash,
+          memo: memo,
+          assetCode: assetCode
         );
         return {'success': true, 'hash': response.hash};
       } else {
-        await _recordTransaction(
-          issuerAccountId,
-          destinationAddress,
-          double.parse(amount),
-          app_transaction.TransactionType.send,
-          app_transaction.TransactionStatus.failed,
-          null,
-          memo,
-          assetCode
+        final senderUid = _auth.currentUser!.uid;
+        await _recordForBothUsers(
+          senderUid: senderUid,
+          recipientAddress: destinationAddress,
+          senderAddress: issuerAccountId,
+          amount: double.parse(amount),
+          type: app_transaction.TransactionType.send,
+          status: app_transaction.TransactionStatus.failed,
+          hash: null,
+          memo: memo,
+          assetCode: assetCode,
+          errorReason: response.extras?.toString()
         );
         throw Exception('Transaction failed: ${response.extras}');
       }

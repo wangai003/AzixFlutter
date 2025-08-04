@@ -17,6 +17,8 @@ class Transaction {
   final String userId;
   final String senderAddress;
   final String recipientAddress;
+  final String? senderAkofaTag;
+  final String? recipientAkofaTag;
   final double amount;
   final TransactionType type;
   final TransactionStatus status;
@@ -30,6 +32,8 @@ class Transaction {
     required this.userId,
     required this.senderAddress,
     required this.recipientAddress,
+    this.senderAkofaTag,
+    this.recipientAkofaTag,
     required this.amount,
     required this.type,
     required this.status,
@@ -63,6 +67,8 @@ class Transaction {
       userId: data['userId'] ?? '',
       senderAddress: data['senderAddress'] ?? '',
       recipientAddress: data['recipientAddress'] ?? '',
+      senderAkofaTag: data['senderAkofaTag'],
+      recipientAkofaTag: data['recipientAkofaTag'],
       amount: (data['amount'] ?? 0).toDouble(),
       type: _parseTransactionType(data['type']),
       status: _parseTransactionStatus(data['status']),
@@ -79,6 +85,8 @@ class Transaction {
       'userId': userId,
       'senderAddress': senderAddress,
       'recipientAddress': recipientAddress,
+      'senderAkofaTag': senderAkofaTag,
+      'recipientAkofaTag': recipientAkofaTag,
       'amount': amount,
       'type': type.toString().split('.').last,
       'status': status.toString().split('.').last,

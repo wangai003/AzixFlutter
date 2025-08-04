@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
@@ -14,6 +15,7 @@ import '../providers/admin_provider.dart';
 import 'admin/admin_dashboard_screen.dart';
 import '../services/auth_service.dart';
 import '../models/user_model.dart';
+import 'transaction_test_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -285,6 +287,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         
                         // Data & Storage section
                         _buildSectionHeader('Data & Storage'),
+                        
+                        // Development & Testing section (only show in debug mode)
+                        if (kDebugMode) ...[
+                          const SizedBox(height: 24),
+                          _buildSectionHeader('Development & Testing'),
+                          _buildSettingItem(
+                            icon: Icons.bug_report,
+                            title: 'Transaction Tests',
+                            subtitle: 'Test transaction recording functionality',
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => const TransactionTestScreen(),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
                         _buildSwitchItem(
                           icon: Icons.backup,
                           title: 'Auto Backup',

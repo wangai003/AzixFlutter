@@ -5,6 +5,7 @@ import '../theme/app_theme.dart';
 import '../utils/responsive_layout.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:url_launcher/url_launcher_string.dart';
+import 'package:cloud_firestore/cloud_firestore.dart' as firestore;
 
 class TransactionList extends StatelessWidget {
   final List<Transaction> transactions;
@@ -146,6 +147,12 @@ class TransactionList extends StatelessWidget {
                       tx.timestamp.toString(),
                       style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
                     ),
+                    const SizedBox(width: 8),
+                    // Show Akofa tags for sender/recipient
+                    if (tx.type == TransactionType.send)
+                      Text('To: ' + (tx.recipientAkofaTag != null && tx.recipientAkofaTag!.isNotEmpty ? '₳${tx.recipientAkofaTag}' : 'Unknown'), style: AppTheme.bodySmall.copyWith(color: AppTheme.primaryGold)),
+                    if (tx.type == TransactionType.receive)
+                      Text('From: ' + (tx.senderAkofaTag != null && tx.senderAkofaTag!.isNotEmpty ? '₳${tx.senderAkofaTag}' : 'Unknown'), style: AppTheme.bodySmall.copyWith(color: AppTheme.primaryGold)),
                   ],
                 ),
               ),
@@ -205,7 +212,12 @@ class TransactionList extends StatelessWidget {
             ),
           ),
           subtitle: Text(
-            tx.status.toString().split('.').last + ' • ' + tx.timestamp.toString(),
+            tx.status.toString().split('.').last + ' • ' + tx.timestamp.toString() +
+            (tx.type == TransactionType.send
+              ? ' • To: ' + (tx.recipientAkofaTag != null && tx.recipientAkofaTag!.isNotEmpty ? '₳${tx.recipientAkofaTag}' : 'Unknown')
+              : tx.type == TransactionType.receive
+                ? ' • From: ' + (tx.senderAkofaTag != null && tx.senderAkofaTag!.isNotEmpty ? '₳${tx.senderAkofaTag}' : 'Unknown')
+                : ''),
             style: AppTheme.bodySmall.copyWith(
               color: AppTheme.grey,
               fontSize: isTablet ? 14 : null,
@@ -242,57 +254,110 @@ class TransactionList extends StatelessWidget {
     showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          backgroundColor: AppTheme.black,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(
-            tx.typeLabel,
-            style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _detailRow('Amount', tx.amount.toString() + ' ' + tx.assetCode),
-                _detailRow('Status', tx.statusLabel),
-                _detailRow('Date', tx.timestamp.toString()),
-                _detailRow('Sender', tx.senderAddress),
-                _detailRow('Recipient', tx.recipientAddress),
-                if (tx.memo != null && tx.memo!.isNotEmpty)
-                  _detailRow('Memo', tx.memo!),
-                if (tx.hash != null && tx.hash!.isNotEmpty)
-                  _detailRow('Transaction Hash', tx.hash!),
-                const SizedBox(height: 16),
-                if (tx.hash != null && tx.hash!.isNotEmpty)
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primaryGold,
-                        foregroundColor: AppTheme.black,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      icon: const Icon(Icons.open_in_new),
-                      label: const Text('View on Stellar Explorer'),
-                      onPressed: () {
-                        _launchUrl(context, tx.hash!);
-                      },
+        return _TransactionDetailsDialog(tx: tx);
+      },
+    );
+  }
+}
+
+class _TransactionDetailsDialog extends StatefulWidget {
+  final Transaction tx;
+  const _TransactionDetailsDialog({Key? key, required this.tx}) : super(key: key);
+
+  @override
+  State<_TransactionDetailsDialog> createState() => _TransactionDetailsDialogState();
+}
+
+class _TransactionDetailsDialogState extends State<_TransactionDetailsDialog> {
+  String? senderAkofaTag;
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchSenderAkofaTag();
+  }
+
+  Future<void> _fetchSenderAkofaTag() async {
+    final senderAddress = widget.tx.senderAddress;
+    if (senderAddress.isEmpty) {
+      setState(() { loading = false; });
+      return;
+    }
+    final query = await firestore.FirebaseFirestore.instance
+        .collection('USER')
+        .where('stellarPublicKey', isEqualTo: senderAddress)
+        .limit(1)
+        .get();
+    if (query.docs.isNotEmpty && query.docs.first.data()['akofaTag'] != null && query.docs.first.data()['akofaTag'].toString().isNotEmpty) {
+      setState(() {
+        senderAkofaTag = '₳' + query.docs.first.data()['akofaTag'];
+        loading = false;
+      });
+    } else {
+      setState(() { loading = false; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tx = widget.tx;
+    String senderDisplay = (tx.senderAkofaTag != null && tx.senderAkofaTag!.isNotEmpty)
+      ? '₳${tx.senderAkofaTag}'
+      : 'Unknown';
+    String recipientDisplay = (tx.recipientAkofaTag != null && tx.recipientAkofaTag!.isNotEmpty)
+      ? '₳${tx.recipientAkofaTag}'
+      : 'Unknown';
+    return AlertDialog(
+      backgroundColor: AppTheme.black,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Text(
+        tx.typeLabel,
+        style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _detailRow('Amount', tx.amount.toString() + ' ' + tx.assetCode),
+            _detailRow('Status', tx.statusLabel),
+            _detailRow('Date', tx.timestamp.toString()),
+            _detailRow('Sender', senderDisplay),
+            _detailRow('Recipient', recipientDisplay),
+            if (tx.memo != null && tx.memo!.isNotEmpty)
+              _detailRow('Memo', tx.memo!),
+            if (tx.hash != null && tx.hash!.isNotEmpty)
+              _detailRow('Transaction Hash', tx.hash!),
+            const SizedBox(height: 16),
+            if (tx.hash != null && tx.hash!.isNotEmpty)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryGold,
+                    foregroundColor: AppTheme.black,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              child: const Text('Close', style: TextStyle(color: AppTheme.primaryGold)),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
+                  icon: const Icon(Icons.open_in_new),
+                  label: const Text('View on Stellar Explorer'),
+                  onPressed: () {
+                    final uri = Uri.parse(tx.hash!);
+                    launchUrl(uri, mode: LaunchMode.externalApplication);
+                  },
+                ),
+              ),
           ],
-        );
-      },
+        ),
+      ),
+      actions: [
+        TextButton(
+          child: const Text('Close', style: TextStyle(color: AppTheme.primaryGold)),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ],
     );
   }
 
@@ -309,16 +374,5 @@ class TransactionList extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  void _launchUrl(BuildContext context, String url) async {
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not launch Stellar Explorer.')),
-      );
-    }
   }
 } 

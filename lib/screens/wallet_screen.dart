@@ -15,6 +15,7 @@ import '../widgets/buy_dialog.dart';
 import '../widgets/wallet_card.dart';
 import '../widgets/quick_actions_row.dart';
 import '../widgets/transaction_list.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class WalletScreen extends StatefulWidget {
   const WalletScreen({Key? key}) : super(key: key);
@@ -29,6 +30,8 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
   bool _isLoading = false;
   String? _error;
   late TabController _tabController;
+  final TextEditingController _recipientController = TextEditingController();
+  String? _sendError;
   
   @override
   void initState() {
@@ -52,6 +55,7 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
   @override
   void dispose() {
     _tabController.dispose();
+    _recipientController.dispose();
     super.dispose();
   }
   
@@ -1065,72 +1069,190 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
     );
   }
   
-  void _showReceiveDialog(BuildContext context, String publicKey) {
+  void _showReceiveDialog(BuildContext context, String publicKey) async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    String? akofaTag;
+    if (authProvider.user != null) {
+      final doc = await FirebaseFirestore.instance.collection('USER').doc(authProvider.user!.uid).get();
+      akofaTag = doc.data()?['akofaTag'];
+    }
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        return AlertDialog(
-          backgroundColor: AppTheme.black,
-          title: Text(
-            'Receive Funds',
-            style: AppTheme.headingSmall.copyWith(
-              color: AppTheme.primaryGold,
-            ),
-            textAlign: TextAlign.center,
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Share your public key to receive funds',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: AppTheme.grey),
+        final _tagController = TextEditingController();
+        bool _isSaving = false;
+        String? _tagError;
+        return StatefulBuilder(
+          builder: (context, setState) => AlertDialog(
+            backgroundColor: AppTheme.black,
+            title: Text(
+              'Receive Funds',
+              style: AppTheme.headingSmall.copyWith(
+                color: AppTheme.primaryGold,
               ),
-              const SizedBox(height: 24),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppTheme.darkGrey.withOpacity(0.3),
-                  borderRadius: BorderRadius.circular(8),
+              textAlign: TextAlign.center,
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Share your public key to receive funds',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: AppTheme.grey),
                 ),
-                child: Column(
-                  children: [
-                    Text(
-                      publicKey,
-                      style: AppTheme.bodySmall,
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 16),
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: publicKey));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Public key copied to clipboard'),
-                            backgroundColor: Colors.green,
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.copy),
-                      label: const Text('Copy Address'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primaryGold,
-                        foregroundColor: AppTheme.black,
+                const SizedBox(height: 24),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppTheme.darkGrey.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        publicKey,
+                        style: AppTheme.bodySmall,
+                        textAlign: TextAlign.center,
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 16),
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: publicKey));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Public key copied to clipboard'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.copy),
+                        label: const Text('Copy Address'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primaryGold,
+                          foregroundColor: AppTheme.black,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
+                const SizedBox(height: 24),
+                // Akofa Tag section
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppTheme.darkGrey.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: akofaTag != null && akofaTag.isNotEmpty
+                      ? Column(
+                          children: [
+                            Text(
+                              'Your Akofa Tag',
+                              style: AppTheme.bodyMedium.copyWith(color: AppTheme.primaryGold, fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text('₳$akofaTag', style: AppTheme.bodyLarge.copyWith(color: AppTheme.white, fontWeight: FontWeight.bold)),
+                                const SizedBox(width: 8),
+                                IconButton(
+                                  icon: const Icon(Icons.copy, color: AppTheme.primaryGold),
+                                  tooltip: 'Copy Akofa Tag',
+                                  onPressed: () {
+                                    Clipboard.setData(ClipboardData(text: '₳$akofaTag'));
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('Akofa Tag copied!'), backgroundColor: Colors.green),
+                                    );
+                                  },
+                                ),
+                              ],
+                            ),
+                          ],
+                        )
+                      : Column(
+                          children: [
+                            Text('Create your Akofa Tag', style: AppTheme.bodyMedium.copyWith(color: AppTheme.primaryGold, fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                const Text('₳', style: TextStyle(fontSize: 20, color: AppTheme.primaryGold, fontWeight: FontWeight.bold)),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: TextField(
+                                    controller: _tagController,
+                                    decoration: InputDecoration(
+                                      hintText: 'yourtag',
+                                      errorText: _tagError,
+                                      border: InputBorder.none,
+                                    ),
+                                    style: const TextStyle(color: AppTheme.white, fontSize: 18),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                onPressed: _isSaving
+                                    ? null
+                                    : () async {
+                                        String tag = _tagController.text.trim().toLowerCase();
+                                        if (tag.isEmpty) {
+                                          setState(() => _tagError = 'Required');
+                                          return;
+                                        }
+                                        if (tag.contains(' ')) {
+                                          setState(() => _tagError = 'No spaces allowed in Akofa Tag');
+                                          return;
+                                        }
+                                        setState(() {
+                                          _isSaving = true;
+                                          _tagError = null;
+                                        });
+                                        // Check uniqueness
+                                        final query = await FirebaseFirestore.instance.collection('USER').where('akofaTag', isEqualTo: tag).limit(1).get();
+                                        if (query.docs.isNotEmpty) {
+                                          setState(() {
+                                            _tagError = 'Tag is already taken';
+                                            _isSaving = false;
+                                          });
+                                          return;
+                                        }
+                                        // Save to Firestore
+                                        await FirebaseFirestore.instance.collection('USER').doc(authProvider.user!.uid).update({'akofaTag': tag});
+                                        setState(() {
+                                          _isSaving = false;
+                                        });
+                                        Navigator.of(context).pop();
+                                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Akofa Tag created!'), backgroundColor: Colors.green));
+                                      },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppTheme.primaryGold,
+                                  foregroundColor: AppTheme.black,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                ),
+                                child: _isSaving
+                                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                                    : const Text('Save Tag', style: TextStyle(fontWeight: FontWeight.bold)),
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+                child: const Text('Close'),
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: const Text('Close'),
-            ),
-          ],
         );
       },
     );
@@ -1506,5 +1628,53 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
         stellarProvider.refreshBalance();
       }
     });
+  }
+
+  Future<String?> resolveWalletAddress(String input) async {
+    if (input.startsWith('₳')) {
+      final tag = input.substring(1).trim().toLowerCase();
+      debugPrint('Resolving Akofa tag: $tag');
+      final query = await FirebaseFirestore.instance
+          .collection('USER')
+          .where('akofaTag', isEqualTo: tag)
+          .limit(1)
+          .get();
+      debugPrint('USER query result count: ${query.docs.length}');
+      if (query.docs.isNotEmpty) {
+        final userId = query.docs.first.id;
+        debugPrint('Found userId: $userId for tag: $tag');
+        final walletDoc = await FirebaseFirestore.instance.collection('wallets').doc(userId).get();
+        debugPrint('Wallet doc exists: ${walletDoc.exists}');
+        if (walletDoc.exists) {
+          final publicKey = walletDoc.data()?['publicKey'];
+          debugPrint('Wallet publicKey: $publicKey');
+          if (publicKey != null && publicKey is String && publicKey.isNotEmpty) {
+            return publicKey;
+          } else {
+            debugPrint('Recipient has no wallet public key.');
+            return null;
+          }
+        } else {
+          debugPrint('Recipient has not set up a wallet.');
+          return null;
+        }
+      } else {
+        debugPrint('Akofa Tag not found: $tag');
+        return null; // Tag not found
+      }
+    } else {
+      // Assume input is a wallet address
+      return input;
+    }
+  }
+
+  Future<void> _onSendPressed() async {
+    final resolvedAddress = await resolveWalletAddress(_recipientController.text.trim());
+    if (resolvedAddress == null) {
+      setState(() => _sendError = 'Recipient tag not found.');
+      return;
+    }
+    // Proceed with sending to resolvedAddress
+    // ... existing send logic ...
   }
 }

@@ -14,6 +14,8 @@ import '../models/user_model.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/services.dart';
 import 'dart:io';
+import 'order_history_screen.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({Key? key}) : super(key: key);
@@ -116,12 +118,18 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   String? _profileError;
   File? _newProfileImage;
   final AuthService _authService = AuthService();
+  final _akofaTagController = TextEditingController();
+  String? _akofaTagError;
+  bool _isCheckingTag = false;
+  bool _isSavingTag = false;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     _fetchUserProfile();
+    // Load current akofaTag
+    _akofaTagController.text = _userModel?.akofaTag ?? '';
   }
 
   Future<void> _fetchUserProfile() async {
@@ -192,6 +200,82 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     } finally {
       setState(() => _isProfileLoading = false);
     }
+  }
+
+  Future<bool> _isTagUnique(String tag) async {
+    final query = await FirebaseFirestore.instance
+        .collection('USER')
+        .where('akofaTag', isEqualTo: tag)
+        .limit(1)
+        .get();
+    if (query.docs.isEmpty) return true;
+    // If the only doc is the current user, allow
+    return query.docs.first.id == _userModel?.id;
+  }
+
+  Widget _buildAkofaTagField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Akofa Tag (unique username)', style: Theme.of(context).textTheme.labelMedium),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            const Text('₳', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            Expanded(
+              child: TextField(
+                controller: _akofaTagController,
+                decoration: InputDecoration(
+                  hintText: 'yourtag',
+                  errorText: _akofaTagError,
+                ),
+                onChanged: (value) async {
+                  setState(() { _isCheckingTag = true; _akofaTagError = null; });
+                  if (value.isEmpty) {
+                    setState(() { _akofaTagError = 'Required'; _isCheckingTag = false; });
+                    return;
+                  }
+                  final isUnique = await _isTagUnique(value);
+                  setState(() {
+                    _akofaTagError = isUnique ? null : 'Tag is already taken';
+                    _isCheckingTag = false;
+                  });
+                },
+              ),
+            ),
+            if (_isCheckingTag) const Padding(
+              padding: EdgeInsets.only(left: 8),
+              child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ElevatedButton(
+          onPressed: _isSavingTag ? null : () async {
+            String tag = _akofaTagController.text.trim().toLowerCase();
+            if (tag.isEmpty) {
+              setState(() { _akofaTagError = 'Required'; });
+              return;
+            }
+            if (tag.contains(' ')) {
+              setState(() { _akofaTagError = 'No spaces allowed in Akofa Tag'; });
+              return;
+            }
+            setState(() { _isSavingTag = true; });
+            final isUnique = await _isTagUnique(tag);
+            if (!isUnique) {
+              setState(() { _akofaTagError = 'Tag is already taken'; _isSavingTag = false; });
+              return;
+            }
+            // Save to Firestore
+            await FirebaseFirestore.instance.collection('USER').doc(_userModel?.id).update({'akofaTag': tag});
+            setState(() { _isSavingTag = false; });
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Akofa Tag updated!')));
+          },
+          child: _isSavingTag ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Save Tag'),
+        ),
+      ],
+    );
   }
 
   @override
@@ -935,6 +1019,19 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                   ),
                 );
               },
+            );
+          },
+        ),
+        // --- Order History navigation ---
+        _buildSettingItem(
+          icon: Icons.history,
+          title: 'Order History',
+          subtitle: 'View your past orders',
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => const OrderHistoryScreen(),
+              ),
             );
           },
         ),

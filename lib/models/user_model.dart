@@ -22,6 +22,7 @@ class UserModel {
   final List<String>? referrals;
   final int? referralCount;
   final bool? miningRateBoosted;
+  final String akofaTag;
 
   UserModel({
     required this.id,
@@ -45,6 +46,7 @@ class UserModel {
     this.referrals,
     this.referralCount,
     this.miningRateBoosted,
+    required this.akofaTag,
   });
 
   factory UserModel.fromMap(Map<String, dynamic> map) {
@@ -79,6 +81,7 @@ class UserModel {
       referrals: map['referrals'] != null ? List<String>.from(map['referrals']) : null,
       referralCount: map['referralCount'],
       miningRateBoosted: map['miningRateBoosted'],
+      akofaTag: map['akofaTag'] ?? '',
     );
   }
 
@@ -105,6 +108,7 @@ class UserModel {
       'referrals': referrals,
       'referralCount': referralCount,
       'miningRateBoosted': miningRateBoosted,
+      'akofaTag': akofaTag,
     };
   }
 
@@ -130,6 +134,7 @@ class UserModel {
     List<String>? referrals,
     int? referralCount,
     bool? miningRateBoosted,
+    String? akofaTag,
   }) {
     return UserModel(
       id: id ?? this.id,
@@ -153,6 +158,7 @@ class UserModel {
       referrals: referrals ?? this.referrals,
       referralCount: referralCount ?? this.referralCount,
       miningRateBoosted: miningRateBoosted ?? this.miningRateBoosted,
+      akofaTag: akofaTag ?? this.akofaTag,
     );
   }
 

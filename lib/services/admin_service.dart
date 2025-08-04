@@ -4,6 +4,7 @@ import '../models/notification.dart';
 import '../models/announcement.dart';
 import '../models/explore_content.dart';
 import '../models/user_model.dart';
+import '../models/vendor_application.dart';
 
 class AdminService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -305,5 +306,58 @@ class AdminService {
     await _firestore.collection('explore_content').doc(articleId).update({
       'bookmarks': FieldValue.arrayRemove([userId])
     });
+  }
+
+  /// Fetch vendor applications with optional filters.
+  /// [status]: 'pending', 'approved', 'rejected', or null for all
+  /// [type]: 'goods', 'service', or null for all
+  /// [searchQuery]: userId or businessName (partial match, case-insensitive)
+  static Future<List<VendorApplication>> fetchVendorApplications({String? status, String? type, String? searchQuery}) async {
+    Query query = FirebaseFirestore.instance.collection('vendor_applications');
+    if (status != null && status != 'all') {
+      query = query.where('status', isEqualTo: status);
+    }
+    if (type != null && type != 'all') {
+      query = query.where('type', isEqualTo: type);
+    }
+    final snapshot = await query.orderBy('submittedAt', descending: true).get();
+    var apps = snapshot.docs.map((doc) => VendorApplication.fromJson(doc.data() as Map<String, dynamic>, doc.id)).toList();
+    if (searchQuery != null && searchQuery.trim().isNotEmpty) {
+      final q = searchQuery.trim().toLowerCase();
+      apps = apps.where((app) {
+        final userMatch = app.uid.toLowerCase().contains(q);
+        final businessMatch = app.goodsVendorData?.businessName.toLowerCase().contains(q) ?? false;
+        return userMatch || businessMatch;
+      }).toList();
+    }
+    return apps;
+  }
+
+  static Future<bool> approveVendorApplication(String applicationId) async {
+    try {
+      await FirebaseFirestore.instance.collection('vendor_applications').doc(applicationId).update({
+        'status': 'approved',
+        'approvedAt': FieldValue.serverTimestamp(),
+        'rejectionReason': FieldValue.delete(),
+      });
+      return true;
+    } catch (e) {
+      print('Error approving application: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> rejectVendorApplication(String applicationId, String rejectionReason) async {
+    try {
+      await FirebaseFirestore.instance.collection('vendor_applications').doc(applicationId).update({
+        'status': 'rejected',
+        'rejectionReason': rejectionReason,
+        'approvedAt': FieldValue.delete(),
+      });
+      return true;
+    } catch (e) {
+      print('Error rejecting application: $e');
+      return false;
+    }
   }
 } 
