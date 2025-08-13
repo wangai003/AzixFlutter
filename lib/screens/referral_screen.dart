@@ -57,16 +57,11 @@ class _ReferralScreenState extends State<ReferralScreen> with TickerProviderStat
           tx.typeLabel == 'Mining Reward' && (tx.memo?.toLowerCase().contains('referral') ?? false)
         ).toList();
         
-        // Load real leaderboard data
-        _referralLeaderboard = await authProvider.authService.getReferralLeaderboard();
+        // Load real leaderboard data - TODO: Implement referral leaderboard
+        _referralLeaderboard = [];
         
-        // Add ranks to leaderboard data
-        for (int i = 0; i < _referralLeaderboard.length; i++) {
-          _referralLeaderboard[i]['rank'] = i + 1;
-        }
-        
-        // Load real recent referrals
-        _recentReferrals = await authProvider.authService.getRecentReferrals(user.uid);
+        // Load real recent referrals - TODO: Implement recent referrals
+        _recentReferrals = [];
       }
     } catch (e) {
       print('Error loading referral data: $e');

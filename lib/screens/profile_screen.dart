@@ -174,14 +174,17 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       final uid = authProvider.user?.uid;
       if (uid == null) throw Exception('User not logged in');
       String? photoUrl = _userModel?.photoUrl;
-      if (_newProfileImage != null) {
-        photoUrl = await _authService.uploadProfileImage(uid, _newProfileImage!);
-      }
-      await _authService.updateUserProfile(
+      // TODO: Implement profile image upload functionality
+      // For now, we'll use the existing photo URL
+      await _authService.updateUserFields(
         uid,
-        name: _nameController.text.trim(),
-        bio: _bioController.text.trim(),
-        photoUrl: photoUrl,
+        {
+          'displayName': _nameController.text.trim(),
+          'profile': {
+            'bio': _bioController.text.trim(),
+          },
+          'photoURL': photoUrl,
+        },
       );
       // Optionally update Firebase Auth displayName/photoURL
       if (authProvider.user != null) {
@@ -1007,7 +1010,28 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
         Builder(
           builder: (context) {
             final isAdmin = Provider.of<AdminProvider>(context, listen: false).isAdmin;
-            if (!isAdmin) return const SizedBox.shrink();
+            if (!isAdmin) {
+              return Column(
+                children: [
+                  _buildSettingItem(
+                    icon: Icons.refresh,
+                    title: 'Refresh Admin Status',
+                    subtitle: 'Click if you recently changed your role',
+                    onTap: () async {
+                      final adminProvider = Provider.of<AdminProvider>(context, listen: false);
+                      await adminProvider.refreshAdminStatus();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Admin status refreshed. Check again.'),
+                          backgroundColor: Colors.blue,
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                ],
+              );
+            }
             return _buildSettingItem(
               icon: Icons.admin_panel_settings,
               title: 'Admin Dashboard',

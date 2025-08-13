@@ -172,11 +172,11 @@ class AdminService {
   // User Management
   Future<List<UserModel>> getUsers({int limit = 50}) async {
     try {
-      final snapshot = await _firestore
-          .collection('users')
-          .orderBy('createdAt', descending: true)
-          .limit(limit)
-          .get();
+              final snapshot = await _firestore
+            .collection('USER')
+            .orderBy('createdAt', descending: true)
+            .limit(limit)
+            .get();
       
       return snapshot.docs.map((doc) {
         final data = doc.data();
@@ -189,7 +189,7 @@ class AdminService {
 
   Future<UserModel?> getUserById(String userId) async {
     try {
-      final doc = await _firestore.collection('users').doc(userId).get();
+      final doc = await _firestore.collection('USER').doc(userId).get();
       if (doc.exists) {
         final data = doc.data()!;
         return UserModel.fromMap({...data, 'id': doc.id});
@@ -202,7 +202,7 @@ class AdminService {
 
   Future<void> updateUserRole(String userId, String newRole) async {
     try {
-      await _firestore.collection('users').doc(userId).update({'role': newRole});
+      await _firestore.collection('USER').doc(userId).update({'role': newRole});
     } catch (e) {
       throw Exception('Failed to update user role: $e');
     }
@@ -210,7 +210,7 @@ class AdminService {
 
   Future<void> deactivateUser(String userId) async {
     try {
-      await _firestore.collection('users').doc(userId).update({'isActive': false});
+      await _firestore.collection('USER').doc(userId).update({'isActive': false});
     } catch (e) {
       throw Exception('Failed to deactivate user: $e');
     }
@@ -218,7 +218,7 @@ class AdminService {
 
   Future<void> activateUser(String userId) async {
     try {
-      await _firestore.collection('users').doc(userId).update({'isActive': true});
+      await _firestore.collection('USER').doc(userId).update({'isActive': true});
     } catch (e) {
       throw Exception('Failed to activate user: $e');
     }
@@ -227,7 +227,7 @@ class AdminService {
   // Analytics
   Future<Map<String, dynamic>> getAnalytics() async {
     try {
-      final usersSnapshot = await _firestore.collection('users').get();
+              final usersSnapshot = await _firestore.collection('USER').get();
       final notificationsSnapshot = await _firestore.collection('notifications').get();
       final announcementsSnapshot = await _firestore.collection('announcements').get();
       final contentSnapshot = await _firestore.collection('explore_content').get();
@@ -253,19 +253,24 @@ class AdminService {
   }
 
   // Check if current user is admin
-  bool isCurrentUserAdmin() {
+  Future<bool> isCurrentUserAdmin() async {
     final user = _auth.currentUser;
     if (user == null) return false;
     
-    // For now, we'll check if the user email is in a predefined admin list
-    // In production, you should store admin roles in Firestore
-    final adminEmails = [
-      'admin@azix.com',
-      'superadmin@azix.com',
-      // Add more admin emails as needed
-    ];
-    
-    return adminEmails.contains(user.email);
+    try {
+      final doc = await _firestore.collection('USER').doc(user.uid).get();
+      if (doc.exists) {
+        final userData = doc.data() as Map<String, dynamic>?;
+        final role = userData?['role'] as String?;
+        
+        // Check if user has admin privileges
+        return role == 'admin' || role == 'super_admin' || role == 'vendor';
+      }
+      return false;
+    } catch (e) {
+      print('Error checking admin status: $e');
+      return false;
+    }
   }
 
   // Get current user role
@@ -274,7 +279,7 @@ class AdminService {
     if (user == null) return 'user';
     
     try {
-      final doc = await _firestore.collection('users').doc(user.uid).get();
+      final doc = await _firestore.collection('USER').doc(user.uid).get();
       if (doc.exists) {
         return doc.data()?['role'] ?? 'user';
       }

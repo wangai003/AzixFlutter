@@ -1,389 +1,343 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import '../services/auth_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../services/auth_service.dart' as local_auth;
+
+enum AuthState { initial, loading, authenticated, unauthenticated, error }
 
 class AuthProvider extends ChangeNotifier {
-  final AuthService _authService = AuthService();
+  final local_auth.AuthService _authService = local_auth.AuthService();
+  
+  AuthState _authState = AuthState.initial;
   User? _user;
-  bool _isLoading = false;
   String? _error;
+  bool _isLoading = false;
 
-  // Store if the user is new after Google sign-in
-  bool _isNewUser = false;
-  bool get isNewUser => _isNewUser;
-
-  // Store the user UID for referral code submission
-  String? _pendingUserUid;
-
-  // Getters
+  AuthState get authState => _authState;
   User? get user => _user;
+  String? get error => _error;
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _user != null;
-  String? get error => _error;
-  AuthService get authService => _authService;
+  local_auth.AuthService get authService => _authService;
 
-  // Constructor
   AuthProvider() {
-    // Delay initialization to ensure Firebase is ready
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _init();
+    _init();
+  }
+
+  void _init() {
+    _authService.authStateChanges.listen((User? user) {
+      _user = user;
+      if (user != null) {
+        _authState = AuthState.authenticated;
+        _error = null;
+      } else {
+        _authState = AuthState.unauthenticated;
+      }
+      notifyListeners();
     });
   }
 
-  // Initialize the provider
-  void _init() {
-    try {
-      _user = _authService.currentUser;
-      _authService.authStateChanges.listen((User? user) {
-        _user = user;
-        notifyListeners();
-      });
-    } catch (e) {
-      print('DEBUG: Error initializing AuthProvider: $e');
-      // Don't crash the app, just log the error
-    }
-  }
-
-  // Set loading state
-  void _setLoading(bool value) {
-    _isLoading = value;
+  void _setLoading(bool loading) {
+    _isLoading = loading;
     notifyListeners();
   }
 
-  // Set error
-  void _setError(String? value) {
-    _error = value;
+  void _setError(String? error) {
+    _error = error;
     notifyListeners();
   }
 
-  // Clear error
   void clearError() {
     _error = null;
     notifyListeners();
   }
 
   // Sign in with email and password
-  Future<bool> signIn(String email, String password) async {
+  Future<bool> signInWithEmailAndPassword(String email, String password) async {
     _setLoading(true);
     _setError(null);
     
     try {
-      await _authService.signInWithEmailAndPassword(email, password);
-      final user = _authService.currentUser;
-      if (user != null && !user.emailVerified) {
-        await user.sendEmailVerification();
-        _setLoading(false);
-        _setError('Please verify your email address. A verification link has been sent.');
-        return false;
-      }
-      _setLoading(false);
-      return true;
-    } on FirebaseAuthException catch (e) {
-      _setLoading(false);
+      final userCredential = await _authService.signInWithEmailAndPassword(email, password);
+      final user = userCredential.user;
       
+      if (user != null) {
+        // Check if user document exists
+        final userDoc = await _authService.getUserDocument(user.uid);
+        
+        if (userDoc == null) {
+          // Create complete user document
+          await _authService.createCompleteUserDocument(
+            user.uid,
+            email: email,
+            displayName: user.displayName,
+            phoneNumber: null, // Will be completed in registration screen
+            role: 'user',
+          );
+        }
+        
+        return true;
+      }
+      return false;
+    } on FirebaseAuthException catch (e) {
+      String message;
       switch (e.code) {
         case 'user-not-found':
-          _setError('No user found with this email.');
+          message = 'No user found with this email address.';
           break;
         case 'wrong-password':
-          _setError('Wrong password provided.');
+          message = 'Wrong password provided.';
           break;
         case 'invalid-email':
-          _setError('The email address is not valid.');
+          message = 'The email address is not valid.';
           break;
         case 'user-disabled':
-          _setError('This user has been disabled.');
+          message = 'This user account has been disabled.';
           break;
         default:
-          _setError('An error occurred: ${e.message}');
+          message = 'An error occurred: ${e.message}';
       }
-      
+      _setError(message);
       return false;
     } catch (e) {
-      _setLoading(false);
       _setError('An unexpected error occurred.');
       return false;
-    }
-  }
-
-  // Register with email and password
-  Future<bool> register(String email, String password, String name, {String? referralCode}) async {
-    _setLoading(true);
-    _setError(null);
-    
-    try {
-      await _authService.registerWithEmailAndPassword(email, password, name, '', referralCode: referralCode);
-      final user = _authService.currentUser;
-      if (user != null && !user.emailVerified) {
-        await user.sendEmailVerification();
-        _setLoading(false);
-        _setError('Please verify your email address. A verification link has been sent.');
-        return false;
-      }
-      _setLoading(false);
-      return true;
-    } on FirebaseAuthException catch (e) {
-      _setLoading(false);
-      
-      switch (e.code) {
-        case 'email-already-in-use':
-          _setError('The email address is already in use.');
-          break;
-        case 'invalid-email':
-          _setError('The email address is not valid.');
-          break;
-        case 'weak-password':
-          _setError('The password is too weak.');
-          break;
-        case 'operation-not-allowed':
-          _setError('Email/password accounts are not enabled.');
-          break;
-        default:
-          _setError('An error occurred: ${e.message}');
-      }
-      
-      return false;
-    } catch (e) {
-      _setLoading(false);
-      _setError('An unexpected error occurred.');
-      return false;
-    }
-  }
-
-  // Check Firestore verification status
-  Future<Map<String, bool>> getFirestoreVerificationStatus(String uid) async {
-    try {
-      final doc = await _authService.getUserDetails(uid);
-      return {
-        'isEmailVerified': doc?['isEmailVerified'] == true,
-        'isPhoneVerified': doc?['isPhoneVerified'] == true,
-      };
-    } catch (e) {
-      return {'isEmailVerified': false, 'isPhoneVerified': false};
-    }
-  }
-
-  // Update Firestore verification status
-  Future<void> setFirestoreVerificationStatus(String uid, {bool? email, bool? phone}) async {
-    final data = <String, dynamic>{};
-    if (email != null) data['isEmailVerified'] = email;
-    if (phone != null) data['isPhoneVerified'] = phone;
-    await _authService.updateUserFields(uid, data);
-  }
-
-  // Sign out
-  Future<void> signOut() async {
-    _setLoading(true);
-    try {
-      final user = _authService.currentUser;
-      if (user != null) {
-        print('DEBUG: Signing out user ${user.uid}, resetting verification status');
-        await setFirestoreVerificationStatus(user.uid, email: false, phone: false);
-        print('DEBUG: Verification status reset to false for user ${user.uid}');
-      }
-      await _authService.signOut();
-      print('DEBUG: User signed out successfully');
-    } catch (e) {
-      print('DEBUG: Error during sign out: $e');
-      _setError('Failed to sign out.');
     } finally {
       _setLoading(false);
     }
   }
 
-  // Reset verification status when session ends (for session expiration, app closure, etc.)
-  Future<void> resetVerificationStatusOnSessionEnd() async {
-    try {
-      final user = _authService.currentUser;
-      if (user != null) {
-        print('DEBUG: Session ended for user ${user.uid}, resetting verification status');
-        await setFirestoreVerificationStatus(user.uid, email: false, phone: false);
-        print('DEBUG: Verification status reset due to session end for user ${user.uid}');
-      }
-    } catch (e) {
-      print('DEBUG: Error resetting verification status on session end: $e');
-    }
-  }
-
-  // Handle token refresh and session expiration
-  Future<void> handleTokenRefresh() async {
-    try {
-      final user = _authService.currentUser;
-      if (user != null) {
-        print('DEBUG: Token refreshed for user ${user.uid}, checking if verification status should be reset');
-        // Check if the user has been inactive for too long (optional enhancement)
-        // For now, we'll reset verification status on token refresh to ensure security
-        await setFirestoreVerificationStatus(user.uid, email: false, phone: false);
-        print('DEBUG: Verification status reset due to token refresh for user ${user.uid}');
-      }
-    } catch (e) {
-      print('DEBUG: Error handling token refresh: $e');
-    }
-  }
-
-  // Reset password
-  Future<bool> resetPassword(String email) async {
+  // Sign up with email and password
+  Future<bool> signUpWithEmailAndPassword(String email, String password, String name) async {
     _setLoading(true);
     _setError(null);
     
     try {
-      await _authService.resetPassword(email);
-      _setLoading(false);
-      return true;
-    } on FirebaseAuthException catch (e) {
-      _setLoading(false);
+      final userCredential = await _authService.createUserWithEmailAndPassword(email, password);
+      final user = userCredential.user;
       
+      if (user != null) {
+        // Update display name
+        await user.updateDisplayName(name);
+        
+        // Send email verification
+        await _authService.sendEmailVerification();
+        
+        // Create complete user document in Firestore
+        await _authService.createCompleteUserDocument(
+          user.uid,
+          email: email,
+          displayName: name,
+          phoneNumber: null, // Will be completed in registration screen
+          role: 'user',
+        );
+        
+        return true;
+      }
+      return false;
+    } on FirebaseAuthException catch (e) {
+      String message;
       switch (e.code) {
-        case 'invalid-email':
-          _setError('The email address is not valid.');
+        case 'email-already-in-use':
+          message = 'The email address is already in use.';
           break;
-        case 'user-not-found':
-          _setError('No user found with this email.');
+        case 'invalid-email':
+          message = 'The email address is not valid.';
+          break;
+        case 'weak-password':
+          message = 'The password is too weak.';
           break;
         default:
-          _setError('An error occurred: ${e.message}');
+          message = 'An error occurred: ${e.message}';
       }
-      
+      _setError(message);
       return false;
     } catch (e) {
-      _setLoading(false);
       _setError('An unexpected error occurred.');
       return false;
+    } finally {
+      _setLoading(false);
     }
   }
-  
-  // Sign in with Google and check if new user
+
+  // Sign in with Google
   Future<bool> signInWithGoogle() async {
     _setLoading(true);
     _setError(null);
-    try {
-      final result = await _authService.signInWithGoogle();
-      final user = _authService.currentUser;
-      
-      if (user != null) {
-        // For Google sign-in users, always set isEmailVerified to false in Firestore
-        // This ensures they must go through our app's verification process
-        await setFirestoreVerificationStatus(user.uid, email: false, phone: false);
-        
-        // Check if user doc was just created (i.e., new user)
-        final userDoc = await _authService.getUserDetails(user.uid);
-        // If userDoc has only minimal fields, treat as new user
-        if (userDoc != null && userDoc['referralCode'] == null) {
-          _isNewUser = true;
-          _pendingUserUid = user.uid;
-        } else {
-          _isNewUser = false;
-          _pendingUserUid = null;
-        }
-      }
-      
-      _setLoading(false);
-      return true;
-    } on FirebaseAuthException catch (e) {
-      _setLoading(false);
-      _setError('Authentication failed: ${e.message}');
-      return false;
-    } catch (e) {
-      _setLoading(false);
-      _setError('An unexpected error occurred during Google Sign-In.');
-      print('Google Sign-In error: $e');
-      return false;
-    }
-  }
-
-  // Submit referral code for new user after Google sign-in
-  Future<bool> submitReferralCode(String? referralCode) async {
-    if (_pendingUserUid == null) return false;
-    _setLoading(true);
-    try {
-      await _authService.completeGoogleUserRegistration(_pendingUserUid!, '', referralCode: referralCode);
-      _isNewUser = false;
-      _pendingUserUid = null;
-      _setLoading(false);
-      return true;
-    } catch (e) {
-      _setLoading(false);
-      _setError('Failed to apply referral code.');
-      return false;
-    }
-  }
-
-  // Register with email and password (enhanced version with phone)
-  Future<bool> registerWithEmailAndPassword(String email, String password, String name, String phoneNumber, {String? referralCode}) async {
-    _setLoading(true);
-    _setError(null);
     
     try {
-      await _authService.registerWithEmailAndPassword(email, password, name, phoneNumber, referralCode: referralCode);
-      _setLoading(false);
-      return true;
-    } on FirebaseAuthException catch (e) {
-      _setLoading(false);
+      final userCredential = await _authService.signInWithGoogle();
+      final user = userCredential.user;
       
-      switch (e.code) {
-        case 'email-already-in-use':
-          _setError('The email address is already in use.');
-          break;
-        case 'invalid-email':
-          _setError('The email address is not valid.');
-          break;
-        case 'weak-password':
-          _setError('The password is too weak.');
-          break;
-        case 'operation-not-allowed':
-          _setError('Email/password accounts are not enabled.');
-          break;
-        default:
-          _setError('An error occurred: ${e.message}');
+      if (user != null) {
+        // Check if user document exists
+        final userDoc = await _authService.getUserDocument(user.uid);
+        
+        if (userDoc == null) {
+          // Create complete user document for new Google user
+          await _authService.createCompleteUserDocument(
+            user.uid,
+            email: user.email ?? '',
+            displayName: user.displayName ?? '',
+            photoURL: user.photoURL,
+            phoneNumber: null, // Will be completed in registration screen
+            role: 'user',
+          );
+        } else {
+          // Update last login for existing user
+          await _authService.updateUserFields(user.uid, {
+            'lastLoginAt': FieldValue.serverTimestamp(),
+          });
+        }
+        
+        return true;
       }
-      
       return false;
     } catch (e) {
-      _setLoading(false);
-      _setError('An unexpected error occurred: $e');
+      _setError('Google sign-in failed: ${e.toString()}');
       return false;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  // Handle redirect result for web
+  Future<bool> handleRedirectResult() async {
+    try {
+      final userCredential = await _authService.handleRedirectResult();
+      if (userCredential != null) {
+        final user = userCredential.user;
+        if (user != null) {
+          // Check if user document exists
+          final userDoc = await _authService.getUserDocument(user.uid);
+          
+          if (userDoc == null) {
+            // Create complete user document for new Google user
+            await _authService.createCompleteUserDocument(
+              user.uid,
+              email: user.email ?? '',
+              displayName: user.displayName ?? '',
+              photoURL: user.photoURL,
+              phoneNumber: null, // Will be completed in registration screen
+              role: 'user',
+            );
+          } else {
+            // Update last login for existing user
+            await _authService.updateUserFields(user.uid, {
+              'lastLoginAt': FieldValue.serverTimestamp(),
+            });
+          }
+          
+          return true;
+        }
+      }
+      return false;
+    } catch (e) {
+      _setError('Failed to handle redirect result: ${e.toString()}');
+      return false;
+    }
+  }
+
+  // Sign out
+  Future<void> signOut() async {
+    try {
+      await _authService.signOut();
+    } catch (e) {
+      _setError('Failed to sign out: ${e.toString()}');
+    }
+  }
+
+  // Send password reset email
+  Future<bool> sendPasswordResetEmail(String email) async {
+    try {
+      await _authService.sendPasswordResetEmail(email);
+      return true;
+    } catch (e) {
+      _setError('Failed to send password reset email: ${e.toString()}');
+      return false;
+    }
+  }
+
+  // Send email verification
+  Future<bool> sendEmailVerification() async {
+    try {
+      await _authService.sendEmailVerification();
+      return true;
+    } catch (e) {
+      _setError('Failed to send verification email: ${e.toString()}');
+      return false;
+    }
+  }
+
+  // Check if user needs email verification
+  Future<bool> needsEmailVerification() async {
+    if (_user == null) return false;
+    
+    try {
+      return await _authService.needsEmailVerification(_user!.uid);
+    } catch (e) {
+      print('Error checking email verification: $e');
+      return false;
+    }
+  }
+
+  // Check if user needs profile completion
+  Future<bool> needsProfileCompletion() async {
+    if (_user == null) return false;
+    
+    try {
+      return await _authService.needsRegistration(_user!.uid);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Mark profile as complete
+  Future<void> markProfileComplete() async {
+    if (_user == null) return;
+    
+    try {
+      await _authService.updateUserFields(_user!.uid, {
+        'needsProfileCompletion': false,
+      });
+    } catch (e) {
+      _setError('Failed to update profile: ${e.toString()}');
     }
   }
 
   // Complete Google user registration
-  Future<bool> completeGoogleUserRegistration(String uid, String phoneNumber, {String? referralCode}) async {
-    _setLoading(true);
-    _setError(null);
+  Future<bool> completeGoogleUserRegistration(String phoneNumber, {String? referralCode}) async {
+    if (_user == null) return false;
     
     try {
-      await _authService.completeGoogleUserRegistration(uid, phoneNumber, referralCode: referralCode);
-      _setLoading(false);
+      await _authService.completeGoogleUserRegistration(_user!.uid, phoneNumber, referralCode: referralCode);
       return true;
     } catch (e) {
-      _setLoading(false);
-      _setError('Failed to complete registration: $e');
+      _setError('Failed to complete registration: ${e.toString()}');
       return false;
     }
   }
 
-  // Check if user needs registration
-  Future<bool> needsRegistration(String uid) async {
+  // Check if user is admin
+  Future<bool> isUserAdmin() async {
+    if (_user == null) return false;
+    
     try {
-      return await _authService.needsRegistration(uid);
-    } catch (e) {
-      return true;
-    }
-  }
-
-  // Check if user exists in USER collection
-  Future<bool> userExistsInCollection(String uid) async {
-    try {
-      return await _authService.userExistsInCollection(uid);
+      return await _authService.isUserAdmin(_user!.uid);
     } catch (e) {
       return false;
     }
   }
 
-  // Check if user has completed registration
-  Future<bool> hasCompletedRegistration(String uid) async {
+  // Update user role (admin only)
+  Future<bool> updateUserRole(String newRole) async {
+    if (_user == null) return false;
+    
     try {
-      return await _authService.hasCompletedRegistration(uid);
+      await _authService.updateUserRole(_user!.uid, newRole);
+      return true;
     } catch (e) {
+      _setError('Failed to update user role: ${e.toString()}');
       return false;
     }
   }

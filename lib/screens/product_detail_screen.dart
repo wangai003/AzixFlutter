@@ -12,7 +12,7 @@ class ProductDetailScreen extends StatelessWidget {
   const ProductDetailScreen({Key? key, required this.product}) : super(key: key);
 
   Future<Map<String, dynamic>?> _fetchVendor() async {
-    final doc = await FirebaseFirestore.instance.collection('users').doc(product.vendorId).get();
+          final doc = await FirebaseFirestore.instance.collection('USER').doc(product.vendorId).get();
     return doc.data();
   }
 

@@ -45,39 +45,9 @@ class _MainNavigationState extends State<MainNavigation> {
     super.dispose();
   }
 
-  // Check if user has a wallet and show prompt if not
-  Future<bool> _checkWalletAndPrompt() async {
-    final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
-    
-    // If user already has a usable wallet, return true to allow navigation
-    if (await stellarProvider.isWalletUsable()) {
-      return true;
-    }
-    
-    // User doesn't have a usable wallet, show the recovery dialog
-    final result = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false, // User must take an action
-      builder: (context) => Dialog(
-        backgroundColor: Colors.transparent,
-        child: _WalletRecoveryDialog(stellarProvider: stellarProvider),
-      ),
-    );
-    // If result is true, it means the wallet was recovered or reset successfully
-    // If null or false, the user dismissed the dialog or failed to recover
-    return result == true;
-  }
+
 
   void _onTabTapped(int index, List<Widget> screens, int vendorIndex, bool isVendor) async {
-    // If navigating to the wallet tab, check wallet existence first
-    // Wallet index is dynamic if vendor is present
-    int walletIndex = isVendor ? (vendorIndex < 3 ? 3 : 4) : 3;
-    if (index == walletIndex) {
-      final allowed = await _checkWalletAndPrompt();
-      if (!allowed) {
-        return;
-      }
-    }
     setState(() {
       _currentIndex = index;
     });
@@ -376,49 +346,49 @@ class _MainNavigationState extends State<MainNavigation> {
           ),
         );
       },
-      child: Stack(
-        clipBehavior: Clip.none,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Column(
-            mainAxisSize: MainAxisSize.min,
+          Stack(
+            clipBehavior: Clip.none,
             children: [
               Icon(
                 Icons.notifications,
                 color: AppTheme.grey,
                 size: 24,
               ),
-              const SizedBox(height: 4),
-              Text(
-                'Alerts',
-                style: AppTheme.bodySmall.copyWith(
-                  color: AppTheme.grey,
-                  fontWeight: FontWeight.normal,
+              if (unreadCount > 0)
+                Positioned(
+                  right: -2,
+                  top: -2,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                    constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                    child: Text(
+                      '$unreadCount',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
                 ),
-              ),
             ],
           ),
-          if (unreadCount > 0)
-            Positioned(
-              right: -2,
-              top: -2,
-              child: Container(
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: Colors.red,
-                  shape: BoxShape.circle,
-                ),
-                constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
-                child: Text(
-                  '$unreadCount',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
+          const SizedBox(height: 4),
+          Text(
+            'Alerts',
+            style: AppTheme.bodySmall.copyWith(
+              color: AppTheme.grey,
+              fontWeight: FontWeight.normal,
             ),
+          ),
         ],
       ),
     );
@@ -462,13 +432,6 @@ class _MainNavigationState extends State<MainNavigation> {
     
     return InkWell(
       onTap: () async {
-        // If this is the wallet tab, check if user has a wallet first
-        if (index == 3) {
-          final canAccessWallet = await _checkWalletAndPrompt();
-          if (!canAccessWallet) {
-            return; // Don't navigate if user doesn't have a wallet
-          }
-        }
         _onTabTapped(index, [], -1, false); // Pass empty list for screens and -1 for vendorIndex
       },
       child: Container(
@@ -514,13 +477,6 @@ class _MainNavigationState extends State<MainNavigation> {
     
     return InkWell(
       onTap: () async {
-        // If this is the wallet tab, check if user has a wallet first
-        if (index == 3) {
-          final canAccessWallet = await _checkWalletAndPrompt();
-          if (!canAccessWallet) {
-            return; // Don't navigate if user doesn't have a wallet
-          }
-        }
         _onTabTapped(index, [], -1, false); // Pass empty list for screens and -1 for vendorIndex
       },
       child: Container(
@@ -625,81 +581,12 @@ class _MainNavigationState extends State<MainNavigation> {
       selected: isActive,
       selectedTileColor: AppTheme.darkGrey.withOpacity(0.3),
       onTap: () async {
-        // If this is the wallet tab, check if user has a wallet first
-        if (index == 3) {
           // Close the drawer first to avoid UI issues
           Navigator.pop(context);
-          
-          final canAccessWallet = await _checkWalletAndPrompt();
-          if (!canAccessWallet) {
-            return; // Don't navigate if user doesn't have a wallet
-          }
-          
-          // Now navigate to the wallet screen
+        // Navigate to the selected screen
           _onTabTapped(index, [], -1, false);
-        } else {
-          // For other screens, just navigate normally
-          _onTabTapped(index, [], -1, false);
-          Navigator.pop(context); // Close the drawer after selection
-        }
       },
     );
   }
 }
 
-// Add the recovery dialog widget at the end of the file
-class _WalletRecoveryDialog extends StatelessWidget {
-  final StellarProvider stellarProvider;
-  const _WalletRecoveryDialog({required this.stellarProvider});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.black,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.redAccent, width: 2),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Wallet Issue Detected', style: TextStyle(color: Colors.redAccent, fontSize: 20, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          Text('Your wallet data appears to be corrupted or incomplete. You can try to reset your wallet or import an existing one.', style: TextStyle(color: Colors.white)),
-          const SizedBox(height: 24),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              TextButton(
-                onPressed: () async {
-                  // Reset wallet: delete and allow user to create a new one
-                  await stellarProvider.deleteWallet();
-                  await stellarProvider.checkWalletStatus();
-                  Navigator.of(context).pop(false);
-                },
-                child: Text('Reset Wallet', style: TextStyle(color: Colors.redAccent)),
-              ),
-              const SizedBox(width: 8),
-              TextButton(
-                onPressed: () {
-                  // TODO: Implement import wallet flow
-                  Navigator.of(context).pop(false);
-                },
-                child: Text('Import Wallet', style: TextStyle(color: Colors.amber)),
-              ),
-              const SizedBox(width: 8),
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop(false);
-                },
-                child: Text('Cancel', style: TextStyle(color: Colors.white)),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}

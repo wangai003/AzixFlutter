@@ -11,7 +11,7 @@ class ServiceDetailScreen extends StatelessWidget {
   const ServiceDetailScreen({Key? key, required this.service}) : super(key: key);
 
   Future<Map<String, dynamic>?> _fetchVendor() async {
-    final doc = await FirebaseFirestore.instance.collection('users').doc(service.vendorId).get();
+          final doc = await FirebaseFirestore.instance.collection('USER').doc(service.vendorId).get();
     return doc.data();
   }
 

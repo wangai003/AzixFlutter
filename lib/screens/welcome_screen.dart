@@ -1,17 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:lottie/lottie.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/auth_provider.dart';
 import '../theme/app_theme.dart';
-import '../widgets/animated_logo.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/google_sign_in_button.dart';
 import 'auth/login_screen.dart';
 import 'auth/register_screen.dart';
-import 'wallet_onboarding_screen.dart';
 
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({Key? key}) : super(key: key);
@@ -110,10 +107,10 @@ class WelcomeScreen extends StatelessWidget {
                   onPressed: () async {
                     final success = await authProvider.signInWithGoogle();
                     if (success && context.mounted) {
-                      Navigator.pushReplacement(
-                        context,
-                        MaterialPageRoute(builder: (context) => const WalletOnboardingScreen()),
-                      );
+                      // After successful Google sign-in, let the Wrapper handle the flow
+                      // Don't manually navigate here - let the authentication state change
+                      // trigger the proper flow in the Wrapper
+                      print('DEBUG: Google sign-in successful, letting Wrapper handle flow');
                     }
                   },
                   isLoading: authProvider.isLoading,

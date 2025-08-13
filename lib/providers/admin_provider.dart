@@ -21,6 +21,14 @@ class AdminProvider extends ChangeNotifier {
   List<UserModel> _users = [];
   Map<String, dynamic> _analytics = {};
   
+  // Constructor - automatically initialize admin status
+  AdminProvider() {
+    // Initialize admin status when provider is created
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      initializeAdminStatus();
+    });
+  }
+
   // Getters
   bool get isLoading => _isLoading;
   String? get error => _error;
@@ -37,7 +45,7 @@ class AdminProvider extends ChangeNotifier {
   Future<void> initializeAdminStatus() async {
     _setLoading(true);
     try {
-      _isAdmin = _adminService.isCurrentUserAdmin();
+      _isAdmin = await _adminService.isCurrentUserAdmin();
       _userRole = await _adminService.getCurrentUserRole();
       _setLoading(false);
       notifyListeners();
@@ -45,6 +53,11 @@ class AdminProvider extends ChangeNotifier {
       _setError('Failed to initialize admin status: $e');
       _setLoading(false);
     }
+  }
+
+  // Force refresh admin status (useful for testing role changes)
+  Future<void> refreshAdminStatus() async {
+    await initializeAdminStatus();
   }
 
   // Notifications

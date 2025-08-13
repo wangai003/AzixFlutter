@@ -25,6 +25,7 @@ import 'screens/vendor/service_management_screen.dart';
 import 'screens/marketplace_home_screen.dart';
 import 'screens/onboarding/goods_vendor_onboarding_screen.dart';
 import 'screens/onboarding/service_vendor_onboarding_screen.dart';
+import 'screens/user_registration_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -103,6 +104,7 @@ class MyApp extends StatelessWidget {
               '/vendor/services': (context) => const ServiceManagementScreen(),
               '/onboarding/goods': (context) => const GoodsVendorOnboardingScreen(),
               '/onboarding/service': (context) => const ServiceVendorOnboardingScreen(),
+              '/user-registration': (context) => const UserRegistrationScreen(),
             },
           );
         },
@@ -117,7 +119,7 @@ class HomeScreen extends StatelessWidget {
   Future<String?> _getUserRole() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return null;
-    final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+    final doc = await FirebaseFirestore.instance.collection('USER').doc(user.uid).get();
     return doc.data()?['role'] as String?;
   }
 

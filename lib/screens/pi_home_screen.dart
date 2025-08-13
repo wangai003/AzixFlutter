@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
@@ -14,13 +12,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../providers/auth_provider.dart' as local_auth;
 import '../theme/app_theme.dart';
 import '../utils/responsive_layout.dart';
-import '../widgets/animated_logo.dart';
-import '../widgets/app_logo.dart';
-import '../widgets/custom_button.dart';
 import '../models/mining_session.dart';
 import '../providers/stellar_provider.dart';
-import '../models/user_model.dart';
-import '../widgets/transaction_list.dart';
 
 class PiHomeScreen extends StatefulWidget {
   const PiHomeScreen({Key? key}) : super(key: key);
@@ -29,42 +22,10 @@ class PiHomeScreen extends StatefulWidget {
   State<PiHomeScreen> createState() => _PiHomeScreenState();
 }
 
-class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderStateMixin {
-  Timer? _miningTimer;
+class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late AnimationController _pulseController;
-  MiningSession? _session;
   bool _loadingSession = true;
-  final List<Transaction> _recentTransactions = [
-    Transaction(
-      id: '1',
-      title: 'Received from John',
-      amount: 5.0,
-      date: DateTime.now().subtract(const Duration(days: 1)),
-      isIncoming: true,
-    ),
-    Transaction(
-      id: '2',
-      title: 'Sent to Market',
-      amount: 2.5,
-      date: DateTime.now().subtract(const Duration(days: 3)),
-      isIncoming: false,
-    ),
-    Transaction(
-      id: '3',
-      title: 'Received from Mining',
-      amount: 1.2,
-      date: DateTime.now().subtract(const Duration(days: 5)),
-      isIncoming: true,
-    ),
-  ];
   
-  final List<String> _announcements = [
-    'Welcome to the new AZIX Network interface!',
-    'Mining rate has been updated to 0.25 ₳/hour',
-    'New marketplace features coming soon',
-    'Invite friends to earn bonus ₳',
-  ];
-
   final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
 
   List<MiningSessionHistory> _miningHistory = [];
@@ -76,10 +37,15 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
   int _totalMiningDays = 0;
   double _totalMined = 0.0;
   List<String> _achievements = [];
+  
+  // Real-time update timer
+  Timer? _uiUpdateTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    
     _pulseController = AnimationController(
       duration: const Duration(seconds: 2),
       vsync: this,
@@ -90,13 +56,66 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
     _restoreMiningSession();
     _fetchMiningHistory();
     _loadMiningStats();
+    
+    // Start real-time UI updates
+    _startUIUpdates();
   }
 
   @override
   void dispose() {
-    _miningTimer?.cancel();
     _pulseController.dispose();
+    _uiUpdateTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  void _startUIUpdates() {
+    // Update UI every second for real-time mining updates
+    _uiUpdateTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) {
+        setState(() {
+          // This will trigger a rebuild and show updated mining data
+        });
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  // Ensure mining timer is running when screen is focused
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _ensureMiningTimerIsRunning();
+  }
+
+  void _ensureMiningTimerIsRunning() {
+    final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
+    final session = stellarProvider.currentMiningSession;
+    
+    // Don't automatically start mining timer - user must manually start mining
+    // if (session != null && session.isActive && !session.isPaused) {
+    //   stellarProvider.startMiningTimer();
+    // }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    if (state == AppLifecycleState.resumed) {
+      // App came back to foreground, restore mining state
+      _restoreMiningSession();
+      _ensureMiningTimerIsRunning();
+    } else if (state == AppLifecycleState.paused) {
+      // App going to background, save current mining state
+      final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
+      final session = stellarProvider.currentMiningSession;
+      if (session != null) {
+        // Save the current state before app goes to background
+        stellarProvider.saveMiningSession(session);
+      }
+    }
   }
 
   Future<void> _initNotifications() async {
@@ -146,95 +165,30 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
   }
 
   Future<void> _updateMiningNotifications() async {
-    if (_session == null) return;
-    await _cancelMiningEndNotification();
-    await _cancelMiningReminder();
-    if (_session!.isActive && !_session!.isPaused) {
-      await _scheduleMiningEndNotification(_session!.sessionEnd);
-    } else if (_session!.isExpired) {
-      await _scheduleMiningReminder(DateTime.now().add(const Duration(seconds: 2)));
-    }
+    // This method is no longer needed as session management is handled by StellarProvider
   }
 
   Future<void> _saveMiningSession() async {
-    if (_session == null) return;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('mining_session', _session!.toRawJson());
-    await _saveMiningSessionToFirestore();
+    // This method is no longer needed as session management is handled by StellarProvider
   }
 
   Future<void> _saveMiningSessionToFirestore() async {
-    if (_session == null) return;
-    final authProvider = Provider.of<local_auth.AuthProvider>(context, listen: false);
-    final user = authProvider.user;
-    if (user == null) return;
-    final sessionData = _session!.toJsonForFirestore(user.uid);
-    await FirebaseFirestore.instance.collection('mining_sessions').doc(user.uid).set(sessionData, SetOptions(merge: true));
+    // This method is no longer needed as session management is handled by StellarProvider
   }
 
   Future<void> _restoreMiningSession() async {
+    setState(() {
+      _loadingSession = true;
+    });
+
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString('mining_session');
-      MiningSession? session;
+      // Let StellarProvider handle the mining session restoration
+      final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
+      await stellarProvider.loadMiningSessions();
       
-      if (raw != null) {
-        try {
-          session = MiningSession.fromRawJson(raw);
-          // Check if session is still valid
-          if (session.sessionEnd.isAfter(DateTime.now())) {
-            // Session is still valid, but don't start automatically
-            _session = session;
-            setState(() {
-              _loadingSession = false;
-            });
-            return;
-          } else {
-            // Session expired, create new one but don't start
-            session = MiningSession.newSession(miningRate: session.miningRate);
-            await prefs.setString('mining_session', session.toRawJson());
-          }
-        } catch (e) {
-          print('Error parsing mining session: $e');
-        }
-      }
-      
-      // Try to restore from Firestore
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        try {
-          final doc = await FirebaseFirestore.instance.collection('mining_sessions').doc(user.uid).get();
-          if (doc.exists) {
-            final data = doc.data()!;
-            session = MiningSession.fromFirestore(data);
-            if (session.sessionEnd.isAfter(DateTime.now())) {
-              // Session is still valid, but don't start automatically
-              _session = session;
-              await prefs.setString('mining_session', session.toRawJson());
-              setState(() {
-                _loadingSession = false;
-              });
-              return;
-            } else {
-              // Session expired, create new one but don't start
-              session = MiningSession.newSession(miningRate: session.miningRate);
-              await prefs.setString('mining_session', session.toRawJson());
-            }
-          }
-        } catch (e) {
-          print('Error restoring from Firestore: $e');
-        }
-      }
-      
-      // Create new session if none exists
-      session ??= MiningSession.newSession(miningRate: 0.25); // Default rate
-      await prefs.setString('mining_session', session.toRawJson());
-      _session = session;
       setState(() {
         _loadingSession = false;
       });
-      
-      // Don't start mining automatically - user must click start
     } catch (e) {
       print('Error restoring mining session: $e');
       setState(() {
@@ -243,128 +197,134 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
     }
   }
 
-  // Start mining manually
+  Future<void> _createNewMiningSession() async {
+    // This method is no longer needed as StellarProvider handles session creation
+    // Just ensure the provider is loaded
+    final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
+    if (stellarProvider.currentMiningSession == null) {
+      await stellarProvider.loadMiningSessions();
+    }
+  }
+
   Future<void> _startMining() async {
-    if (_session == null) return;
+    final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
     
-    try {
-      _session!.startMining();
-      await _saveMiningSession();
-      _maybeStartMiningTimer();
-      setState(() {});
-      
-      // Show success message
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Mining started! 🚀'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      print('Error starting mining: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to start mining: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  // Pause mining
-  Future<void> _pauseMining() async {
-    if (_session == null) return;
-    
-    try {
-      _session!.pauseMining();
-      await _saveMiningSession();
-      setState(() {});
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Mining paused'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
-    } catch (e) {
-      print('Error pausing mining: $e');
-    }
-  }
-
-  // Resume mining
-  Future<void> _resumeMining() async {
-    if (_session == null) return;
-    
-    try {
-      _session!.resumeMining();
-      await _saveMiningSession();
-      _maybeStartMiningTimer();
-      setState(() {});
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Mining resumed! 🚀'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      print('Error resuming mining: $e');
-    }
-  }
-
-  void _maybeStartMiningTimer() {
-    _miningTimer?.cancel();
-    if (_session != null && _session!.isActive && !_session!.isPaused) {
-      _miningTimer = Timer.periodic(const Duration(seconds: 1), (_) => _tickMining());
-    }
-  }
-
-  void _tickMining() async {
-    if (_session == null) return;
-    final now = DateTime.now();
-    
-    // Check if session is paused or expired
-    if (_session!.isPaused || _session!.isExpired) {
-      _miningTimer?.cancel();
-      setState(() {});
+    // Check if mining can be started
+    if (!stellarProvider.canStartMining) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot start mining while another session is active'),
+          backgroundColor: Colors.orange,
+        ),
+      );
       return;
     }
     
-    final elapsed = now.difference(_session!.lastResume).inSeconds;
-    final total = _session!.accumulatedSeconds + elapsed;
+    // Start mining using the provider
+    final success = await stellarProvider.startMining();
     
-    // Check if session has ended
-    if (now.isAfter(_session!.sessionEnd)) {
-      _session!.accumulatedSeconds += _session!.sessionEnd.difference(_session!.lastResume).inSeconds;
-      _session!.lastResume = _session!.sessionEnd;
-      _miningTimer?.cancel();
+    if (success) {
+      setState(() {});
       
-      print('Mining session ended, triggering reward...');
-      // Credit mining reward only once when session ends
-      await _creditMiningReward();
+      // Get the new session for notification scheduling
+      final session = stellarProvider.currentMiningSession;
+      if (session != null) {
+        // Schedule notification for session end
+        await _scheduleMiningEndNotification(session.sessionEnd);
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Mining started successfully!'),
+          backgroundColor: Colors.green,
+        ),
+      );
     } else {
-      _session!.accumulatedSeconds = total;
-      _session!.lastResume = now;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to start mining'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
-    
-    _saveMiningSession();
-    setState(() {});
   }
+
+  Future<void> _pauseMining() async {
+    final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
+    final session = stellarProvider.currentMiningSession;
+    
+    if (session != null) {
+      session.pauseMining();
+      setState(() {});
+      
+      // Cancel notifications
+      await _cancelMiningEndNotification();
+      await _cancelMiningReminder();
+    }
+  }
+
+  Future<void> _resumeMining() async {
+    final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
+    final session = stellarProvider.currentMiningSession;
+    
+    if (session != null) {
+      session.resumeMining();
+      // _maybeStartMiningTimer(); // This line is no longer needed
+      setState(() {});
+      
+      // Reschedule notification for session end
+      await _scheduleMiningEndNotification(session.sessionEnd);
+    }
+  }
+
+  // void _maybeStartMiningTimer() { // This method is no longer needed
+  //   _miningTimer?.cancel();
+  //   if (_session != null && _session!.isActive && !_session!.isPaused) {
+  //     _miningTimer = Timer.periodic(const Duration(seconds: 1), (_) => _tickMining());
+  //   }
+  // }
+
+  // void _tickMining() async { // This method is no longer needed
+  //   if (_session == null) return;
+  //   final now = DateTime.now();
+    
+  //   // Check if session is paused or expired
+  //   if (_session!.isPaused || _session!.isExpired) {
+  //     _miningTimer?.cancel();
+  //     setState(() {});
+  //     return;
+  //   }
+    
+  //   final elapsed = now.difference(_session!.lastResume).inSeconds;
+  //   final total = _session!.accumulatedSeconds + elapsed;
+    
+  //   // Check if session has ended
+  //   if (now.isAfter(_session!.sessionEnd)) {
+  //     _session!.accumulatedSeconds += _session!.sessionEnd.difference(_session!.lastResume).inSeconds;
+  //     _session!.lastResume = _session!.sessionEnd;
+  //     _miningTimer?.cancel();
+      
+  //     print('Mining session ended, triggering reward...');
+  //     // Credit mining reward only once when session ends
+  //     await _creditMiningReward();
+  //   } else {
+  //     _session!.accumulatedSeconds = total;
+  //     _session!.lastResume = now;
+  //   }
+    
+  //   _saveMiningSession();
+  //   setState(() {});
+  // }
 
   // Separate method to credit mining reward
   Future<void> _creditMiningReward() async {
-    if (_session == null) return;
+    final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
+    final session = stellarProvider.currentMiningSession;
     
-    final miningRate = _session?.miningRate ?? 0.0;
-    final accumulatedSeconds = _session?.accumulatedSeconds ?? 0;
+    if (session == null) return;
+    
+    final miningRate = session.miningRate ?? 0.0;
+    final accumulatedSeconds = session.accumulatedSeconds;
     final earned = miningRate * (accumulatedSeconds / 3600.0);
     
     // Ensure minimum reward for very short sessions
@@ -375,8 +335,6 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
       return;
     }
     
-    final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
-    
     try {
       // Check if reward was already credited (prevent double crediting)
       final authProvider = Provider.of<local_auth.AuthProvider>(context, listen: false);
@@ -386,8 +344,8 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
           .collection('mining_history')
           .doc(user.uid)
           .collection('sessions')
-          .where('sessionStart', isEqualTo: _session!.sessionStart.toIso8601String())
-          .where('sessionEnd', isEqualTo: _session!.sessionEnd.toIso8601String())
+          .where('sessionStart', isEqualTo: session.sessionStart.toIso8601String())
+          .where('sessionEnd', isEqualTo: session.sessionEnd.toIso8601String())
           .get();
         
         if (existingHistory.docs.isNotEmpty) {
@@ -581,17 +539,23 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
   }
 
   Future<void> _saveMiningSessionHistory({String? transactionId, String? stellarHash, String? status}) async {
-    if (_session == null) return;
+    final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
+    final session = stellarProvider.currentMiningSession;
+    
+    if (session == null) return;
+    
     final authProvider = Provider.of<local_auth.AuthProvider>(context, listen: false);
     final user = authProvider.user;
     if (user == null) return;
-    final miningRate = _session?.miningRate ?? 0.0;
-    final earned = miningRate * ((_session?.accumulatedSeconds ?? 0) / 3600.0);
+    
+    final miningRate = session.miningRate ?? 0.0;
+    final earned = miningRate * ((session.accumulatedSeconds) / 3600.0);
+    
     final history = MiningSessionHistory(
       id: '',
       userId: user.uid,
-      sessionStart: _session!.sessionStart,
-      sessionEnd: _session!.sessionEnd,
+      sessionStart: session.sessionStart,
+      sessionEnd: session.sessionEnd,
       earnedAkofa: earned,
       status: status ?? 'completed',
       transactionId: transactionId,
@@ -834,12 +798,15 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
 
   // Show mining session summary
   void _showMiningSessionSummary() {
-    if (_session == null) return;
+    final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
+    final session = stellarProvider.currentMiningSession;
     
-    final miningRate = _session?.miningRate ?? 0.0;
-    final earned = miningRate * ((_session?.accumulatedSeconds ?? 0) / 3600.0);
-    final sessionDuration = _session!.sessionEnd.difference(_session!.sessionStart);
-    final minedDuration = Duration(seconds: _session!.accumulatedSeconds);
+    if (session == null) return;
+    
+    final miningRate = session.miningRate ?? 0.0;
+    final earned = miningRate * ((session.accumulatedSeconds) / 3600.0);
+    final sessionDuration = session.sessionEnd.difference(session.sessionStart);
+    final minedDuration = Duration(seconds: session.accumulatedSeconds);
     
     showDialog(
       context: context,
@@ -863,8 +830,8 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
             _buildSummaryItem('Time Mined', _formatDuration(minedDuration)),
             _buildSummaryItem('Mining Rate', '${miningRate.toStringAsFixed(2)} ₳/hour'),
             _buildSummaryItem('Earnings', '${earned.toStringAsFixed(6)} ₳'),
-            _buildSummaryItem('Session Status', _session!.isExpired ? 'Completed' : _session!.isPaused ? 'Paused' : 'Active'),
-            if (_session!.isExpired)
+            _buildSummaryItem('Session Status', session.isExpired ? 'Completed' : session.isPaused ? 'Paused' : 'Active'),
+            if (session.isExpired)
               _buildSummaryItem('Next Session', 'Ready to start'),
           ],
         ),
@@ -873,7 +840,7 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
             onPressed: () => Navigator.of(context).pop(),
             child: Text('Close', style: TextStyle(color: AppTheme.primaryGold)),
           ),
-          if (_session!.isExpired)
+          if (session.isExpired)
             ElevatedButton(
               onPressed: () {
                 Navigator.of(context).pop();
@@ -916,8 +883,6 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     final authProvider = Provider.of<local_auth.AuthProvider>(context);
     final stellarProvider = Provider.of<StellarProvider>(context);
-    final user = authProvider.user;
-    final screenSize = MediaQuery.of(context).size;
     
     return Scaffold(
       body: Container(
@@ -1019,245 +984,6 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
                       ),
                     ),
                   ),
-                ),
-                
-                // Modern Glass-like Referral Section at Bottom
-                FutureBuilder<Map<String, dynamic>?>(
-                  future: user != null ? authProvider.authService.getUserDetails(user.uid) : null,
-                  builder: (context, snapshot) {
-                    final userData = snapshot.data;
-                    final referralCode = userData?['referralCode'] ?? '';
-                    final referrals = (userData?['referrals'] as List<dynamic>?)?.length ?? 0;
-                    final referralCount = userData?['referralCount'] ?? 0;
-                    final referralTransactions = stellarProvider.transactions.where((tx) =>
-                      tx.typeLabel == 'Mining Reward' && (tx.memo?.toLowerCase().contains('referral') ?? false)
-                    ).toList();
-                    
-                    return Container(
-                      margin: const EdgeInsets.only(top: 24),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(24),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.08),
-                            borderRadius: BorderRadius.circular(24),
-                            border: Border.all(
-                              color: Colors.white.withOpacity(0.1),
-                              width: 1,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.2),
-                                blurRadius: 20,
-                                offset: const Offset(0, 10),
-                              ),
-                            ],
-                          ),
-                          child: BackdropFilter(
-                            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                            child: Padding(
-                              padding: const EdgeInsets.all(24.0),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  // Header with icon
-                                  Row(
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.all(8),
-                                        decoration: BoxDecoration(
-                                          color: AppTheme.primaryGold.withOpacity(0.2),
-                                          borderRadius: BorderRadius.circular(12),
-                                        ),
-                                        child: Icon(
-                                          Icons.share,
-                                          color: AppTheme.primaryGold,
-                                          size: 20,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Text(
-                                        'Referral Program',
-                                        style: AppTheme.headingMedium.copyWith(
-                                          color: AppTheme.white,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 20),
-                                  
-                                  // Referral Code Section
-                                  Container(
-                                    padding: const EdgeInsets.all(16),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.05),
-                                      borderRadius: BorderRadius.circular(16),
-                                      border: Border.all(
-                                        color: Colors.white.withOpacity(0.1),
-                                      ),
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          'Your Referral Code',
-                                          style: AppTheme.bodySmall.copyWith(
-                                            color: AppTheme.grey,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: SelectableText(
-                                                referralCode,
-                                                style: AppTheme.headingMedium.copyWith(
-                                                  color: AppTheme.primaryGold,
-                                                  fontWeight: FontWeight.w700,
-                                                  letterSpacing: 1.2,
-                                                ),
-                                              ),
-                                            ),
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                              decoration: BoxDecoration(
-                                                color: AppTheme.primaryGold.withOpacity(0.2),
-                                                borderRadius: BorderRadius.circular(20),
-                                              ),
-                                              child: Text(
-                                                'Copy',
-                                                style: AppTheme.bodySmall.copyWith(
-                                                  color: AppTheme.primaryGold,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  
-                                  // Stats Grid
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: _buildReferralStatCard(
-                                          'Referrals',
-                                          '$referrals',
-                                          Icons.people,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: _buildReferralStatCard(
-                                          'Total Count',
-                                          '$referralCount',
-                                          Icons.trending_up,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 16),
-                                  
-                                  // Earnings Card
-                                  Container(
-                                    padding: const EdgeInsets.all(16),
-                                    decoration: BoxDecoration(
-                                      gradient: LinearGradient(
-                                        colors: [
-                                          AppTheme.primaryGold.withOpacity(0.2),
-                                          AppTheme.primaryGold.withOpacity(0.1),
-                                        ],
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                      ),
-                                      borderRadius: BorderRadius.circular(16),
-                                      border: Border.all(
-                                        color: AppTheme.primaryGold.withOpacity(0.3),
-                                      ),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Container(
-                                          padding: const EdgeInsets.all(8),
-                                          decoration: BoxDecoration(
-                                            color: AppTheme.primaryGold.withOpacity(0.2),
-                                            borderRadius: BorderRadius.circular(12),
-                                          ),
-                                          child: Icon(
-                                            Icons.monetization_on,
-                                            color: AppTheme.primaryGold,
-                                            size: 20,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'Earned from Referrals',
-                                                style: AppTheme.bodySmall.copyWith(
-                                                  color: AppTheme.grey,
-                                                ),
-                                              ),
-                                              Text(
-                                                '${referralTransactions.fold<double>(0, (sum, tx) => sum + (tx.amount ?? 0)).toStringAsFixed(2)} AKOFA',
-                                                style: AppTheme.bodyLarge.copyWith(
-                                                  color: AppTheme.primaryGold,
-                                                  fontWeight: FontWeight.w700,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  
-                                  // Transaction History (if any)
-                                  if (referralTransactions.isNotEmpty) ...[
-                                    const SizedBox(height: 16),
-                                    Text(
-                                      'Recent Referral Rewards',
-                                      style: AppTheme.bodyMedium.copyWith(
-                                        color: AppTheme.white,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Container(
-                                      height: 120,
-                                      decoration: BoxDecoration(
-                                        color: Colors.white.withOpacity(0.05),
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(12),
-                                        child: TransactionList(transactions: referralTransactions),
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ).animate().fadeIn(
-                      duration: const Duration(milliseconds: 1000),
-                      delay: const Duration(milliseconds: 800),
-                    ).slideY(
-                      begin: 0.3,
-                      end: 0,
-                      curve: Curves.easeOut,
-                      duration: const Duration(milliseconds: 1000),
-                    );
-                  },
                 ),
               ],
             ),
@@ -1466,58 +1192,112 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
     );
   }
 
-  Widget _buildReferralStatCard(String title, String value, IconData icon) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.1),
-        ),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: AppTheme.primaryGold, size: 24),
-          const SizedBox(height: 8),
-          Text(
-            title,
-            style: AppTheme.bodySmall.copyWith(
-              color: AppTheme.grey,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: AppTheme.headingMedium.copyWith(
-              color: AppTheme.primaryGold,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildMiningSection() {
-    if (_loadingSession || _session == null) {
+    final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
+    final session = stellarProvider.currentMiningSession;
+    
+    if (stellarProvider.isLoadingMiningSessions) {
       return const Center(child: CircularProgressIndicator());
     }
-    final now = DateTime.now();
-    final session = _session!;
-    final totalSessionSeconds = session.sessionEnd.difference(session.sessionStart).inSeconds;
-    int minedSeconds = session.accumulatedSeconds;
-    if (!session.isPaused && now.isBefore(session.sessionEnd)) {
-      minedSeconds += now.difference(session.lastResume).inSeconds;
-    } else if (now.isAfter(session.sessionEnd)) {
-      minedSeconds = totalSessionSeconds;
+    
+    // If no session exists, show the start mining UI
+    if (session == null) {
+      return Card(
+        color: AppTheme.darkGrey.withOpacity(0.7),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        elevation: 0,
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Mining', style: AppTheme.headingSmall.copyWith(color: AppTheme.white, fontWeight: FontWeight.bold)),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppTheme.grey.withOpacity(0.3),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      'Ready to Start',
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 32),
+              
+              // Start Mining Prompt
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryGold.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: AppTheme.primaryGold.withOpacity(0.3),
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.play_circle_outline,
+                      size: 64,
+                      color: AppTheme.primaryGold,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Ready to Start Mining?',
+                      style: AppTheme.headingMedium.copyWith(
+                        color: AppTheme.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Click the button below to begin your 24-hour mining session and start earning Akofa tokens!',
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.grey,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      onPressed: _startMining,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryGold,
+                        foregroundColor: AppTheme.black,
+                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+                      ),
+                      child: const Text(
+                        'Start Mining',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
     }
-    final progress = minedSeconds / totalSessionSeconds;
-    final miningRate = session.miningRate ?? 0.0;
-    final earnedValue = miningRate * ((minedSeconds.toDouble()) / 3600.0);
-    final timeLeft = session.sessionEnd.difference(now);
-    final sessionExpired = now.isAfter(session.sessionEnd);
+    
+    // Session exists - show normal mining UI
+    final progress = stellarProvider.miningProgress;
+    final earnedValue = stellarProvider.currentMiningEarnings;
+    final timeRemaining = stellarProvider.formattedTimeRemaining;
+    final sessionExpired = session.isExpired;
 
     return Card(
       color: AppTheme.darkGrey.withOpacity(0.7),
@@ -1549,159 +1329,215 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
               ],
             ),
             const SizedBox(height: 16),
-            LinearProgressIndicator(
-              value: progress.clamp(0, 1),
-              minHeight: 10,
-              backgroundColor: AppTheme.grey.withOpacity(0.2),
-              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryGold),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Earnings: ${earnedValue.toStringAsFixed(6)} ₳',
-              style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              sessionExpired
-                  ? 'Session complete. Start a new session to continue mining.'
-                  : session.isPaused
-                      ? 'Mining paused. Resume to continue.'
-                      : 'Mining rate: ${session.miningRate} ₳/hour',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
-            ),
-            const SizedBox(height: 8),
-            if (!sessionExpired)
-              Text(
-                session.isPaused
-                    ? 'Time left: ${_formatDuration(session.sessionEnd.difference(session.pausedAt ?? now))}'
-                    : 'Time left: ${_formatDuration(timeLeft)}',
-                style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
-              ),
-            const SizedBox(height: 24),
-            Center(
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                width: 120,
-                height: 120,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: session.isActive ? AppTheme.darkGrey : Colors.transparent,
-                  border: Border.all(
-                    color: session.isActive ? AppTheme.primaryGold : AppTheme.grey,
-                    width: 3,
-                  ),
-                  boxShadow: session.isActive
-                      ? [
-                          BoxShadow(
-                            color: AppTheme.primaryGold.withOpacity(0.3),
-                            blurRadius: 20,
-                            spreadRadius: 5,
-                          )
-                        ]
-                      : null,
-                ),
-                child: Center(
-                  child: AnimatedBuilder(
-                    animation: _pulseController,
-                    builder: (context, child) {
-                      return Transform.scale(
-                        scale: session.isActive && !session.isPaused
-                            ? 1.0 + (_pulseController.value * 0.1)
-                            : 1.0,
-                        child: Icon(
-                          session.isActive && !session.isPaused ? Icons.flash_on : Icons.flash_on_outlined,
-                          color: session.isActive ? AppTheme.primaryGold : AppTheme.grey,
-                          size: 60,
-                        ),
-                      );
-                    },
-                  ),
+            
+            // Countdown Timer
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryGold.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: AppTheme.primaryGold.withOpacity(0.3),
                 ),
               ),
-            ),
-            const SizedBox(height: 24),
-            Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (sessionExpired)
-                      ElevatedButton.icon(
-                        onPressed: _restoreMiningSession,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Start New Session'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primaryGold,
-                          foregroundColor: AppTheme.black,
-                          minimumSize: const Size(140, 48),
-                          textStyle: AppTheme.headingSmall,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                      )
-                    else if (!session.isActive && !session.isPaused)
-                      ElevatedButton.icon(
-                        onPressed: _startMining,
-                        icon: const Icon(Icons.play_arrow),
-                        label: const Text('Start Mining'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primaryGold,
-                          foregroundColor: AppTheme.black,
-                          minimumSize: const Size(140, 48),
-                          textStyle: AppTheme.headingSmall,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                      )
-                    else if (session.isPaused)
-                      ElevatedButton.icon(
-                        onPressed: _resumeMining,
-                        icon: const Icon(Icons.play_arrow),
-                        label: const Text('Resume'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primaryGold,
-                          foregroundColor: AppTheme.black,
-                          minimumSize: const Size(140, 48),
-                          textStyle: AppTheme.headingSmall,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                      )
-                    else
-                      ElevatedButton.icon(
-                        onPressed: _pauseMining,
-                        icon: const Icon(Icons.pause),
-                        label: const Text('Pause'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primaryGold,
-                          foregroundColor: AppTheme.black,
-                          minimumSize: const Size(140, 48),
-                          textStyle: AppTheme.headingSmall,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        'Time Remaining',
+                        style: AppTheme.bodyMedium.copyWith(
+                          color: AppTheme.grey,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                // Session summary button
-                ElevatedButton.icon(
-                  onPressed: _showMiningSessionSummary,
-                  icon: const Icon(Icons.analytics),
-                  label: const Text('Session Summary'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size(140, 40),
-                    textStyle: AppTheme.bodyMedium,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      if (session.isActive && !session.isPaused) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: Colors.green,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'LIVE',
+                          style: AppTheme.bodySmall.copyWith(
+                            color: Colors.green,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    timeRemaining,
+                    style: AppTheme.headingLarge.copyWith(
+                      color: AppTheme.primaryGold,
+                      fontWeight: FontWeight.bold,
+                      fontFamily: 'Monospace',
+                      fontSize: 32,
                     ),
                   ),
+                  Text(
+                    '24-Hour Session',
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.grey,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            
+            const SizedBox(height: 16),
+            
+            // Progress Bar
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Progress',
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.grey,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    Text(
+                      '${(progress * 100).toStringAsFixed(1)}%',
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.primaryGold,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                LinearProgressIndicator(
+                  value: progress.clamp(0, 1),
+                  minHeight: 12,
+                  backgroundColor: AppTheme.grey.withOpacity(0.2),
+                  valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryGold),
+                ),
+              ],
+            ),
+            
+            const SizedBox(height: 24),
+            
+            // Earnings Display
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: AppTheme.darkGrey.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: AppTheme.primaryGold.withOpacity(0.3),
+                ),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        'Current Earnings',
+                        style: AppTheme.bodyMedium.copyWith(
+                          color: AppTheme.grey,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      if (session.isActive && !session.isPaused) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: Colors.green,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'UPDATING',
+                          style: AppTheme.bodySmall.copyWith(
+                            color: Colors.green,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '${earnedValue.toStringAsFixed(6)} ₳',
+                    style: AppTheme.headingLarge.copyWith(
+                      color: AppTheme.primaryGold,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    'Rate: ${session.miningRate.toStringAsFixed(2)} ₳/hour',
+                    style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                // Show different buttons based on session state
+                if (session != null && session.isActive && !session.isExpired) ...[
+                  // Active session - show pause/resume
+                  ElevatedButton(
+                    onPressed: session.isPaused ? _resumeMining : _pauseMining,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: session.isPaused ? AppTheme.primaryGold : Colors.orange,
+                      foregroundColor: session.isPaused ? AppTheme.black : AppTheme.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                    child: Text(session.isPaused ? 'Resume' : 'Pause'),
+                  ),
+                ] else if (stellarProvider.canStartMining) ...[
+                  // No active session - show start mining
+                  ElevatedButton(
+                    onPressed: _startMining,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryGold,
+                      foregroundColor: AppTheme.black,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                    child: const Text('Start Mining'),
+                  ),
+                ] else ...[
+                  // Session exists but can't start new one - show disabled button
+                  ElevatedButton(
+                    onPressed: null, // Disabled
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.grey.withOpacity(0.3),
+                      foregroundColor: AppTheme.grey,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    ),
+                    child: const Text('Session Active'),
+                  ),
+                ],
+                ElevatedButton(
+                  onPressed: _showMiningSessionSummary,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.transparent,
+                    foregroundColor: AppTheme.primaryGold,
+                    side: const BorderSide(color: AppTheme.primaryGold),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  ),
+                  child: const Text('Summary'),
                 ),
               ],
             ),
@@ -1862,22 +1698,6 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
       ],
     );
   }
-}
-
-class Transaction {
-  final String id;
-  final String title;
-  final double amount;
-  final DateTime date;
-  final bool isIncoming;
-
-  Transaction({
-    required this.id,
-    required this.title,
-    required this.amount,
-    required this.date,
-    required this.isIncoming,
-  });
 }
 
 extension StringCasingExtension on String {

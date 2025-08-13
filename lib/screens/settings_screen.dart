@@ -122,7 +122,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'autoBackup': _autoBackupEnabled,
         };
         final authService = AuthService();
-        await authService.updateUserProfile(user.id, preferences: preferences);
+        await authService.updateUserFields(user.id, {'preferences': preferences});
         await _fetchUserProfile();
       }
       ScaffoldMessenger.of(context).showSnackBar(
@@ -365,7 +365,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         Builder(
                           builder: (context) {
                             final isAdmin = Provider.of<AdminProvider>(context, listen: false).isAdmin;
-                            if (!isAdmin) return const SizedBox.shrink();
+                            if (!isAdmin) {
+                              return Column(
+                                children: [
+                                  _buildSettingItem(
+                                    icon: Icons.refresh,
+                                    title: 'Refresh Admin Status',
+                                    subtitle: 'Click if you recently changed your role',
+                                    onTap: () async {
+                                      final adminProvider = Provider.of<AdminProvider>(context, listen: false);
+                                      await adminProvider.refreshAdminStatus();
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('Admin status refreshed. Check again.'),
+                                          backgroundColor: Colors.blue,
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  const SizedBox(height: 16),
+                                ],
+                              );
+                            }
                             return _buildSettingItem(
                               icon: Icons.admin_panel_settings,
                               title: 'Admin Dashboard',
@@ -949,7 +970,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   final authProvider = Provider.of<AuthProvider>(context, listen: false);
                   final firebaseUser = authProvider.user;
                   final authService = AuthService();
-                  await authService.updateUserProfile(user.id, name: newName);
+                  await authService.updateUserFields(user.id, {'displayName': newName});
                   if (firebaseUser != null) {
                     await firebaseUser.updateDisplayName(newName);
                   }

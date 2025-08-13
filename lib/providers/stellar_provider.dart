@@ -9,6 +9,10 @@ import '../models/transaction.dart' as app_transaction;
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:async';
+import 'dart:convert';
+import '../models/mining_session.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class StellarProvider extends ChangeNotifier {
   final StellarService _stellarService = StellarService();
@@ -39,6 +43,12 @@ class StellarProvider extends ChangeNotifier {
   bool _isMpesaLoading = false;
   List<Map<String, dynamic>> _mpesaTransactions = [];
 
+  // Mining session state
+  List<MiningSession> _miningSessions = [];
+  bool _isLoadingMiningSessions = false;
+  Timer? _miningTimer;
+  int _currentMiningSessionId = 0;
+
   bool get hasWallet => _hasWallet;
   bool get isLoading => _isLoading;
   String? get error => _error;
@@ -63,6 +73,10 @@ class StellarProvider extends ChangeNotifier {
   bool get isMpesaLoading => _isMpesaLoading;
   List<Map<String, dynamic>> get mpesaTransactions => _mpesaTransactions;
 
+  // Mining session getters
+  List<MiningSession> get miningSessions => _miningSessions;
+  bool get isLoadingMiningSessions => _isLoadingMiningSessions;
+
   StellarProvider() {
     _init();
   }
@@ -72,6 +86,9 @@ class StellarProvider extends ChangeNotifier {
     if (_hasWallet) {
       await loadTransactions();
       await loadWalletAssets();
+      await loadMiningSessions();
+      // Remove automatic mining timer start - mining will only start when user manually initiates
+      // await startMiningTimer();
     }
   }
 
@@ -1064,5 +1081,316 @@ class StellarProvider extends ChangeNotifier {
     } catch (e) {
       return false;
     }
+  }
+
+  // ==================== MINING FUNCTIONALITY ====================
+
+  // Manual method to start mining - only works when no active session exists
+  Future<bool> startMining() async {
+    if (_publicKey == null) return false;
+    
+    // Check if there's already an active session
+    final currentSession = this.currentMiningSession;
+    if (currentSession != null && currentSession.isActive && !currentSession.isExpired) {
+      // Can't start mining if there's already an active session
+      return false;
+    }
+    
+    // Create new mining session
+    final newSession = MiningSession.newSession(miningRate: 0.25);
+    _miningSessions = [newSession];
+    
+    // Start the mining timer
+    await startMiningTimer();
+    
+    // Save the new session
+    await saveMiningSession(newSession);
+    
+    notifyListeners();
+    return true;
+  }
+
+  Future<void> startMiningTimer() async {
+    if (_publicKey == null) return;
+    
+    // Cancel existing timer if any
+    _miningTimer?.cancel();
+    
+    // Start the mining timer that runs every second
+    _miningTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      _updateMiningProgress();
+    });
+    
+    print('Mining timer started - will persist across app restarts');
+  }
+
+  void stopMiningTimer() {
+    _miningTimer?.cancel();
+    _miningTimer = null;
+    print('Mining timer stopped');
+  }
+
+  void _updateMiningProgress() {
+    if (_miningSessions.isEmpty) return;
+    
+    final activeSession = _miningSessions.lastWhere(
+      (session) => session.isActive,
+      orElse: () => MiningSession.newSession(miningRate: 0.25),
+    );
+    
+    if (activeSession.isActive && !activeSession.isPaused) {
+      // Update session progress in real-time
+      final now = DateTime.now();
+      final timeSinceResume = now.difference(activeSession.lastResume).inSeconds;
+      
+      // Check if session should end (24 hours)
+      if (now.isAfter(activeSession.sessionEnd)) {
+        _endMiningSession(activeSession);
+      } else {
+        // Update accumulated time and notify listeners every second
+        activeSession.accumulatedSeconds = activeSession.accumulatedSeconds + timeSinceResume;
+        activeSession.lastResume = now;
+        
+        // Save state every 10 seconds to ensure persistence
+        if (activeSession.accumulatedSeconds % 10 == 0) {
+          saveMiningSession(activeSession);
+        }
+        
+        notifyListeners();
+      }
+    }
+  }
+
+  void _endMiningSession(MiningSession session) {
+    session.isPaused = true;
+    
+    // Calculate and record mining reward
+    final earned = session.earnedAkofa;
+    
+    if (earned > 0) {
+      recordMiningReward(earned);
+    }
+    
+    // Save session to storage
+    saveMiningSession(session);
+    
+    // Don't automatically start new session - user must manually start
+    // _startNewMiningSession();
+    
+    notifyListeners();
+  }
+
+  void _startNewMiningSession() {
+    final newSession = MiningSession.newSession(miningRate: 0.25);
+    
+    _miningSessions.add(newSession);
+    saveMiningSession(newSession);
+    notifyListeners();
+  }
+
+  Future<void> saveMiningSession(MiningSession session) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionData = {
+        'sessionId': session.sessionId,
+        'sessionStart': session.sessionStart.millisecondsSinceEpoch,
+        'sessionEnd': session.sessionEnd.millisecondsSinceEpoch,
+        'isPaused': session.isPaused,
+        'pausedAt': session.pausedAt?.millisecondsSinceEpoch,
+        'accumulatedSeconds': session.accumulatedSeconds,
+        'lastResume': session.lastResume.millisecondsSinceEpoch,
+        'miningRate': session.miningRate,
+      };
+      
+      // Save as JSON string for proper parsing
+      await prefs.setString('current_mining_session', json.encode(sessionData));
+      
+      // Also save to Firestore for cloud backup (optional)
+      await _saveMiningSessionToFirestore(session);
+    } catch (e) {
+      print('Failed to save mining session: $e');
+    }
+  }
+
+  Future<void> _saveMiningSessionToFirestore(MiningSession session) async {
+    try {
+      // For now, we'll skip Firestore save to avoid context issues
+      // This can be implemented later with proper context management
+      // The local storage is sufficient for persistence
+    } catch (e) {
+      print('Failed to save mining session to Firestore: $e');
+      // Don't fail the local save if Firestore fails
+    }
+  }
+
+  Future<void> loadMiningSessions() async {
+    if (_publicKey == null) return;
+    
+    _isLoadingMiningSessions = true;
+    notifyListeners();
+    
+    try {
+      // Load from local storage
+      final prefs = await SharedPreferences.getInstance();
+      final sessionData = prefs.getString('current_mining_session');
+      
+      if (sessionData != null) {
+        try {
+          final sessionMap = Map<String, dynamic>.from(
+            json.decode(sessionData) as Map<String, dynamic>
+          );
+          
+          // Convert stored timestamps back to DateTime objects
+          final session = MiningSession(
+            sessionId: sessionMap['sessionId'] ?? '',
+            sessionStart: DateTime.fromMillisecondsSinceEpoch(sessionMap['sessionStart'] ?? 0),
+            sessionEnd: DateTime.fromMillisecondsSinceEpoch(sessionMap['sessionEnd'] ?? 0),
+            isPaused: sessionMap['isPaused'] ?? false,
+            pausedAt: sessionMap['pausedAt'] != null 
+                ? DateTime.fromMillisecondsSinceEpoch(sessionMap['pausedAt'])
+                : null,
+            accumulatedSeconds: sessionMap['accumulatedSeconds'] ?? 0,
+            lastResume: DateTime.fromMillisecondsSinceEpoch(sessionMap['lastResume'] ?? 0),
+            miningRate: (sessionMap['miningRate'] as num?)?.toDouble() ?? 0.25,
+          );
+          
+          _miningSessions = [session];
+          
+          // Check if session is still valid and restore state
+          await _restoreMiningState(session);
+        } catch (parseError) {
+          print('Error parsing mining session: $parseError');
+          // Don't automatically create new session - user must manually start
+          _miningSessions = [];
+        }
+      } else {
+        // No session exists - don't create one automatically
+        // User must manually start mining
+        _miningSessions = [];
+      }
+      
+      _isLoadingMiningSessions = false;
+      notifyListeners();
+    } catch (e) {
+      _isLoadingMiningSessions = false;
+      _setError('Failed to load mining sessions: $e');
+      notifyListeners();
+    }
+  }
+
+  Future<void> _restoreMiningState(MiningSession session) async {
+    final now = DateTime.now();
+    
+    // Check if session has expired
+    if (now.isAfter(session.sessionEnd)) {
+      // Session expired, mark it as expired but don't start new one automatically
+      session.isPaused = true;
+      session.pausedAt = now;
+      await saveMiningSession(session);
+      return;
+    }
+    
+    // If session was paused, keep it paused
+    if (session.isPaused) {
+      // Update accumulated time from when it was paused
+      if (session.pausedAt != null) {
+        final timeSincePause = session.pausedAt!.difference(session.lastResume).inSeconds;
+        session.accumulatedSeconds += timeSincePause;
+      }
+    } else {
+      // Session was active, calculate accumulated time since last resume
+      final timeSinceResume = now.difference(session.lastResume).inSeconds;
+      session.accumulatedSeconds += timeSinceResume;
+      session.lastResume = now;
+    }
+    
+    // Save the restored state
+    await saveMiningSession(session);
+    
+    // Don't automatically start timer - user must manually resume mining
+    // if (session.isActive && !session.isPaused) {
+    //   await startMiningTimer();
+    // }
+  }
+
+  Future<void> stopMiningSession(String sessionId) async {
+    final sessionToStop = _miningSessions.firstWhere(
+      (session) => session.sessionId == sessionId,
+      orElse: () => MiningSession.newSession(miningRate: 0.25),
+    );
+    
+    if (sessionToStop.isActive) {
+      sessionToStop.pauseMining();
+      await saveMiningSession(sessionToStop);
+      notifyListeners();
+    }
+  }
+
+  Future<void> deleteMiningSession(String sessionId) async {
+    _miningSessions.removeWhere((session) => session.sessionId == sessionId);
+    notifyListeners();
+  }
+
+  // Get current active mining session
+  MiningSession? get currentMiningSession {
+    if (_miningSessions.isEmpty) return null;
+    return _miningSessions.lastWhere(
+      (session) => session.isActive,
+      orElse: () => _miningSessions.last,
+    );
+  }
+
+  // Get mining progress (0.0 to 1.0)
+  double get miningProgress {
+    final session = currentMiningSession;
+    if (session == null || !session.isActive) return 0.0;
+    
+    final now = DateTime.now();
+    final elapsed = now.difference(session.sessionStart).inSeconds;
+    final total = session.sessionEnd.difference(session.sessionStart).inSeconds;
+    
+    return (elapsed / total).clamp(0.0, 1.0);
+  }
+
+  // Get current mining earnings
+  double get currentMiningEarnings {
+    final session = currentMiningSession;
+    if (session == null || !session.isActive) return 0.0;
+    
+    return session.earnedAkofa;
+  }
+
+  // Get time remaining in current session
+  Duration get timeRemaining {
+    final session = currentMiningSession;
+    if (session == null || session.isExpired) return Duration.zero;
+    
+    final now = DateTime.now();
+    final remaining = session.sessionEnd.difference(now);
+    return remaining.isNegative ? Duration.zero : remaining;
+  }
+
+  // Get formatted time remaining string
+  String get formattedTimeRemaining {
+    final remaining = timeRemaining;
+    if (remaining.inSeconds <= 0) return 'Session Ended';
+    
+    final hours = remaining.inHours;
+    final minutes = remaining.inMinutes % 60;
+    final seconds = remaining.inSeconds % 60;
+    
+    return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  // Check if mining can be started (no active session exists)
+  bool get canStartMining {
+    final session = currentMiningSession;
+    return session == null || session.isExpired;
+  }
+
+  @override
+  void dispose() {
+    _miningTimer?.cancel();
+    super.dispose();
   }
 }

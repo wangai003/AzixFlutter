@@ -51,7 +51,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
       });
       return;
     }
-    final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+          final doc = await FirebaseFirestore.instance.collection('USER').doc(user.uid).get();
     final role = doc.data()?['role'];
     setState(() {
       _isAdmin = role == 'admin';
@@ -367,7 +367,7 @@ class _AdminPayoutRequestsTabState extends State<_AdminPayoutRequestsTab> {
     // Mark as paid and deduct from vendor's akofaBalance
     final batch = FirebaseFirestore.instance.batch();
     final payoutRef = FirebaseFirestore.instance.collection('payout_requests').doc(req.id);
-    final vendorRef = FirebaseFirestore.instance.collection('USERS').doc(req.vendorId);
+            final vendorRef = FirebaseFirestore.instance.collection('USER').doc(req.vendorId);
     batch.update(payoutRef, {
       'status': 'paid',
       'processedAt': DateTime.now(),

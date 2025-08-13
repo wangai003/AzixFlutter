@@ -566,8 +566,8 @@ class ServiceOrderDetailScreen extends StatelessWidget {
                                 // Deduct from wallet (send Akofa to vendor or escrow)
                                 // For demo, just update Firestore balances atomically
                                 final orderRef = FirebaseFirestore.instance.collection('service_orders').doc(order.id);
-                                final userRef = FirebaseFirestore.instance.collection('USERS').doc(user.uid);
-                                final vendorRef = FirebaseFirestore.instance.collection('USERS').doc(order.vendorId);
+                                        final userRef = FirebaseFirestore.instance.collection('USER').doc(user.uid);
+        final vendorRef = FirebaseFirestore.instance.collection('USER').doc(order.vendorId);
                                 await FirebaseFirestore.instance.runTransaction((txn) async {
                                   final userSnap = await txn.get(userRef);
                                   final vendorSnap = await txn.get(vendorRef);
