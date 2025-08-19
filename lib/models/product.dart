@@ -11,6 +11,8 @@ class Product {
   final String category;
   final String subcategory;
   final List<String> shippingOptions;
+  final String? sku;
+  final Map<String, dynamic> metadata;
   final DateTime? createdAt;
 
   Product({
@@ -24,6 +26,8 @@ class Product {
     required this.category,
     required this.subcategory,
     required this.shippingOptions,
+    this.sku,
+    this.metadata = const {},
     this.createdAt,
   });
 
@@ -38,6 +42,8 @@ class Product {
         category: json['category'] ?? '',
         subcategory: json['subcategory'] ?? '',
         shippingOptions: List<String>.from(json['shippingOptions'] ?? []),
+        sku: json['sku'],
+        metadata: Map<String, dynamic>.from(json['metadata'] ?? {}),
         createdAt: json['createdAt'] != null ? (json['createdAt'] as Timestamp).toDate() : null,
       );
 
@@ -51,6 +57,8 @@ class Product {
         'category': category,
         'subcategory': subcategory,
         'shippingOptions': shippingOptions,
+        'sku': sku,
+        'metadata': metadata,
         'createdAt': createdAt,
       };
 } 

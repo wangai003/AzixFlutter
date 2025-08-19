@@ -149,4 +149,23 @@ class Transaction {
         return 'Failed';
     }
   }
+
+  // Convert transaction to map for compatibility
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'userId': userId,
+      'senderAddress': senderAddress,
+      'recipientAddress': recipientAddress,
+      'senderAkofaTag': senderAkofaTag,
+      'recipientAkofaTag': recipientAkofaTag,
+      'amount': amount,
+      'type': type.toString().split('.').last,
+      'status': status.toString().split('.').last,
+      'hash': hash,
+      'timestamp': timestamp.toIso8601String(),
+      'memo': memo,
+      'assetCode': assetCode,
+    };
+  }
 }

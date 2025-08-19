@@ -7,7 +7,10 @@ import 'dart:io';
 import '../models/order_message.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import '../services/stellar_service.dart';
+import '../providers/marketplace_provider.dart';
+import '../providers/stellar_provider.dart';
 
 class ServiceOrderDetailScreen extends StatelessWidget {
   final ServiceOrder order;
@@ -563,41 +566,57 @@ class ServiceOrderDetailScreen extends StatelessWidget {
                       onPressed: canPay
                           ? () async {
                               try {
-                                // Deduct from wallet (send Akofa to vendor or escrow)
-                                // For demo, just update Firestore balances atomically
-                                final orderRef = FirebaseFirestore.instance.collection('service_orders').doc(order.id);
-                                        final userRef = FirebaseFirestore.instance.collection('USER').doc(user.uid);
-        final vendorRef = FirebaseFirestore.instance.collection('USER').doc(order.vendorId);
-                                await FirebaseFirestore.instance.runTransaction((txn) async {
-                                  final userSnap = await txn.get(userRef);
-                                  final vendorSnap = await txn.get(vendorRef);
-                                  final bal = (userSnap.data()?['akofaBalance'] ?? 0.0) as num;
-                                  final pending = (vendorSnap.data()?['pendingBalance'] ?? 0.0) as num;
-                                  if (bal < order.price) throw Exception('Insufficient balance');
-                                  txn.update(userRef, {'akofaBalance': bal - order.price});
-                                  txn.update(vendorRef, {'pendingBalance': pending + order.price});
-                                  txn.update(orderRef, {
-                                    'paymentStatus': 'paid',
-                                    'paymentDetails': {
-                                      'amount': order.price,
-                                      'paidAt': DateTime.now(),
-                                      'payerId': user.uid,
-                                    },
+                                // Use the unified marketplace payment system
+                                final marketplace = Provider.of<MarketplaceProvider>(context, listen: false);
+
+                                
+                                // Show loading
+                                showDialog(
+                                  context: context,
+                                  barrierDismissible: false,
+                                  builder: (context) => const Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                );
+
+                                // Process payment via marketplace provider
+                                final paymentResult = await marketplace.processServicePayment(
+                                  serviceOrder: order,
+                                );
+
+                                // Close loading dialog
+                                Navigator.of(context).pop();
+
+                                if (paymentResult['success'] == true) {
+                                  // Log payment event
+                                  final event = {
+                                    'type': 'payment',
+                                    'timestamp': DateTime.now(),
+                                    'userId': user.uid,
+                                    'userName': user.displayName ?? user.email ?? 'User',
+                                    'amount': order.price,
+                                    'details': 'Paid for order via ${paymentResult['paymentResult']['method']}',
+                                    'stellarHash': paymentResult['paymentResult']['hash'],
+                                  };
+                                  
+                                  await FirebaseFirestore.instance.collection('service_orders').doc(order.id).update({
+                                    'events': FieldValue.arrayUnion([event]),
                                   });
-                                });
-                                // Log payment event
-                                final event = {
-                                  'type': 'payment',
-                                  'timestamp': DateTime.now(),
-                                  'userId': user.uid,
-                                  'userName': user.displayName ?? user.email ?? 'User',
-                                  'amount': order.price,
-                                  'details': 'Paid for order',
-                                };
-                                await FirebaseFirestore.instance.collection('service_orders').doc(order.id).update({
-                                  'events': FieldValue.arrayUnion([event]),
-                                });
-                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Payment successful!')));
+
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Payment successful! ${paymentResult['paymentResult']['method'] == 'stellar' ? 'Transaction recorded on Stellar blockchain.' : 'Balance updated.'}'),
+                                      backgroundColor: Colors.green,
+                                    )
+                                  );
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Payment failed: ${paymentResult['error']}'),
+                                      backgroundColor: Colors.red,
+                                    )
+                                  );
+                                }
                               } catch (e) {
                                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Payment failed: '
                                     '${e.toString()}')));

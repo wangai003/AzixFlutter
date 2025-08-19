@@ -7,12 +7,13 @@ import '../services/swap_service.dart';
 import '../services/mpesa_service.dart';
 import '../models/transaction.dart' as app_transaction;
 import 'package:provider/provider.dart';
-import '../providers/auth_provider.dart';
+import '../providers/auth_provider.dart' as local_auth;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 import 'dart:convert';
 import '../models/mining_session.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 
 class StellarProvider extends ChangeNotifier {
   final StellarService _stellarService = StellarService();
@@ -87,8 +88,115 @@ class StellarProvider extends ChangeNotifier {
       await loadTransactions();
       await loadWalletAssets();
       await loadMiningSessions();
+      // Check for any uncredited mining sessions
+      await _checkUncreditedMiningSessions();
       // Remove automatic mining timer start - mining will only start when user manually initiates
       // await startMiningTimer();
+    }
+  }
+
+  // Check for any uncredited mining sessions
+  Future<void> _checkUncreditedMiningSessions() async {
+    try {
+      final auth = firebase_auth.FirebaseAuth.instance;
+      final user = auth.currentUser;
+      if (user == null) return;
+
+      // Check if there are any completed mining sessions that haven't been credited
+      for (final session in _miningSessions) {
+        if (session.isExpired && session.earnedAkofa > 0) {
+          print('Found uncredited mining session: ${session.sessionId}');
+          // Try to credit the reward
+          await _recordMiningRewardAsync(session.earnedAkofa, session);
+        }
+      }
+    } catch (e) {
+      print('Error checking uncredited mining sessions: $e');
+    }
+  }
+
+  // Public method to manually check and process uncredited mining sessions
+  Future<void> checkAndProcessUncreditedSessions() async {
+    await _checkUncreditedMiningSessions();
+  }
+
+  // Method to manually force complete a mining session (for testing)
+  Future<void> forceCompleteMiningSession() async {
+    if (_miningSessions.isEmpty) return;
+    
+    final currentSession = _miningSessions.last;
+    if (currentSession.isActive && !currentSession.isExpired) {
+      print('Manually forcing completion of mining session: ${currentSession.sessionId}');
+      
+      // Calculate final accumulated time
+      final now = DateTime.now();
+      final timeSinceResume = now.difference(currentSession.lastResume).inSeconds;
+      currentSession.accumulatedSeconds = currentSession.accumulatedSeconds + timeSinceResume;
+      currentSession.lastResume = now;
+      
+      // Mark as expired
+      currentSession.isPaused = true;
+      
+      // Process the reward
+      final earned = currentSession.earnedAkofa;
+      if (earned > 0) {
+        await _recordMiningRewardAsync(earned, currentSession);
+      }
+      
+      // Save the session
+      await saveMiningSession(currentSession);
+      notifyListeners();
+    }
+  }
+
+  // Get detailed information about all mining sessions (for debugging)
+  Map<String, dynamic> getMiningSessionsDebugInfo() {
+    final debugInfo = <String, dynamic>{};
+    
+    for (int i = 0; i < _miningSessions.length; i++) {
+      final session = _miningSessions[i];
+      debugInfo['session_$i'] = {
+        'sessionId': session.sessionId,
+        'sessionStart': session.sessionStart.toIso8601String(),
+        'sessionEnd': session.sessionEnd.toIso8601String(),
+        'isActive': session.isActive,
+        'isExpired': session.isExpired,
+        'isPaused': session.isPaused,
+        'accumulatedSeconds': session.accumulatedSeconds,
+        'lastResume': session.lastResume.toIso8601String(),
+        'miningRate': session.miningRate,
+        'earnedAkofa': session.earnedAkofa,
+        'timeRemaining': session.sessionEnd.difference(DateTime.now()).inSeconds,
+      };
+    }
+    
+    debugInfo['totalSessions'] = _miningSessions.length;
+    debugInfo['hasActiveSession'] = _miningSessions.any((s) => s.isActive);
+    debugInfo['hasExpiredSession'] = _miningSessions.any((s) => s.isExpired);
+    debugInfo['miningTimerActive'] = _miningTimer != null;
+    
+    return debugInfo;
+  }
+
+  // Get account funding information
+  Future<Map<String, dynamic>> getAccountFundingInfo() async {
+    if (_publicKey == null) {
+      return {
+        'exists': false,
+        'status': 'no_wallet',
+        'message': 'No wallet found'
+      };
+    }
+    
+    try {
+      return await _stellarService.getAccountFundingInfo(_publicKey!);
+    } catch (e) {
+      return {
+        'exists': false,
+        'status': 'error',
+        'message': 'Error checking account status: $e',
+        'publicKey': _publicKey
+      };
     }
   }
 
@@ -187,7 +295,7 @@ class StellarProvider extends ChangeNotifier {
       bool useBiometrics = false;
       if (authMethod == 'google') {
         // Use Google UID
-        final authProvider = Provider.of<AuthProvider>(context, listen: false);
+        final authProvider = Provider.of<local_auth.AuthProvider>(context, listen: false);
         final success = await authProvider.signInWithGoogle();
         if (!success) {
           _setLoading(false);
@@ -1133,18 +1241,23 @@ class StellarProvider extends ChangeNotifier {
   void _updateMiningProgress() {
     if (_miningSessions.isEmpty) return;
     
+    // Find the current active session
     final activeSession = _miningSessions.lastWhere(
-      (session) => session.isActive,
-      orElse: () => MiningSession.newSession(miningRate: 0.25),
+      (session) => session.isActive && !session.isExpired,
+      orElse: () => _miningSessions.isNotEmpty ? _miningSessions.last : MiningSession.newSession(miningRate: 0.25),
     );
     
-    if (activeSession.isActive && !activeSession.isPaused) {
+    if (activeSession.isActive && !activeSession.isPaused && !activeSession.isExpired) {
       // Update session progress in real-time
       final now = DateTime.now();
       final timeSinceResume = now.difference(activeSession.lastResume).inSeconds;
       
       // Check if session should end (24 hours)
       if (now.isAfter(activeSession.sessionEnd)) {
+        print('Mining session ended: ${activeSession.sessionId}');
+        print('Session duration: ${activeSession.sessionEnd.difference(activeSession.sessionStart).inHours} hours');
+        print('Accumulated time: ${activeSession.accumulatedSeconds} seconds');
+        print('Earned AKOFA: ${activeSession.earnedAkofa}');
         _endMiningSession(activeSession);
       } else {
         // Update accumulated time and notify listeners every second
@@ -1158,6 +1271,10 @@ class StellarProvider extends ChangeNotifier {
         
         notifyListeners();
       }
+    } else if (activeSession.isExpired && !activeSession.isPaused) {
+      // Session has expired but hasn't been processed yet
+      print('Found expired session that needs processing: ${activeSession.sessionId}');
+      _endMiningSession(activeSession);
     }
   }
 
@@ -1168,7 +1285,8 @@ class StellarProvider extends ChangeNotifier {
     final earned = session.earnedAkofa;
     
     if (earned > 0) {
-      recordMiningReward(earned);
+      // Record mining reward asynchronously
+      _recordMiningRewardAsync(earned, session);
     }
     
     // Save session to storage
@@ -1178,6 +1296,60 @@ class StellarProvider extends ChangeNotifier {
     // _startNewMiningSession();
     
     notifyListeners();
+  }
+
+  // Helper method to handle async mining reward recording
+  Future<void> _recordMiningRewardAsync(double earned, MiningSession session) async {
+    try {
+      print('Recording mining reward: $earned AKOFA');
+      final success = await recordMiningReward(earned);
+      
+      if (success) {
+        print('Mining reward recorded successfully');
+        // Update session status to completed
+        session.isPaused = true;
+        await saveMiningSession(session);
+        
+        // Save to mining history
+        await _saveMiningSessionToHistory(session, 'completed', earned);
+      } else {
+        print('Failed to record mining reward');
+        // Save to mining history as failed
+        await _saveMiningSessionToHistory(session, 'failed', earned);
+      }
+    } catch (e) {
+      print('Error recording mining reward: $e');
+      // Save to mining history as failed
+      await _saveMiningSessionToHistory(session, 'failed', earned);
+    }
+  }
+
+  // Save mining session to history
+  Future<void> _saveMiningSessionToHistory(MiningSession session, String status, double earned) async {
+    try {
+      final auth = firebase_auth.FirebaseAuth.instance;
+      final user = auth.currentUser;
+      if (user == null) return;
+
+      final firestore = FirebaseFirestore.instance;
+      await firestore
+          .collection('mining_history')
+          .doc(user.uid)
+          .collection('sessions')
+          .add({
+        'sessionId': session.sessionId,
+        'sessionStart': session.sessionStart.toIso8601String(),
+        'sessionEnd': session.sessionEnd.toIso8601String(),
+        'duration': session.sessionEnd.difference(session.sessionStart).inSeconds,
+        'accumulatedSeconds': session.accumulatedSeconds,
+        'miningRate': session.miningRate,
+        'earned': earned,
+        'status': status,
+        'completedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('Failed to save mining session to history: $e');
+    }
   }
 
   void _startNewMiningSession() {
@@ -1283,9 +1455,26 @@ class StellarProvider extends ChangeNotifier {
     
     // Check if session has expired
     if (now.isAfter(session.sessionEnd)) {
-      // Session expired, mark it as expired but don't start new one automatically
+      // Session expired, process the mining reward before marking as expired
+      print('Restoring expired mining session: ${session.sessionId}');
+      
+      // Calculate final accumulated time
+      if (!session.isPaused && session.pausedAt == null) {
+        final timeSinceResume = session.sessionEnd.difference(session.lastResume).inSeconds;
+        session.accumulatedSeconds += timeSinceResume;
+      }
+      
+      // Mark as expired
       session.isPaused = true;
       session.pausedAt = now;
+      
+      // Process the mining reward if there are earnings
+      final earned = session.earnedAkofa;
+      if (earned > 0) {
+        print('Processing reward for expired session: $earned AKOFA');
+        await _recordMiningRewardAsync(earned, session);
+      }
+      
       await saveMiningSession(session);
       return;
     }

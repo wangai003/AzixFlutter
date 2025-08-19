@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+
 import '../providers/cart_provider.dart';
+import '../providers/marketplace_provider.dart';
+import '../providers/stellar_provider.dart';
 import '../theme/app_theme.dart';
 
 class CheckoutScreen extends StatefulWidget {
@@ -29,52 +31,248 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   Future<void> _submitOrder(BuildContext context) async {
     if (!_formKey.currentState!.validate()) return;
+    
     final cart = Provider.of<CartProvider>(context, listen: false);
+    final marketplace = Provider.of<MarketplaceProvider>(context, listen: false);
+    final stellar = Provider.of<StellarProvider>(context, listen: false);
+    
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('You must be logged in.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You must be logged in to complete checkout.'))
+      );
       return;
     }
+
+    if (cart.items.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Your cart is empty.'))
+      );
+      return;
+    }
+
     setState(() => _loading = true);
-    await FirebaseFirestore.instance.collection('orders').add({
-      'buyerId': user.uid,
-      'items': cart.items.map((e) => e.toJson()).toList(),
-      'shippingInfo': {
-        'name': _nameController.text.trim(),
-        'address': _addressController.text.trim(),
-        'phone': _phoneController.text.trim(),
-      },
-      'total': cart.totalPrice,
-      'status': 'pending',
-      'timestamp': FieldValue.serverTimestamp(),
-    });
-    cart.clearCart();
-    setState(() => _loading = false);
-    if (mounted) {
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          backgroundColor: AppTheme.white,
-          title: Row(
-            children: [
-              Icon(Icons.check_circle, color: AppTheme.primaryGold, size: 32),
-              const SizedBox(width: 8),
-              const Text('Order Placed'),
-            ],
-          ),
-          content: const Text('Your order has been placed successfully!'),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                Navigator.pop(context);
-              },
-              child: const Text('OK'),
+
+    try {
+      // Check if user has sufficient AKOFA balance
+      await stellar.refreshBalance();
+      final userBalance = double.tryParse(stellar.akofaBalance) ?? 0.0;
+      final totalAmount = cart.totalPrice;
+
+      if (userBalance < totalAmount) {
+        setState(() => _loading = false);
+        _showInsufficientBalanceDialog(context, userBalance, totalAmount);
+        return;
+      }
+
+      // Show payment confirmation dialog
+      final confirmed = await _showPaymentConfirmationDialog(context, totalAmount);
+      if (!confirmed) {
+        setState(() => _loading = false);
+        return;
+      }
+
+      // Process payment using MarketplaceProvider
+      final paymentResult = await marketplace.processCartPayment(
+        cartItems: cart.items,
+        shippingInfo: {
+          'name': _nameController.text.trim(),
+          'address': _addressController.text.trim(),
+          'phone': _phoneController.text.trim(),
+        },
+      );
+
+      setState(() => _loading = false);
+
+      if (paymentResult['success'] == true) {
+        // Clear cart and show success
+        cart.clearCart();
+        
+        if (mounted) {
+          _showSuccessDialog(context, paymentResult);
+        }
+      } else {
+        // Show error
+        if (mounted) {
+          _showErrorDialog(context, paymentResult['error'] ?? 'Payment failed');
+        }
+      }
+
+    } catch (e) {
+      setState(() => _loading = false);
+      if (mounted) {
+        _showErrorDialog(context, e.toString());
+      }
+    }
+  }
+
+  Future<bool> _showPaymentConfirmationDialog(BuildContext context, double amount) async {
+    return await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.white,
+        title: Row(
+          children: [
+            Icon(Icons.payment, color: AppTheme.primaryGold, size: 28),
+            const SizedBox(width: 8),
+            const Text('Confirm Payment'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Total Amount: ${amount.toStringAsFixed(6)} AKOFA'),
+            const SizedBox(height: 8),
+            Text(
+              'This payment will be processed using your AKOFA tokens via the Stellar blockchain.',
+              style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
             ),
           ],
         ),
-      );
-    }
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryGold,
+              foregroundColor: AppTheme.black,
+            ),
+            child: const Text('Pay with AKOFA'),
+          ),
+        ],
+      ),
+    ) ?? false;
+  }
+
+  void _showInsufficientBalanceDialog(BuildContext context, double balance, double required) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.white,
+        title: Row(
+          children: [
+            Icon(Icons.account_balance_wallet, color: Colors.orange, size: 28),
+            const SizedBox(width: 8),
+            const Text('Insufficient Balance'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Your AKOFA Balance: ${balance.toStringAsFixed(6)}'),
+            Text('Required Amount: ${required.toStringAsFixed(6)}'),
+            const SizedBox(height: 8),
+            Text(
+              'You need ${(required - balance).toStringAsFixed(6)} more AKOFA to complete this purchase.',
+              style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              // Navigate to buy AKOFA screen or wallet
+              Navigator.of(context).pushReplacementNamed('/wallet');
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryGold,
+              foregroundColor: AppTheme.black,
+            ),
+            child: const Text('Get AKOFA'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSuccessDialog(BuildContext context, Map<String, dynamic> paymentResult) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.white,
+        title: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.green, size: 32),
+            const SizedBox(width: 8),
+            const Text('Payment Successful!'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Your order has been placed and paid successfully!'),
+            const SizedBox(height: 8),
+            Text('Order ID: ${paymentResult['orderId']}'),
+            Text('Amount Paid: ${paymentResult['totalAmount'].toStringAsFixed(6)} AKOFA'),
+            const SizedBox(height: 8),
+            Text(
+              'Vendors have been notified and will begin processing your order.',
+              style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop(); // Close dialog
+              Navigator.of(context).pop(); // Close checkout
+              Navigator.of(context).pop(); // Close cart
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryGold,
+              foregroundColor: AppTheme.black,
+            ),
+            child: const Text('Continue Shopping'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showErrorDialog(BuildContext context, String error) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.white,
+        title: Row(
+          children: [
+            Icon(Icons.error, color: Colors.red, size: 28),
+            const SizedBox(width: 8),
+            const Text('Payment Failed'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Sorry, we could not process your payment.'),
+            const SizedBox(height: 8),
+            Text(
+              error,
+              style: AppTheme.bodyMedium.copyWith(color: Colors.red),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Try Again'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override

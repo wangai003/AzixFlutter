@@ -2,27 +2,36 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'providers/auth_provider.dart' as local_auth;
 import 'providers/stellar_provider.dart';
+import 'providers/secure_stellar_provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/admin_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/notification_provider.dart';
 import 'providers/security_provider.dart';
 import 'providers/cart_provider.dart';
+import 'providers/unified_cart_provider.dart';
+import 'providers/search_provider.dart';
 import 'providers/wishlist_provider.dart';
+import 'providers/marketplace/marketplace_provider.dart';
+import 'services/secure_mining_service.dart';
+import 'services/mining_security_service.dart';
+import 'services/app_initialization_service.dart';
+import 'services/stellar_service.dart';
+import 'services/notification_service.dart';
 import 'theme/app_theme.dart';
-import 'utils/responsive_layout.dart';
+
 import 'wrapper.dart';
 import 'screens/all_transactions_screen.dart';
 import 'screens/admin/admin_dashboard_screen.dart';
 import 'screens/vendor/product_management_screen.dart';
 import 'screens/vendor/service_management_screen.dart';
-import 'screens/marketplace_home_screen.dart';
+import 'screens/marketplace/functional_responsive_marketplace.dart';
 import 'screens/onboarding/goods_vendor_onboarding_screen.dart';
 import 'screens/onboarding/service_vendor_onboarding_screen.dart';
 import 'screens/user_registration_screen.dart';
@@ -41,6 +50,14 @@ Future<void> main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
     print('DEBUG: Firebase initialized successfully');
+    
+    // Initialize notification service
+    await NotificationService.initialize();
+    print('DEBUG: Notification service initialized successfully');
+    
+    // Initialize the complete app system
+    await AppInitializationService.initializeApp();
+    
   } catch (e, stack) {
     // Print and optionally log the error
     print('Failed to initialize Firebase: $e');
@@ -72,10 +89,43 @@ class MyApp extends StatelessWidget {
             return previousStellarProvider ?? StellarProvider();
           },
         ),
+        // Enhanced secure mining provider
+        ChangeNotifierProxyProvider<local_auth.AuthProvider, SecureStellarProvider>(
+          create: (_) => SecureStellarProvider(),
+          update: (_, auth, previousProvider) {
+            if (auth.isAuthenticated && previousProvider != null) {
+              // Auto-initialize when authenticated
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                // Provider will auto-initialize
+              });
+            }
+            return previousProvider ?? SecureStellarProvider();
+          },
+        ),
+        // Mining services
+        Provider<SecureMiningService>(
+          create: (_) => SecureMiningService()..initialize(),
+        ),
+        Provider<MiningSecurityService>(
+          create: (_) => MiningSecurityService(),
+        ),
         ChangeNotifierProvider(create: (_) => ChatProvider()),
         ChangeNotifierProvider(create: (_) => AdminProvider()),
         ChangeNotifierProvider(create: (_) => CartProvider()),
+        ChangeNotifierProvider(create: (_) => UnifiedCartProvider()),
+        ChangeNotifierProvider(create: (_) => SearchProvider()),
         ChangeNotifierProvider(create: (_) => WishlistProvider()),
+        // Enhanced marketplace provider with Stellar integration
+        ChangeNotifierProxyProvider<StellarProvider, EnhancedMarketplaceProvider>(
+          create: (_) => EnhancedMarketplaceProvider(
+            stellarService: StellarService(),
+          ),
+          update: (_, stellarProvider, previousMarketplaceProvider) {
+            return previousMarketplaceProvider ?? EnhancedMarketplaceProvider(
+              stellarService: StellarService(),
+            );
+          },
+        ),
       ],
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, _) {
@@ -99,7 +149,7 @@ class MyApp extends StatelessWidget {
             routes: {
               '/all-transactions': (context) => const AllTransactionsScreen(),
               '/admin/dashboard': (context) => const AdminDashboardScreen(),
-              '/marketplace': (context) => const MarketplaceHomeScreen(),
+              '/marketplace': (context) => const FunctionalResponsiveMarketplace(),
               '/vendor/products': (context) => const ProductManagementScreen(),
               '/vendor/services': (context) => const ServiceManagementScreen(),
               '/onboarding/goods': (context) => const GoodsVendorOnboardingScreen(),

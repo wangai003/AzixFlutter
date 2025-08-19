@@ -39,6 +39,28 @@ class ServiceOrder {
     this.paymentDetails,
   });
 
+  factory ServiceOrder.fromFirestore(String id, Map<String, dynamic> data) {
+    return ServiceOrder(
+      id: id,
+      serviceId: data['serviceId'] ?? '',
+      buyerId: data['buyerId'] ?? '',
+      vendorId: data['vendorId'] ?? '',
+      package: Map<String, dynamic>.from(data['package'] ?? {}),
+      requirements: data['requirements'] ?? '',
+      status: data['status'] ?? 'pending',
+      price: (data['price'] ?? 0.0).toDouble(),
+      milestones: data['milestones']?.cast<Map<String, dynamic>>(),
+      messages: data['messages']?.cast<Map<String, dynamic>>(),
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      deliveryFiles: data['deliveryFiles']?.cast<String>(),
+      deliveryMessage: data['deliveryMessage'],
+      review: data['review'] != null ? Map<String, dynamic>.from(data['review']) : null,
+      paymentStatus: data['paymentStatus'],
+      paymentDetails: data['paymentDetails'] != null ? Map<String, dynamic>.from(data['paymentDetails']) : null,
+    );
+  }
+
   factory ServiceOrder.fromJson(Map<String, dynamic> json, String id) {
     return ServiceOrder(
       id: id,

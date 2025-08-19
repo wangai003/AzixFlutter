@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Allow read/write access to authenticated users for their own USER document
+    match /USER/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Secure mining sessions - users can only access their own sessions
+    match /secure_mining_sessions/{sessionId} {
+      allow read, write: if request.auth != null 
+        && request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null 
+        && request.auth.uid == request.resource.data.userId;
+    }
+    
+    // Secure mining history - users can only access their own history
+    match /secure_mining_history/{userId}/sessions/{sessionId} {
+      allow read, write: if request.auth != null 
+        && request.auth.uid == userId;
+    }
+    
+    // Mining attempts - users can access their own attempts
+    match /mining_attempts/{userId}/attempts/{attemptId} {
+      allow read, write: if request.auth != null 
+        && request.auth.uid == userId;
+    }
+    
+    // Security audit - read-only for authenticated users, write for system
+    match /security_audit/{auditId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+    }
+    
+    // Transactions - users can access their own transactions
+    match /transactions/{transactionId} {
+      allow read, write: if request.auth != null 
+        && (request.auth.uid == resource.data.userId 
+        || request.auth.uid == resource.data.senderUid);
+    }
+    
+    // Allow read access to all other collections for authenticated users
+    match /{document=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+  }
+}

@@ -341,4 +341,12 @@ class AuthProvider extends ChangeNotifier {
       return false;
     }
   }
+
+  // Refresh user data
+  Future<void> refreshUserData() async {
+    if (_user != null) {
+      // Trigger a refresh by notifying listeners
+      notifyListeners();
+    }
+  }
 }

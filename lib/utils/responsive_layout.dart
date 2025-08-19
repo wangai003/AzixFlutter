@@ -96,6 +96,68 @@ class ResponsiveLayout {
       largeDesktop: 1200.0,
     );
   }
+
+  /// Returns true if the current screen is tablet or desktop
+  static bool isTabletOrDesktop(BuildContext context) {
+    return MediaQuery.of(context).size.width >= mobileBreakpoint;
+  }
+
+  /// Returns responsive padding based on screen size
+  static double getResponsivePadding(BuildContext context) {
+    return getValueForScreenType<double>(
+      context: context,
+      mobile: 16.0,
+      tablet: 20.0,
+      desktop: 24.0,
+      largeDesktop: 32.0,
+    );
+  }
+
+  /// Returns responsive spacing based on screen size
+  static double getResponsiveSpacing(BuildContext context, double baseSpacing) {
+    final multiplier = getValueForScreenType<double>(
+      context: context,
+      mobile: 1.0,
+      tablet: 1.2,
+      desktop: 1.4,
+      largeDesktop: 1.6,
+    );
+    return baseSpacing * multiplier;
+  }
+
+  /// Returns responsive font size based on screen size
+  static double getResponsiveFontSize(BuildContext context, double baseFontSize) {
+    final multiplier = getValueForScreenType<double>(
+      context: context,
+      mobile: 1.0,
+      tablet: 1.1,
+      desktop: 1.2,
+      largeDesktop: 1.3,
+    );
+    return baseFontSize * multiplier;
+  }
+
+  /// Returns grid cross axis count based on screen size
+  static int getGridCrossAxisCount(BuildContext context) {
+    return getValueForScreenType<int>(
+      context: context,
+      mobile: 2,
+      tablet: 3,
+      desktop: 4,
+      largeDesktop: 5,
+    );
+  }
+
+  /// Returns grid child aspect ratio based on screen size
+  static double getGridChildAspectRatio(BuildContext context) {
+    return getValueForScreenType<double>(
+      context: context,
+      mobile: 0.75,
+      tablet: 0.8,
+      desktop: 0.85,
+      largeDesktop: 0.9,
+    );
+  }
 }
 
 /// A widget that adapts its layout based on screen size

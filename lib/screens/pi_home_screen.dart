@@ -13,7 +13,9 @@ import '../providers/auth_provider.dart' as local_auth;
 import '../theme/app_theme.dart';
 import '../utils/responsive_layout.dart';
 import '../models/mining_session.dart';
+import '../models/secure_mining_session.dart';
 import '../providers/stellar_provider.dart';
+import '../providers/secure_stellar_provider.dart';
 
 class PiHomeScreen extends StatefulWidget {
   const PiHomeScreen({Key? key}) : super(key: key);
@@ -1540,6 +1542,312 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
                   child: const Text('Summary'),
                 ),
               ],
+            ),
+            
+            const SizedBox(height: 16),
+            
+            // Check for uncredited sessions button
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () async {
+                  final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
+                  await stellarProvider.checkAndProcessUncreditedSessions();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Checking for uncredited mining sessions...'),
+                      backgroundColor: Colors.blue,
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.refresh),
+                label: const Text('Check for Uncredited Sessions'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.primaryGold,
+                  side: BorderSide(color: AppTheme.primaryGold),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+            
+            const SizedBox(height: 8),
+            
+            // Force complete mining session button (for testing)
+            if (session != null && session.isActive && !session.isExpired)
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
+                    await stellarProvider.forceCompleteMiningSession();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Forcing completion of mining session...'),
+                        backgroundColor: Colors.orange,
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.timer_off),
+                  label: const Text('Force Complete Session (Test)'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.orange,
+                    side: BorderSide(color: Colors.orange),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ),
+            
+            const SizedBox(height: 8),
+            
+            // Debug mining sessions button
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
+                  final debugInfo = stellarProvider.getMiningSessionsDebugInfo();
+                  
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      backgroundColor: AppTheme.black,
+                      title: Text(
+                        'Mining Sessions Debug Info',
+                        style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
+                      ),
+                      content: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: debugInfo.entries.map((entry) {
+                            if (entry.key.startsWith('session_')) {
+                              final sessionData = entry.value as Map<String, dynamic>;
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Session ${entry.key.split('_')[1]}',
+                                    style: AppTheme.bodyLarge.copyWith(
+                                      color: AppTheme.primaryGold,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  ...sessionData.entries.map((sessionEntry) => Text(
+                                    '  ${sessionEntry.key}: ${sessionEntry.value}',
+                                    style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+                                  )),
+                                  const SizedBox(height: 8),
+                                ],
+                              );
+                            } else {
+                              return Text(
+                                '${entry.key}: ${entry.value}',
+                                style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
+                              );
+                            }
+                          }).toList(),
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: Text('Close', style: TextStyle(color: AppTheme.primaryGold)),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.bug_report),
+                label: const Text('Debug Mining Sessions'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.purple,
+                  side: BorderSide(color: Colors.purple),
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+            
+            const SizedBox(height: 8),
+            
+            // Check account funding status button
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () async {
+                  final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
+                  final fundingInfo = await stellarProvider.getAccountFundingInfo();
+                  
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      backgroundColor: AppTheme.black,
+                      title: Text(
+                        'Account Funding Status',
+                        style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
+                      ),
+                      content: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: fundingInfo['status'] == 'active' 
+                                  ? Colors.green.withOpacity(0.2)
+                                  : Colors.orange.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: fundingInfo['status'] == 'active' 
+                                    ? Colors.green 
+                                    : Colors.orange,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    fundingInfo['status'] == 'active' 
+                                      ? Icons.check_circle 
+                                      : Icons.warning,
+                                    color: fundingInfo['status'] == 'active' 
+                                      ? Colors.green 
+                                      : Colors.orange,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      fundingInfo['message'] ?? 'Unknown status',
+                                      style: AppTheme.bodyMedium.copyWith(
+                                        color: AppTheme.white,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            
+                            if (fundingInfo['publicKey'] != null) ...[
+                              const SizedBox(height: 16),
+                              Text(
+                                'Public Key:',
+                                style: AppTheme.bodyMedium.copyWith(
+                                  color: AppTheme.primaryGold,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.darkGrey.withOpacity(0.3),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: SelectableText(
+                                  fundingInfo['publicKey'],
+                                  style: AppTheme.bodySmall.copyWith(
+                                    color: AppTheme.grey,
+                                    fontFamily: 'Monospace',
+                                  ),
+                                ),
+                              ),
+                            ],
+                            
+                            if (fundingInfo['fundingInstructions'] != null) ...[
+                              const SizedBox(height: 16),
+                              Text(
+                                'Funding Instructions:',
+                                style: AppTheme.bodyMedium.copyWith(
+                                  color: AppTheme.primaryGold,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              ...(fundingInfo['fundingInstructions'] as List<String>).map((instruction) => 
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 4),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text('• ', style: TextStyle(color: AppTheme.primaryGold)),
+                                      Expanded(
+                                        child: Text(
+                                          instruction,
+                                          style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                            
+                            if (fundingInfo['testnetFaucet'] != null) ...[
+                              const SizedBox(height: 16),
+                              Text(
+                                'Testnet Faucet:',
+                                style: AppTheme.bodyMedium.copyWith(
+                                  color: AppTheme.primaryGold,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              InkWell(
+                                onTap: () {
+                                  // You can implement URL launching here
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Copy this URL: ${fundingInfo['testnetFaucet']}'),
+                                      action: SnackBarAction(
+                                        label: 'Copy',
+                                        onPressed: () {
+                                          // Copy to clipboard
+                                        },
+                                      ),
+                                    ),
+                                  );
+                                },
+                                child: Text(
+                                  fundingInfo['testnetFaucet'],
+                                  style: AppTheme.bodySmall.copyWith(
+                                    color: AppTheme.primaryGold,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: Text('Close', style: TextStyle(color: AppTheme.primaryGold)),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.account_balance_wallet),
+                label: const Text('Check Account Funding'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.blue,
+                  side: BorderSide(color: Colors.blue),
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
             ),
           ],
         ),

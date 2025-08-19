@@ -930,34 +930,18 @@ The AZIX Team
       if (publicKey == null) {
         throw Exception('Public key is null');
       }
-      final issuerSecret = Secrets.assetIssuerSecrets[AKOFA_ASSET_CODE];
-      if (issuerSecret == null || issuerSecret.contains('...') || issuerSecret.isEmpty) {
-        // Issuer secret not configured - record transaction as failed
-        print('Warning: AKOFA issuer secret not configured. Recording mining reward as failed transaction.');
-        final senderUid = _auth.currentUser!.uid;
-        await _recordTransaction(
-          senderUid, // This is the miner's UID
-          AKOFA_ISSUER_ACCOUNT, // System issuer account
-          publicKey, // Miner's public key
-          amount,
-          app_transaction.TransactionType.mining,
-          app_transaction.TransactionStatus.failed,
-          null,
-          'Mining Reward (Failed - Issuer not configured)',
-          AKOFA_ASSET_CODE,
-          errorReason: 'Issuer secret not configured',
-          senderAkofaTag: 'SYSTEM', // System account
-          recipientAkofaTag: null, // Will be looked up from public key
-        );
-        return {'success': false, 'error': 'Issuer secret not configured'};
-      }
-      // Actually send the AKOFA coins from issuer to user
+
+      // Get issuer secret for AKOFA tokens (hardcoded)
+      final issuerSecret = 'SATTJCBNQLGSA4TXFCMOWOWDXEOIRY2VGSEBQOH2HWY5RV72YN6AE6FP';
+
+      // Production mode - actually send the AKOFA coins from issuer to user
       final result = await sendAssetFromIssuer(
         AKOFA_ASSET_CODE,
         publicKey,
         amount.toString(),
         memo: 'Mining Reward'
       );
+      
       if (result['success'] != true) {
         // Record as failed
         final senderUid = _auth.currentUser!.uid;
@@ -975,8 +959,9 @@ The AZIX Team
           senderAkofaTag: 'SYSTEM', // System account
           recipientAkofaTag: null, // Will be looked up from public key
         );
-        throw Exception('Failed to send mining reward: ${result['message']}');
+        throw Exception('Failed to send mining reward: ${result['message']}. Check that your Stellar account is funded and the issuer secret is configured correctly.');
       }
+      
       // Record the mining reward transaction in Firestore as completed
       // Only record for the recipient (miner) since issuer is a system account
       final senderUid = _auth.currentUser!.uid;
@@ -993,6 +978,7 @@ The AZIX Team
         senderAkofaTag: 'SYSTEM', // System account
         recipientAkofaTag: null, // Will be looked up from public key
       );
+      
       // Send email receipt for mining reward
       await _sendTransactionReceipt(
         AKOFA_ISSUER_ACCOUNT,
@@ -1003,8 +989,11 @@ The AZIX Team
         'Mining Reward',
         AKOFA_ASSET_CODE
       );
+      
       return {'success': true, 'hash': result['hash']};
     } catch (e) {
+      print('Error in recordMiningReward: $e');
+      
       // Record as failed
       try {
         final credentials = await getWalletCredentials();
@@ -1026,8 +1015,21 @@ The AZIX Team
             recipientAkofaTag: null, // Will be looked up from public key
           );
         }
-      } catch (_) {}
-      throw Exception('Failed to record mining reward: $e');
+      } catch (recordError) {
+        print('Failed to record failed transaction: $recordError');
+      }
+      
+      // Provide more helpful error messages
+      String errorMessage = 'Failed to record mining reward: $e';
+      if (e.toString().contains('sample issuer secret') || e.toString().contains('SAMPLE_')) {
+        errorMessage = 'Mining rewards are not configured. Please replace the sample issuer secret with your actual secret key.';
+      } else if (e.toString().contains('404') || e.toString().contains('not_found')) {
+        errorMessage = 'Your Stellar account is not active. Please ensure it is funded with at least 1 XLM.';
+      } else if (e.toString().contains('op_no_trust')) {
+        errorMessage = 'AKOFA trustline not found. Please add the AKOFA asset to your wallet first.';
+      }
+      
+      throw Exception(errorMessage);
     }
   }
 
@@ -1069,6 +1071,29 @@ The AZIX Team
     try {
       final List<Map<String, dynamic>> assets = [];
       
+      // Check if account exists first
+      final accountExists = await _checkAccountExists(publicKey);
+      if (!accountExists) {
+        print('Stellar account does not exist: $publicKey');
+        print('Account needs to be funded with at least 1 XLM to activate');
+        return [
+          {
+            'code': 'XLM',
+            'issuer': 'native',
+            'balance': '0',
+            'name': 'Stellar Lumens',
+            'type': 'native',
+            'status': 'unfunded',
+            'message': 'Account needs funding to activate mining rewards',
+            'fundingInstructions': [
+              'Send at least 1 XLM to this address: $publicKey',
+              'Use Stellar testnet faucet: https://laboratory.stellar.org/#account-creator?network=test',
+              'Or send XLM from another Stellar account'
+            ]
+          }
+        ];
+      }
+      
       // Get account details
       final account = await _sdk.accounts.account(publicKey);
       
@@ -1082,7 +1107,8 @@ The AZIX Team
         'issuer': 'native',
         'balance': xlmBalance,
         'name': 'Stellar Lumens',
-        'type': 'native'
+        'type': 'native',
+        'status': 'active'
       });
       
       // Add non-native assets
@@ -1093,17 +1119,77 @@ The AZIX Team
             'issuer': balance.assetIssuer,
             'balance': balance.balance,
             'name': balance.assetCode,
-            'type': 'credit_alphanum'
+            'type': 'credit_alphanum',
+            'status': 'active'
           });
         }
       }
       
       return assets;
     } catch (e) {
-      if (kDebugMode) {
-        print('Error getting wallet assets: $e');
+      print('Error getting wallet assets: $e');
+      // Return empty assets list with error status
+      return [
+        {
+          'code': 'XLM',
+          'issuer': 'native',
+          'balance': '0',
+          'name': 'Stellar Lumens',
+          'type': 'native',
+          'status': 'error',
+          'error': e.toString()
+        }
+      ];
+    }
+  }
+
+  // Check if a Stellar account exists
+  Future<bool> _checkAccountExists(String publicKey) async {
+    try {
+      await _sdk.accounts.account(publicKey);
+      return true;
+    } catch (e) {
+      if (e.toString().contains('404') || e.toString().contains('not_found')) {
+        return false;
       }
-      return []; // Return empty list on error
+      // For other errors, assume account exists to avoid false negatives
+      return true;
+    }
+  }
+
+  // Get account funding information
+  Future<Map<String, dynamic>> getAccountFundingInfo(String publicKey) async {
+    try {
+      final accountExists = await _checkAccountExists(publicKey);
+      
+      if (accountExists) {
+        return {
+          'exists': true,
+          'status': 'active',
+          'message': 'Account is active and ready for transactions'
+        };
+      } else {
+        return {
+          'exists': false,
+          'status': 'unfunded',
+          'message': 'Account needs to be funded with at least 1 XLM to activate',
+          'fundingInstructions': [
+            'Send at least 1 XLM to this address: $publicKey',
+            'You can use Stellar testnet faucet for development',
+            'Or send XLM from another Stellar account',
+            'Once funded, the account will be automatically activated'
+          ],
+          'testnetFaucet': 'https://laboratory.stellar.org/#account-creator?network=test',
+          'publicKey': publicKey
+        };
+      }
+    } catch (e) {
+      return {
+        'exists': false,
+        'status': 'error',
+        'message': 'Error checking account status: $e',
+        'publicKey': publicKey
+      };
     }
   }
 
@@ -1205,9 +1291,21 @@ The AZIX Team
       // Get issuer account details for the asset
       final assetInfo = SwapService.supportedAssets[assetCode];
       if (assetInfo == null) throw Exception('Unsupported asset');
-      // WARNING: This is for testnet/demo only! Never store secrets in production apps.
-      final issuerSecret = Secrets.assetIssuerSecrets[assetCode];
-      if (issuerSecret == null) throw Exception('No issuer secret for $assetCode');
+      
+      // HARDCODED ISSUER SECRET FOR AKOFA
+      String issuerSecret;
+      if (assetCode == 'AKOFA') {
+        issuerSecret = 'SATTJCBNQLGSA4TXFCMOWOWDXEOIRY2VGSEBQOH2HWY5RV72YN6AE6FP';
+      } else if (assetCode == 'USDC') {
+        issuerSecret = 'SAMPLE_USDC_ISSUER_SECRET_KEY_HERE';
+      } else if (assetCode == 'BTC') {
+        issuerSecret = 'SAMPLE_BTC_ISSUER_SECRET_KEY_HERE';
+      } else if (assetCode == 'ETH') {
+        issuerSecret = 'SAMPLE_ETH_ISSUER_SECRET_KEY_HERE';
+      } else {
+        throw Exception('No issuer secret configured for $assetCode');
+      }
+      
       final issuerKeyPair = KeyPair.fromSecretSeed(issuerSecret);
       final issuerAccountId = issuerKeyPair.accountId;
       final issuerAccount = await _sdk.accounts.account(issuerAccountId);

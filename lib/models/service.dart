@@ -1,10 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ServicePackage {
-  final String name;
-  final double price;
-  final String description;
-  final int deliveryTime; // in days
+  String name;
+  double price;
+  String description;
+  int deliveryTime; // in days
 
   ServicePackage({
     required this.name,
