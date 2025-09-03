@@ -82,10 +82,16 @@ class EnhancedMarketplaceProvider extends ChangeNotifier {
   /// Initialize provider
   Future<void> _initialize() async {
     try {
-      await _loadInitialData();
+      await loadInitialData();
     } catch (e) {
       _setError('Failed to initialize marketplace: ${e.toString()}');
     }
+  }
+  
+  /// Retry initialization
+  Future<void> retryInitialization() async {
+    _clearError();
+    await _initialize();
   }
   
   /// Set current user context
@@ -97,7 +103,7 @@ class EnhancedMarketplaceProvider extends ChangeNotifier {
   }
   
   /// Load initial marketplace data
-  Future<void> _loadInitialData() async {
+  Future<void> loadInitialData() async {
     _setLoading(true);
     
     try {
@@ -603,7 +609,7 @@ class EnhancedMarketplaceProvider extends ChangeNotifier {
   /// Refresh all data
   Future<void> refresh() async {
     _clearError();
-    await _loadInitialData();
+    await loadInitialData();
     if (_currentUserId != null) {
       await _loadUserData();
     }

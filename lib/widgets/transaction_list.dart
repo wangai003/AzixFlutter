@@ -143,16 +143,19 @@ class TransactionList extends StatelessWidget {
                       style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      tx.timestamp.toString(),
-                      style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
+                    Flexible(
+                      child: Text(
+                        _formatTimestamp(tx.timestamp),
+                        style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     const SizedBox(width: 8),
-                    // Show Akofa tags for sender/recipient
-                    if (tx.type == TransactionType.send)
-                      Text('To: ' + (tx.recipientAkofaTag != null && tx.recipientAkofaTag!.isNotEmpty ? '₳${tx.recipientAkofaTag}' : 'Unknown'), style: AppTheme.bodySmall.copyWith(color: AppTheme.primaryGold)),
-                    if (tx.type == TransactionType.receive)
-                      Text('From: ' + (tx.senderAkofaTag != null && tx.senderAkofaTag!.isNotEmpty ? '₳${tx.senderAkofaTag}' : 'Unknown'), style: AppTheme.bodySmall.copyWith(color: AppTheme.primaryGold)),
+                    // Show sender and recipient information for all transaction types
+                    if (tx.senderAkofaTag != null && tx.senderAkofaTag!.isNotEmpty)
+                      Text('From: ₳${tx.senderAkofaTag}', style: AppTheme.bodySmall.copyWith(color: AppTheme.primaryGold)),
+                    if (tx.recipientAkofaTag != null && tx.recipientAkofaTag!.isNotEmpty && tx.recipientAkofaTag != tx.senderAkofaTag)
+                      Text('To: ₳${tx.recipientAkofaTag}', style: AppTheme.bodySmall.copyWith(color: AppTheme.primaryGold)),
                   ],
                 ),
               ),
@@ -212,12 +215,13 @@ class TransactionList extends StatelessWidget {
             ),
           ),
           subtitle: Text(
-            tx.status.toString().split('.').last + ' • ' + tx.timestamp.toString() +
-            (tx.type == TransactionType.send
-              ? ' • To: ' + (tx.recipientAkofaTag != null && tx.recipientAkofaTag!.isNotEmpty ? '₳${tx.recipientAkofaTag}' : 'Unknown')
-              : tx.type == TransactionType.receive
-                ? ' • From: ' + (tx.senderAkofaTag != null && tx.senderAkofaTag!.isNotEmpty ? '₳${tx.senderAkofaTag}' : 'Unknown')
-                : ''),
+            tx.status.toString().split('.').last + ' • ' + _formatTimestamp(tx.timestamp) +
+            (tx.senderAkofaTag != null && tx.senderAkofaTag!.isNotEmpty
+              ? ' • From: ₳${tx.senderAkofaTag}'
+              : '') +
+            (tx.recipientAkofaTag != null && tx.recipientAkofaTag!.isNotEmpty && tx.recipientAkofaTag != tx.senderAkofaTag
+              ? ' • To: ₳${tx.recipientAkofaTag}'
+              : ''),
             style: AppTheme.bodySmall.copyWith(
               color: AppTheme.grey,
               fontSize: isTablet ? 14 : null,
@@ -237,13 +241,13 @@ class TransactionList extends StatelessWidget {
     );
   }
   
-  Color _getStatusColor(TransactionStatus status) {
-    switch (status) {
-      case TransactionStatus.completed:
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'completed':
         return Colors.green;
-      case TransactionStatus.pending:
+      case 'pending':
         return Colors.orange;
-      case TransactionStatus.failed:
+      case 'failed':
         return Colors.red;
       default:
         return AppTheme.grey;
@@ -258,6 +262,20 @@ class TransactionList extends StatelessWidget {
       },
     );
   }
+  
+  String _formatTimestamp(DateTime timestamp) {
+    final now = DateTime.now();
+    final difference = now.difference(timestamp);
+    
+    // Show exact date and time for recent transactions (within 24 hours)
+    if (difference.inHours < 24) {
+      return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')} • ${timestamp.day}/${timestamp.month}/${timestamp.year}';
+    } else if (difference.inDays > 0) {
+      return '${difference.inDays}d ago • ${timestamp.day}/${timestamp.month}/${timestamp.year}';
+    } else {
+      return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')} • ${timestamp.day}/${timestamp.month}/${timestamp.year}';
+    }
+  }
 }
 
 class _TransactionDetailsDialog extends StatefulWidget {
@@ -269,35 +287,7 @@ class _TransactionDetailsDialog extends StatefulWidget {
 }
 
 class _TransactionDetailsDialogState extends State<_TransactionDetailsDialog> {
-  String? senderAkofaTag;
-  bool loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _fetchSenderAkofaTag();
-  }
-
-  Future<void> _fetchSenderAkofaTag() async {
-    final senderAddress = widget.tx.senderAddress;
-    if (senderAddress.isEmpty) {
-      setState(() { loading = false; });
-      return;
-    }
-    final query = await firestore.FirebaseFirestore.instance
-        .collection('USER')
-        .where('stellarPublicKey', isEqualTo: senderAddress)
-        .limit(1)
-        .get();
-    if (query.docs.isNotEmpty && query.docs.first.data()['akofaTag'] != null && query.docs.first.data()['akofaTag'].toString().isNotEmpty) {
-      setState(() {
-        senderAkofaTag = '₳' + query.docs.first.data()['akofaTag'];
-        loading = false;
-      });
-    } else {
-      setState(() { loading = false; });
-    }
-  }
+  // No need to fetch Akofa tags separately - they're already populated by the blockchain service
 
   @override
   Widget build(BuildContext context) {
@@ -322,15 +312,15 @@ class _TransactionDetailsDialogState extends State<_TransactionDetailsDialog> {
           children: [
             _detailRow('Amount', tx.amount.toString() + ' ' + tx.assetCode),
             _detailRow('Status', tx.statusLabel),
-            _detailRow('Date', tx.timestamp.toString()),
-            _detailRow('Sender', senderDisplay),
-            _detailRow('Recipient', recipientDisplay),
+            _detailRow('Date', _formatTimestamp(tx.timestamp)),
+            _detailRow('Sender', '${senderDisplay} (${tx.senderAddress ?? 'Unknown'})'),
+            _detailRow('Recipient', '${recipientDisplay} (${tx.recipientAddress ?? 'Unknown'})'),
             if (tx.memo != null && tx.memo!.isNotEmpty)
               _detailRow('Memo', tx.memo!),
-            if (tx.hash != null && tx.hash!.isNotEmpty)
-              _detailRow('Transaction Hash', tx.hash!),
+            if (tx.transactionHash != null && tx.transactionHash!.isNotEmpty)
+              _detailRow('Transaction Hash', tx.transactionHash!),
             const SizedBox(height: 16),
-            if (tx.hash != null && tx.hash!.isNotEmpty)
+            if (tx.transactionHash != null && tx.transactionHash!.isNotEmpty)
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
@@ -344,7 +334,7 @@ class _TransactionDetailsDialogState extends State<_TransactionDetailsDialog> {
                   icon: const Icon(Icons.open_in_new),
                   label: const Text('View on Stellar Explorer'),
                   onPressed: () {
-                    final uri = Uri.parse(tx.hash!);
+                    final uri = Uri.parse(tx.transactionHash!);
                     launchUrl(uri, mode: LaunchMode.externalApplication);
                   },
                 ),
@@ -374,5 +364,19 @@ class _TransactionDetailsDialogState extends State<_TransactionDetailsDialog> {
         ],
       ),
     );
+  }
+  
+  String _formatTimestamp(DateTime timestamp) {
+    final now = DateTime.now();
+    final difference = now.difference(timestamp);
+    
+    // Show exact date and time for recent transactions (within 24 hours)
+    if (difference.inHours < 24) {
+      return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')} • ${timestamp.day}/${timestamp.month}/${timestamp.year}';
+    } else if (difference.inDays > 0) {
+      return '${difference.inDays}d ago • ${timestamp.day}/${timestamp.month}/${timestamp.year}';
+    } else {
+      return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')} • ${timestamp.day}/${timestamp.month}/${timestamp.year}';
+    }
   }
 } 

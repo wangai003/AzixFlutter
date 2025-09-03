@@ -3,169 +3,174 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 enum TransactionType {
   send,
   receive,
-  mining
+  mining,
+  buyAkofa,
+  swap,
+  funding,
+  withdrawal
 }
 
 enum TransactionStatus {
   pending,
+  processing,
   completed,
-  failed
+  failed,
+  cancelled
 }
 
 class Transaction {
+  // Core fields
   final String id;
   final String userId;
-  final String senderAddress;
-  final String recipientAddress;
+  final String type;
+  final String status;
+  final double amount;
+  final String assetCode;
+  final DateTime timestamp;
+  
+  // Transaction details
+  final String? memo;
+  final String? description;
+  final String? transactionHash;
+  
+  // User identification
   final String? senderAkofaTag;
   final String? recipientAkofaTag;
-  final double amount;
-  final TransactionType type;
-  final TransactionStatus status;
-  final String? hash;
-  final DateTime timestamp;
-  final String? memo;
-  final String assetCode; // XLM or AKOFA
+  final String? senderAddress;
+  final String? recipientAddress;
+  
+  // Additional metadata
+  final Map<String, dynamic> metadata;
 
   Transaction({
     required this.id,
     required this.userId,
-    required this.senderAddress,
-    required this.recipientAddress,
-    this.senderAkofaTag,
-    this.recipientAkofaTag,
-    required this.amount,
     required this.type,
     required this.status,
-    this.hash,
+    required this.amount,
+    required this.assetCode,
     required this.timestamp,
     this.memo,
-    required this.assetCode,
+    this.description,
+    this.transactionHash,
+    this.senderAkofaTag,
+    this.recipientAkofaTag,
+    this.senderAddress,
+    this.recipientAddress,
+    this.metadata = const {},
   });
 
-  // Factory constructor to create a Transaction from a Firestore document
+  // Factory constructor from Firestore
   factory Transaction.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
-    
-    // Handle timestamp conversion safely
-    DateTime timestamp;
-    try {
-      if (data['timestamp'] is Timestamp) {
-        timestamp = (data['timestamp'] as Timestamp).toDate();
-      } else if (data['timestamp'] is DateTime) {
-        timestamp = data['timestamp'] as DateTime;
-      } else {
-        timestamp = DateTime.now(); // Fallback
-      }
-    } catch (e) {
-      print('Error parsing timestamp for transaction ${doc.id}: $e');
-      timestamp = DateTime.now(); // Fallback
-    }
     
     return Transaction(
       id: doc.id,
       userId: data['userId'] ?? '',
-      senderAddress: data['senderAddress'] ?? '',
-      recipientAddress: data['recipientAddress'] ?? '',
+      type: data['type'] ?? '',
+      status: data['status'] ?? '',
+      amount: (data['amount'] ?? 0).toDouble(),
+      assetCode: data['assetCode'] ?? '',
+      timestamp: data['timestamp'] is Timestamp 
+          ? (data['timestamp'] as Timestamp).toDate() 
+          : DateTime.now(),
+      memo: data['memo'],
+      description: data['description'],
+      transactionHash: data['transactionHash'],
       senderAkofaTag: data['senderAkofaTag'],
       recipientAkofaTag: data['recipientAkofaTag'],
-      amount: (data['amount'] ?? 0).toDouble(),
-      type: _parseTransactionType(data['type']),
-      status: _parseTransactionStatus(data['status']),
-      hash: data['hash'],
-      timestamp: timestamp,
-      memo: data['memo'],
-      assetCode: data['assetCode'] ?? 'AKOFA',
+      senderAddress: data['senderAddress'],
+      recipientAddress: data['recipientAddress'],
+      metadata: data['metadata'] as Map<String, dynamic>? ?? {},
     );
   }
 
-  // Convert Transaction to a Map for Firestore
+  // Convert to Firestore document
   Map<String, dynamic> toFirestore() {
     return {
       'userId': userId,
-      'senderAddress': senderAddress,
-      'recipientAddress': recipientAddress,
-      'senderAkofaTag': senderAkofaTag,
-      'recipientAkofaTag': recipientAkofaTag,
+      'type': type,
+      'status': status,
       'amount': amount,
-      'type': type.toString().split('.').last,
-      'status': status.toString().split('.').last,
-      'hash': hash,
+      'assetCode': assetCode,
       'timestamp': timestamp,
       'memo': memo,
-      'assetCode': assetCode,
+      'description': description,
+      'transactionHash': transactionHash,
+      'senderAkofaTag': senderAkofaTag,
+      'recipientAkofaTag': recipientAkofaTag,
+      'senderAddress': senderAddress,
+      'recipientAddress': recipientAddress,
+      'metadata': metadata,
     };
   }
 
-  // Helper method to parse TransactionType from string
-  static TransactionType _parseTransactionType(String? typeStr) {
-    if (typeStr == 'send') return TransactionType.send;
-    if (typeStr == 'receive') return TransactionType.receive;
-    if (typeStr == 'mining') return TransactionType.mining;
-    return TransactionType.receive; // Default
-  }
-
-  // Helper method to parse TransactionStatus from string
-  static TransactionStatus _parseTransactionStatus(String? statusStr) {
-    if (statusStr == 'pending') return TransactionStatus.pending;
-    if (statusStr == 'completed') return TransactionStatus.completed;
-    if (statusStr == 'failed') return TransactionStatus.failed;
-    return TransactionStatus.pending; // Default
-  }
-
-  // Get a human-readable description of the transaction
-  String get description {
-    switch (type) {
-      case TransactionType.send:
-        return 'Sent $amount $assetCode';
-      case TransactionType.receive:
-        return 'Received $amount $assetCode';
-      case TransactionType.mining:
-        return 'Mined $amount $assetCode';
-    }
-  }
-
-  // Get a color based on the transaction type
-  // Note: This is just a placeholder, you'll need to implement this in your UI
+  // Helper getters
+  bool get isIncoming => type == 'receive' || type == 'mining' || type == 'buyAkofa';
+  bool get isOutgoing => type == 'send' || type == 'withdrawal';
+  
   String get typeLabel {
     switch (type) {
-      case TransactionType.send:
-        return 'Sent';
-      case TransactionType.receive:
-        return 'Received';
-      case TransactionType.mining:
-        return 'Mining Reward';
+      case 'send': return 'Sent';
+      case 'receive': return 'Received';
+      case 'mining': return 'Mining Reward';
+      case 'buyAkofa': return 'Bought';
+      case 'swap': return 'Swapped';
+      case 'funding': return 'Funded';
+      case 'withdrawal': return 'Withdrew';
+      default: return type;
     }
   }
 
-  // Get a status label
   String get statusLabel {
     switch (status) {
-      case TransactionStatus.pending:
-        return 'Pending';
-      case TransactionStatus.completed:
-        return 'Completed';
-      case TransactionStatus.failed:
-        return 'Failed';
+      case 'pending': return 'Pending';
+      case 'processing': return 'Processing';
+      case 'completed': return 'Completed';
+      case 'failed': return 'Failed';
+      case 'cancelled': return 'Cancelled';
+      default: return status;
     }
   }
 
-  // Convert transaction to map for compatibility
+  String get otherPartyAkofaTag {
+    if (isIncoming) {
+      return senderAkofaTag ?? 'Unknown';
+    } else {
+      return recipientAkofaTag ?? 'Unknown';
+    }
+  }
+
+  String get direction {
+    if (isIncoming) return 'Incoming';
+    if (isOutgoing) return 'Outgoing';
+    return 'Unknown';
+  }
+
+  // Convert to map for compatibility
   Map<String, dynamic> toMap() {
     return {
       'id': id,
       'userId': userId,
-      'senderAddress': senderAddress,
-      'recipientAddress': recipientAddress,
-      'senderAkofaTag': senderAkofaTag,
-      'recipientAkofaTag': recipientAkofaTag,
+      'type': type,
+      'status': status,
       'amount': amount,
-      'type': type.toString().split('.').last,
-      'status': status.toString().split('.').last,
-      'hash': hash,
+      'assetCode': assetCode,
       'timestamp': timestamp.toIso8601String(),
       'memo': memo,
-      'assetCode': assetCode,
+      'description': description,
+      'transactionHash': transactionHash,
+      'senderAkofaTag': senderAkofaTag,
+      'recipientAkofaTag': recipientAkofaTag,
+      'senderAddress': senderAddress,
+      'recipientAddress': recipientAddress,
+      'metadata': metadata,
+      'isIncoming': isIncoming,
+      'isOutgoing': isOutgoing,
+      'typeLabel': typeLabel,
+      'statusLabel': statusLabel,
+      'otherPartyAkofaTag': otherPartyAkofaTag,
+      'direction': direction,
     };
   }
 }

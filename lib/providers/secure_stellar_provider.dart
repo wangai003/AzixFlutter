@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/secure_mining_session.dart';
 import '../services/secure_mining_service.dart';
 import '../services/stellar_service.dart';
+import '../services/blockchain_transaction_service.dart';
 import '../services/real_time_mining_service.dart';
 
 /// Enhanced Stellar provider with secure mining capabilities
@@ -90,6 +91,16 @@ class SecureStellarProvider extends ChangeNotifier {
       print('🔄 Real-time mining update: ${session.earnedAkofa.toStringAsFixed(6)} AKOFA');
     });
   }
+  
+  /// Force refresh mining session data
+  Future<void> refreshMiningSession() async {
+    try {
+      await _loadMiningSession();
+      print('🔄 Mining session refreshed');
+    } catch (e) {
+      print('❌ Error refreshing mining session: $e');
+    }
+  }
 
   /// Load wallet state
   Future<void> _loadWalletState() async {
@@ -114,19 +125,29 @@ class SecureStellarProvider extends ChangeNotifier {
     notifyListeners();
     
     try {
-      // Load from real-time service first
+      // First try to restore from real-time service (most reliable)
       _currentMiningSession = _realTimeMiningService.getCurrentSession();
       
-      // Fallback to security service if needed
+      // If no session from real-time service, try security service
+      if (_currentMiningSession == null) {
+        _currentMiningSession = await _securityService.restoreSession();
+      }
+      
+      // If still no session, try to load from storage
       if (_currentMiningSession == null) {
         _currentMiningSession = await _securityService.loadSession();
       }
       
       if (_currentMiningSession != null) {
         _startMiningUpdateTimer();
+        print('✅ Mining session restored: ${_currentMiningSession!.earnedAkofa.toStringAsFixed(6)} AKOFA');
+        print('⏱️ Session progress: ${_currentMiningSession!.accumulatedSeconds}s / ${_currentMiningSession!.sessionEnd.difference(_currentMiningSession!.sessionStart).inSeconds}s');
+      } else {
+        print('ℹ️ No active mining session found');
       }
     } catch (e) {
       _setError('Failed to load mining session: $e');
+      print('❌ Error loading mining session: $e');
     }
     
     _isLoadingMiningSessions = false;
@@ -244,7 +265,7 @@ class SecureStellarProvider extends ChangeNotifier {
   Future<double> _getUserMiningRate() async {
     try {
       final userId = _auth.currentUser?.uid;
-      if (userId == null) return 0.25; // Default rate
+      if (userId == null) return 0.25; // EXACT: 0.25 AKOFA per hour
 
       final userDoc = await _firestore.collection('USER').doc(userId).get();
       if (!userDoc.exists) return 0.25;
@@ -258,7 +279,8 @@ class SecureStellarProvider extends ChangeNotifier {
         return 0.50; // 2x boost
       }
       
-      return 0.25; // Base rate
+      return 0.25; // EXACT base rate: 0.25 AKOFA per hour
+      // This means 6 AKOFA after 24 hours
     } catch (e) {
       print('Error getting mining rate: $e');
       return 0.25;
@@ -344,7 +366,7 @@ class SecureStellarProvider extends ChangeNotifier {
   /// Process mining reward with enhanced security
   Future<void> _processSecureMiningReward(SecureMiningSessionHistory history) async {
     try {
-      // Validate reward amount
+      // Validate reward amount - should be exactly 6 AKOFA for completed 24-hour session
       if (history.earnedAkofa <= 0) {
         throw Exception('Invalid reward amount');
       }
@@ -368,7 +390,7 @@ class SecureStellarProvider extends ChangeNotifier {
         await refreshBalance();
         await loadTransactions();
         
-        print('Secure mining reward processed: ${history.earnedAkofa} AKOFA');
+        print('✅ Mining session completed! ${history.earnedAkofa} AKOFA credited to wallet');
       } else {
         throw Exception('Failed to record reward: ${result['message']}');
       }
@@ -520,10 +542,18 @@ class SecureStellarProvider extends ChangeNotifier {
     if (!_hasWallet || _publicKey == null) return;
     
     try {
-      _balance = await _stellarService.getBalance(_publicKey!);
+      // Try to get AKOFA balance first, fallback to general balance
+      try {
+        _balance = await _stellarService.getAkofaBalance(_publicKey!);
+      } catch (e) {
+        // Fallback to general balance method
+        _balance = await _stellarService.getBalance(_publicKey!);
+      }
       notifyListeners();
+      print('💰 Balance refreshed: $_balance AKOFA');
     } catch (e) {
       _setError('Failed to refresh balance: $e');
+      print('❌ Error refreshing balance: $e');
     }
   }
 
@@ -545,8 +575,9 @@ class SecureStellarProvider extends ChangeNotifier {
     notifyListeners();
     
     try {
-      final txHistory = await _stellarService.getTransactionHistory();
-      _transactions = txHistory.map((tx) => tx.toMap()).toList();
+      // Use blockchain service instead of non-existent method
+      final blockchainTransactions = await BlockchainTransactionService.getUserTransactionsFromBlockchain();
+      _transactions = blockchainTransactions.map((tx) => tx.toMap()).toList();
       _isTransactionLoading = false;
       notifyListeners();
     } catch (e) {

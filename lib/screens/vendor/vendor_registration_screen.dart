@@ -25,6 +25,10 @@ class _VendorRegistrationScreenState extends State<VendorRegistrationScreen> {
   final _cityController = TextEditingController();
   final _stateController = TextEditingController();
   final _websiteController = TextEditingController();
+  final _instagramController = TextEditingController();
+  final _facebookController = TextEditingController();
+  final _twitterController = TextEditingController();
+  final _tiktokController = TextEditingController();
   
   String _selectedBusinessType = 'Individual';
   List<String> _selectedCategories = [];
@@ -61,6 +65,10 @@ class _VendorRegistrationScreenState extends State<VendorRegistrationScreen> {
     _cityController.dispose();
     _stateController.dispose();
     _websiteController.dispose();
+    _instagramController.dispose();
+    _facebookController.dispose();
+    _twitterController.dispose();
+    _tiktokController.dispose();
     super.dispose();
   }
 
@@ -94,6 +102,8 @@ class _VendorRegistrationScreenState extends State<VendorRegistrationScreen> {
               _buildContactInfoSection(),
               const SizedBox(height: 24),
               _buildCategoriesSection(),
+              const SizedBox(height: 24),
+              _buildSocialMediaSection(),
               const SizedBox(height: 24),
               _buildImagesSection(),
               const SizedBox(height: 32),
@@ -298,6 +308,38 @@ class _VendorRegistrationScreenState extends State<VendorRegistrationScreen> {
     );
   }
 
+  Widget _buildSocialMediaSection() {
+    return _buildSection(
+      title: 'Social Media',
+      subtitle: 'Connect your social media accounts (optional)',
+      children: [
+        _buildTextField(
+          controller: _instagramController,
+          label: 'Instagram',
+          hint: '@your_instagram_handle',
+        ),
+        const SizedBox(height: 16),
+        _buildTextField(
+          controller: _facebookController,
+          label: 'Facebook',
+          hint: 'facebook.com/your_page',
+        ),
+        const SizedBox(height: 16),
+        _buildTextField(
+          controller: _twitterController,
+          label: 'Twitter/X',
+          hint: '@your_twitter_handle',
+        ),
+        const SizedBox(height: 16),
+        _buildTextField(
+          controller: _tiktokController,
+          label: 'TikTok',
+          hint: '@your_tiktok_handle',
+        ),
+      ],
+    );
+  }
+
   Widget _buildImagesSection() {
     return _buildSection(
       title: 'Branding Images',
@@ -482,6 +524,10 @@ class _VendorRegistrationScreenState extends State<VendorRegistrationScreen> {
           validator: validator,
           keyboardType: keyboardType,
           maxLines: maxLines,
+          style: const TextStyle(
+            color: Colors.black87,
+            fontSize: 16,
+          ),
           decoration: InputDecoration(
             hintText: hint,
             hintStyle: TextStyle(
@@ -528,6 +574,10 @@ class _VendorRegistrationScreenState extends State<VendorRegistrationScreen> {
         DropdownButtonFormField<String>(
           value: value,
           onChanged: onChanged,
+          style: const TextStyle(
+            color: Colors.black87,
+            fontSize: 16,
+          ),
           decoration: InputDecoration(
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
@@ -589,6 +639,12 @@ class _VendorRegistrationScreenState extends State<VendorRegistrationScreen> {
           'city': _cityController.text.trim(),
           'state': _stateController.text.trim(),
           'website': _websiteController.text.trim(),
+        },
+        'socialMedia': {
+          'instagram': _instagramController.text.trim(),
+          'facebook': _facebookController.text.trim(),
+          'twitter': _twitterController.text.trim(),
+          'tiktok': _tiktokController.text.trim(),
         },
         'categories': _selectedCategories,
         'images': {

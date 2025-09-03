@@ -500,6 +500,106 @@ class SecureMiningService {
   /// Get current session
   SecureMiningSession? get currentSession => _currentSession;
 
+  /// Restore mining session from local storage and server
+  Future<SecureMiningSession?> restoreSession() async {
+    final userId = _auth.currentUser?.uid;
+    if (userId == null || _deviceId == null) return null;
+
+    try {
+      // First try to restore from local storage
+      final localSession = await _restoreSessionLocally();
+      if (localSession != null && localSession.isActive) {
+        // Validate with server
+        final serverSession = await _getSessionFromServer(userId, localSession.sessionId);
+        if (serverSession != null && serverSession.isActive) {
+          _currentSession = serverSession;
+          _startProofTimer();
+          _startValidationTimer();
+          return _currentSession;
+        }
+      }
+
+      // If local restoration failed, try server restoration
+      final activeServerSession = await _getActiveSessionFromServer(userId);
+      if (activeServerSession != null) {
+        _currentSession = activeServerSession;
+        await _saveSessionLocally(_currentSession!);
+        _startProofTimer();
+        _startValidationTimer();
+        return _currentSession;
+      }
+
+      return null;
+    } catch (e) {
+      print('Error restoring session: $e');
+      return null;
+    }
+  }
+
+  /// Restore session from local storage
+  Future<SecureMiningSession?> _restoreSessionLocally() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionData = prefs.getString(_sessionKey);
+      if (sessionData == null) return null;
+
+      final sessionMap = json.decode(sessionData) as Map<String, dynamic>;
+      final session = SecureMiningSession.fromJson(sessionMap);
+      
+      // Check if session is still valid
+      if (session.sessionEnd.isAfter(DateTime.now()) && session.isActive) {
+        return session;
+      }
+      
+      return null;
+    } catch (e) {
+      print('Error restoring local session: $e');
+      return null;
+    }
+  }
+
+  /// Get session from server by session ID
+  Future<SecureMiningSession?> _getSessionFromServer(String userId, String sessionId) async {
+    try {
+      final doc = await _firestore
+          .collection('secure_mining_sessions')
+          .doc(sessionId)
+          .get();
+
+      if (!doc.exists) return null;
+
+      final data = doc.data()!;
+      if (data['userId'] != userId || data['deviceId'] != _deviceId) return null;
+
+      return SecureMiningSession.fromJson(data);
+    } catch (e) {
+      print('Error getting session from server: $e');
+      return null;
+    }
+  }
+
+  /// Get active session from server for user
+  Future<SecureMiningSession?> _getActiveSessionFromServer(String userId) async {
+    try {
+      final query = await _firestore
+          .collection('secure_mining_sessions')
+          .where('userId', isEqualTo: userId)
+          .where('deviceId', isEqualTo: _deviceId)
+          .where('sessionEnd', isGreaterThan: Timestamp.now())
+          .where('isActive', isEqualTo: true)
+          .limit(1)
+          .get();
+
+      if (query.docs.isEmpty) return null;
+
+      final doc = query.docs.first;
+      return SecureMiningSession.fromJson(doc.data());
+    } catch (e) {
+      print('Error getting active session from server: $e');
+      return null;
+    }
+  }
+
   /// Check if user can start mining
   Future<bool> canStartMining() async {
     final userId = _auth.currentUser?.uid;

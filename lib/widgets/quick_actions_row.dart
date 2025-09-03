@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../theme/app_theme.dart';
 import '../utils/responsive_layout.dart';
+import '../widgets/enhanced_buy_akofa_dialog.dart';
 
 class QuickActionsRow extends StatelessWidget {
   final VoidCallback onSend;
@@ -23,9 +24,10 @@ class QuickActionsRow extends StatelessWidget {
     final isLargeDesktop = ResponsiveLayout.isLargeDesktop(context);
     final isWebPlatform = kIsWeb;
     
-    void _showComingSoon() {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('This feature is coming soon!')),
+    void _showBuyAkofaDialog() {
+      showDialog(
+        context: context,
+        builder: (context) => const EnhancedBuyAkofaDialog(),
       );
     }
     
@@ -61,14 +63,14 @@ class QuickActionsRow extends StatelessWidget {
           _ActionButton(
             icon: Icons.shopping_cart,
             label: 'Buy Akofa',
-            onTap: _showComingSoon,
+            onTap: _showBuyAkofaDialog,
             isLarge: isDesktop || isTablet,
           ),
           if (isDesktop)
             _ActionButton(
               icon: Icons.add_card,
               label: 'Buy',
-              onTap: _showComingSoon,
+              onTap: _showBuyAkofaDialog,
               isLarge: true,
             ),
         ],

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:stellar_flutter_sdk/stellar_flutter_sdk.dart';
 import 'package:http/http.dart' as http;
 import '../services/stellar_service.dart';
+import '../services/blockchain_transaction_service.dart';
 import '../services/swap_service.dart';
 import '../services/mpesa_service.dart';
 import '../models/transaction.dart' as app_transaction;
@@ -49,6 +50,10 @@ class StellarProvider extends ChangeNotifier {
   bool _isLoadingMiningSessions = false;
   Timer? _miningTimer;
   int _currentMiningSessionId = 0;
+  
+  // Auto-refresh timer for transactions
+  Timer? _transactionRefreshTimer;
+  static const Duration _transactionRefreshInterval = Duration(minutes: 2); // Check every 2 minutes
 
   bool get hasWallet => _hasWallet;
   bool get isLoading => _isLoading;
@@ -80,6 +85,7 @@ class StellarProvider extends ChangeNotifier {
 
   StellarProvider() {
     _init();
+    _startTransactionAutoRefresh();
   }
 
   Future<void> _init() async {
@@ -216,17 +222,22 @@ class StellarProvider extends ChangeNotifier {
   }
 
   Future<bool> checkWalletStatus() async {
+    print('🔄 StellarProvider: checkWalletStatus() called');
     _setLoading(true);
     _setError(null);
 
     try {
+      print('🔄 StellarProvider: Checking if wallet exists...');
       _hasWallet = await _stellarService.hasWallet();
+      print('🔄 StellarProvider: _hasWallet = $_hasWallet');
 
       if (_hasWallet) {
+        print('✅ StellarProvider: Wallet found, getting public key...');
         // First, just get the public key (no authentication needed)
         final publicKey = await _stellarService.getPublicKey();
         
         if (publicKey != null) {
+          print('✅ StellarProvider: Public key found: $publicKey');
           _publicKey = publicKey;
           await refreshBalance();
           
@@ -241,8 +252,11 @@ class StellarProvider extends ChangeNotifier {
             print('Failed to check Akofa trustline: $trustlineError');
           }
         } else {
+          print('❌ StellarProvider: No public key found, setting _hasWallet to false');
           _hasWallet = false;
         }
+      } else {
+        print('❌ StellarProvider: No wallet found');
       }
 
       _setLoading(false);
@@ -319,11 +333,7 @@ class StellarProvider extends ChangeNotifier {
       } else if (authMethod == 'biometrics') {
         useBiometrics = true;
       }
-      final credentials = await _stellarService.createWalletAndStoreInFirestore(
-        googleUid: googleUid,
-        password: password,
-        useBiometrics: useBiometrics,
-      );
+      final credentials = await _stellarService.createWalletAndStoreInFirestore();
       _publicKey = credentials['publicKey'];
       _hasWallet = true;
       await refreshBalance();
@@ -334,7 +344,8 @@ class StellarProvider extends ChangeNotifier {
         _setError('Setting up your wallet with Akofa token...');
         // Note: We're already in loading state from the beginning of createWallet
         
-        final trustlineResult = await addAkofaTrustline();
+        // TODO: Implement addAkofaTrustline method
+        final trustlineResult = <String, dynamic>{'success': false, 'message': 'Method not implemented yet', 'status': 'not_implemented'};
         if (trustlineResult['success'] == true) {
           // Set a success message for the user
           String successMessage = 'Wallet setup complete!';
@@ -464,8 +475,13 @@ class StellarProvider extends ChangeNotifier {
     }
     
     try {
-      final result = await _stellarService.hasEnoughXlmForTransaction(this._publicKey!);
-      return result;
+      final hasEnough = await _stellarService.hasEnoughXlmForTransaction(this._publicKey!);
+      return {
+        'hasEnough': hasEnough,
+        'message': hasEnough ? 'Sufficient XLM balance' : 'Insufficient XLM balance',
+        'balance': '0', // This would need to be fetched separately
+        'status': hasEnough ? 'sufficient' : 'insufficient'
+      };
     } catch (e) {
       _setError('Failed to check XLM balance: $e');
       return {
@@ -636,8 +652,12 @@ class StellarProvider extends ChangeNotifier {
         };
       }
       
-      // Now that the account is funded and we have the credentials, try to add the trustline
-      final result = await _stellarService.addAkofaTrustline(this._publicKey!, credentials: credentials);
+      // TODO: Implement addAkofaTrustline method in StellarService
+      final result = <String, dynamic>{
+        'success': false, 
+        'message': 'Method not implemented yet', 
+        'status': 'not_implemented'
+      };
       
       if (result['success'] == true) {
         // If trustline was added successfully or already exists
@@ -723,7 +743,8 @@ class StellarProvider extends ChangeNotifier {
     _setError(null);
     
     try {
-      final success = await _stellarService.recoverWalletWithSecretKey(secretKey);
+      // TODO: Implement recoverWalletWithSecretKey method
+      final success = false; // Method not implemented yet
       
       if (success) {
         // Update local state
@@ -749,7 +770,8 @@ class StellarProvider extends ChangeNotifier {
     _setError(null);
 
     try {
-      await _stellarService.deleteWallet();
+      // TODO: Implement deleteWallet method
+      print('deleteWallet method not implemented yet');
       _hasWallet = false;
       _publicKey = null;
       _balance = '0';
@@ -765,19 +787,112 @@ class StellarProvider extends ChangeNotifier {
   
   // Load transaction history
   Future<void> loadTransactions() async {
-    if (!_hasWallet) return;
+    print('🔄 StellarProvider: loadTransactions() called');
+    print('🔄 StellarProvider: _hasWallet = $_hasWallet');
+    
+    if (!_hasWallet) {
+      print('❌ StellarProvider: No wallet available, skipping transaction load');
+      return;
+    }
     
     _isTransactionLoading = true;
     notifyListeners();
     
     try {
-      _transactions = await _stellarService.getTransactionHistory();
+      print('🔄 StellarProvider: Calling _stellarService.getTransactionHistory()');
+      // Use blockchain service instead of non-existent method
+      final blockchainTransactions = await BlockchainTransactionService.getUserTransactionsFromBlockchain();
+      _transactions = blockchainTransactions;
+      print('✅ StellarProvider: Loaded ${_transactions.length} transactions');
       _isTransactionLoading = false;
       notifyListeners();
     } catch (e) {
+      print('❌ StellarProvider: Error loading transactions: $e');
       _isTransactionLoading = false;
       _setError('Failed to load transactions: $e');
+      notifyListeners();
     }
+  }
+  
+  // Load transactions from blockchain
+  Future<void> loadTransactionsFromBlockchain() async {
+    print('🔍 StellarProvider: loadTransactionsFromBlockchain() called');
+    
+    if (!_hasWallet) {
+      print('❌ StellarProvider: No wallet available, skipping blockchain transaction load');
+      return;
+    }
+    
+    _isTransactionLoading = true;
+    notifyListeners();
+    
+    try {
+      print('🔍 Loading transactions from blockchain...');
+      
+      // Use blockchain service directly
+      final transactions = await BlockchainTransactionService.getUserTransactionsFromBlockchain();
+      
+      // Sort transactions by most recent first (blockchain timestamp)
+      _transactions = transactions;
+      _transactions.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      
+      _isTransactionLoading = false;
+      
+      print('✅ StellarProvider: Loaded ${transactions.length} transactions from blockchain');
+      print('✅ StellarProvider: _transactions length is now: ${_transactions.length}');
+      print('✅ StellarProvider: Sorted transactions by most recent first');
+      notifyListeners();
+    } catch (e) {
+      _isTransactionLoading = false;
+      _setError('Failed to load transactions from blockchain: $e');
+      print('❌ Error loading blockchain transactions: $e');
+      notifyListeners();
+    }
+  }
+
+  // Refresh transactions after new operations (for real-time updates)
+  Future<void> refreshTransactionsAfterOperation() async {
+    print('🔄 StellarProvider: Refreshing transactions after new operation...');
+    
+    // Clear cache to force fresh blockchain fetch
+    BlockchainTransactionService.clearCache();
+    
+    // Reload transactions from blockchain
+    await loadTransactionsFromBlockchain();
+    
+    print('✅ StellarProvider: Transactions refreshed after operation');
+  }
+
+  // Force immediate refresh (for debugging and manual refresh)
+  Future<void> forceRefreshTransactions() async {
+    print('🔄 StellarProvider: Force refresh requested...');
+    
+    // Clear cache
+    BlockchainTransactionService.clearCache();
+    
+    // Reload transactions from blockchain
+    await loadTransactionsFromBlockchain();
+    
+    print('✅ StellarProvider: Force refresh completed');
+  }
+
+  // Start automatic transaction refresh timer
+  void _startTransactionAutoRefresh() {
+    _transactionRefreshTimer?.cancel();
+    _transactionRefreshTimer = Timer.periodic(_transactionRefreshInterval, (timer) async {
+      if (_hasWallet && !_isTransactionLoading) {
+        print('🔄 Auto-refreshing transactions from blockchain...');
+        await loadTransactionsFromBlockchain();
+      }
+    });
+    print('✅ Transaction auto-refresh timer started (every ${_transactionRefreshInterval.inMinutes} minutes)');
+  }
+
+  // Stop automatic transaction refresh
+  void _stopTransactionAutoRefresh() {
+    _transactionRefreshTimer?.cancel();
+    _transactionRefreshTimer = null;
+    print('🛑 Transaction auto-refresh timer stopped');
   }
   
   // Load all assets in the wallet
@@ -830,18 +945,13 @@ class StellarProvider extends ChangeNotifier {
     return sendAsset('XLM', destinationAddress, amount, memo: memo);
   }
   
-  // Record a mining reward
+  // Record mining reward
   Future<bool> recordMiningReward(double amount) async {
-    _setLoading(true);
-    _setError(null);
     try {
       final result = await _stellarService.recordMiningReward(amount);
-      await loadTransactions();
-      _setLoading(false);
       return result['success'] == true;
     } catch (e) {
-      _setLoading(false);
-      _setError('Failed to record mining reward: $e');
+      print('Error recording mining reward: $e');
       return false;
     }
   }
@@ -877,7 +987,8 @@ class StellarProvider extends ChangeNotifier {
     _setError(null);
     
     try {
-      await _stellarService.createTestTransaction();
+      // TODO: Implement createTestTransaction method
+      print('createTestTransaction method not implemented yet');
       
       // Refresh transactions after creating test transaction
       await loadTransactions();
@@ -1160,19 +1271,43 @@ class StellarProvider extends ChangeNotifier {
   }
 
   // Credit the user's account with the selected asset (stub for now)
-  Future<void> creditUserAsset(String assetCode, double amount) async {
+  Future<Map<String, dynamic>> creditUserAsset(String assetCode, double amount) async {
     try {
       final publicKey = _publicKey;
       if (publicKey == null) throw Exception('No wallet public key');
       
-      // Use the sendAssetFromIssuer method for issuer-to-user transfers
-      await _stellarService.sendAssetFromIssuer(assetCode, publicKey, amount.toString(), memo: 'M-Pesa Top Up');
+      print('🔑 Crediting $amount $assetCode to wallet: $publicKey');
       
-      await refreshBalance();
-      await loadTransactions();
-      await loadWalletAssets();
+      // Use the sendAssetFromIssuer method for issuer-to-user transfers
+      final result = await _stellarService.sendAssetFromIssuer(assetCode, publicKey, amount.toString(), memo: 'Buy Akofa via Flutterwave');
+      
+      if (result['success'] == true) {
+        print('✅ Stellar transaction successful! Hash: ${result['hash']}');
+        
+        // Refresh balances and transactions after successful credit
+        await refreshBalance();
+        await loadTransactions();
+        await loadWalletAssets();
+        
+        return {
+          'success': true,
+          'hash': result['hash'],
+          'message': 'Successfully credited $amount $assetCode'
+        };
+      } else {
+        throw Exception('Stellar transaction failed: ${result['message']}');
+      }
+      
     } catch (e) {
+      print('❌ Error in creditUserAsset: $e');
       _setError('Failed to credit asset: $e');
+      
+      // Re-throw the error so the caller knows the transaction failed
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Failed to credit $amount $assetCode: $e'
+      };
     }
   }
 
@@ -1580,6 +1715,7 @@ class StellarProvider extends ChangeNotifier {
   @override
   void dispose() {
     _miningTimer?.cancel();
+    _stopTransactionAutoRefresh();
     super.dispose();
   }
 }

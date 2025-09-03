@@ -92,16 +92,37 @@ class _ModernMarketplaceHomeState extends State<ModernMarketplaceHome>
     return Scaffold(
       backgroundColor: MarketplaceTheme.gray50,
       body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(),
-            _buildSearchSection(),
-            if (_showSuggestions) _buildSuggestions(),
-            _buildCategoryFilters(),
-            _buildQuickStats(),
-            _buildTabSection(),
-            Expanded(child: _buildTabContent()),
-          ],
+        child: Consumer<EnhancedMarketplaceProvider>(
+          builder: (context, marketplace, child) {
+            // Show error state if there's an error
+            if (marketplace.errorMessage != null) {
+              return _buildErrorState(marketplace.errorMessage!);
+            }
+            
+            // Show loading state
+            if (marketplace.isLoading) {
+              return _buildLoadingState();
+            }
+            
+            // Show main content
+            return SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              child: Column(
+                children: [
+                  _buildHeader(),
+                  _buildSearchSection(),
+                  // Show empty state if no data
+                  if (marketplace.products.isEmpty && marketplace.services.isEmpty && !marketplace.isLoading)
+                    _buildEmptyState('No products or services available yet'),
+                  if (_showSuggestions) _buildSuggestions(),
+                  _buildCategoryFilters(),
+                  _buildQuickStats(),
+                  _buildTabSection(),
+                  _buildTabContent(),
+                ],
+              ),
+            );
+          },
         ),
       ),
     );
@@ -357,108 +378,49 @@ class _ModernMarketplaceHomeState extends State<ModernMarketplaceHome>
   
   Widget _buildSearchSection() {
     return Container(
-      padding: const EdgeInsets.all(MarketplaceTheme.space4),
+      padding: const EdgeInsets.all(MarketplaceTheme.space3),
       color: MarketplaceTheme.white,
-      child: Column(
-        children: [
-          // Main search bar
-          Container(
-            decoration: BoxDecoration(
-              color: MarketplaceTheme.gray50,
-              borderRadius: BorderRadius.circular(MarketplaceTheme.radiusLg),
-              border: Border.all(color: MarketplaceTheme.gray200),
+      child: Container(
+        decoration: BoxDecoration(
+          color: MarketplaceTheme.gray50,
+          borderRadius: BorderRadius.circular(MarketplaceTheme.radiusLg),
+          border: Border.all(color: MarketplaceTheme.gray200),
+        ),
+        child: TextField(
+          controller: _searchController,
+          decoration: InputDecoration(
+            hintText: 'Search products, services, or vendors...',
+            hintStyle: MarketplaceTheme.bodyMedium.copyWith(
+              color: MarketplaceTheme.gray400,
             ),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: 'Search products, services, or vendors...',
-                hintStyle: MarketplaceTheme.bodyMedium.copyWith(
-                  color: MarketplaceTheme.gray400,
-                ),
-                prefixIcon: const Icon(
-                  Icons.search,
-                  color: MarketplaceTheme.gray400,
-                ),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() {
-                            _showSuggestions = false;
-                          });
-                        },
-                      )
-                    : IconButton(
-                        icon: const Icon(Icons.mic),
-                        onPressed: _startVoiceSearch,
-                      ),
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: MarketplaceTheme.space4,
-                  vertical: MarketplaceTheme.space3,
-                ),
-              ),
-              onSubmitted: _performSearch,
+            prefixIcon: const Icon(
+              Icons.search,
+              color: MarketplaceTheme.gray400,
+            ),
+            suffixIcon: _searchController.text.isNotEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.clear),
+                    onPressed: () {
+                      _searchController.clear();
+                      setState(() {
+                        _showSuggestions = false;
+                      });
+                    },
+                  )
+                : null,
+            border: InputBorder.none,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: MarketplaceTheme.space3,
+              vertical: MarketplaceTheme.space2,
             ),
           ),
-          
-          const SizedBox(height: MarketplaceTheme.space3),
-          
-          // Quick search chips
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _buildSearchChip('Electronics', Icons.devices),
-                _buildSearchChip('Fashion', Icons.checkroom),
-                _buildSearchChip('Services', Icons.work),
-                _buildSearchChip('Home & Garden', Icons.home),
-                _buildSearchChip('Automotive', Icons.directions_car),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  Widget _buildSearchChip(String label, IconData icon) {
-    return Container(
-      margin: const EdgeInsets.only(right: MarketplaceTheme.space2),
-      child: GestureDetector(
-        onTap: () => _performSearch(label),
-        child: Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: MarketplaceTheme.space3,
-            vertical: MarketplaceTheme.space2,
-          ),
-          decoration: BoxDecoration(
-            color: MarketplaceTheme.white,
-            borderRadius: BorderRadius.circular(MarketplaceTheme.radiusLg),
-            border: Border.all(color: Colors.grey.shade400),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                icon,
-                size: 16,
-                color: Colors.black54,
-              ),
-              const SizedBox(width: MarketplaceTheme.space2),
-              Text(
-                label,
-                style: MarketplaceTheme.labelMedium.copyWith(
-                  color: Colors.black87,
-                ),
-              ),
-            ],
-          ),
+          onSubmitted: _performSearch,
         ),
       ),
     );
   }
+  
+
 
   Widget _buildCategoryFilters() {
     return Container(
@@ -551,14 +513,13 @@ class _ModernMarketplaceHomeState extends State<ModernMarketplaceHome>
   }
 
   Widget _buildMainCategoryChips() {
-    final categories = ['All', ...MarketplaceCategories.getAllCategories()];
-    
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
+        // Goods Categories
         Text(
-          'Main Categories',
+          'Goods Categories',
           style: MarketplaceTheme.bodyMedium.copyWith(
             fontSize: ResponsiveLayout.getResponsiveFontSize(context, 14),
             fontWeight: FontWeight.w600,
@@ -569,7 +530,7 @@ class _ModernMarketplaceHomeState extends State<ModernMarketplaceHome>
         Wrap(
           spacing: ResponsiveLayout.getResponsiveSpacing(context, 4),
           runSpacing: ResponsiveLayout.getResponsiveSpacing(context, 4),
-          children: categories.map((category) {
+          children: ['All', ...MarketplaceCategories.getGoodsCategories()].map((category) {
             final isSelected = _selectedCategory == category;
             return FilterChip(
               label: Text(
@@ -584,7 +545,7 @@ class _ModernMarketplaceHomeState extends State<ModernMarketplaceHome>
               onSelected: (selected) {
                 setState(() {
                   _selectedCategory = selected ? category : 'All';
-                  _selectedSubcategory = null; // Reset subcategory when main category changes
+                  _selectedSubcategory = null;
                 });
               },
               selectedColor: MarketplaceTheme.primaryBlue.withOpacity(0.2),
@@ -592,6 +553,54 @@ class _ModernMarketplaceHomeState extends State<ModernMarketplaceHome>
               backgroundColor: isSelected ? MarketplaceTheme.primaryBlue : Colors.white,
               side: BorderSide(
                 color: isSelected ? MarketplaceTheme.primaryBlue : Colors.grey.shade400,
+                width: isSelected ? 2 : 1,
+              ),
+              padding: EdgeInsets.symmetric(
+                horizontal: ResponsiveLayout.getResponsivePadding(context) * 0.5,
+                vertical: 4,
+              ),
+            );
+          }).toList(),
+        ),
+        
+        SizedBox(height: ResponsiveLayout.getResponsiveSpacing(context, 8)),
+        
+        // Services Categories
+        Text(
+          'Services Categories',
+          style: MarketplaceTheme.bodyMedium.copyWith(
+            fontSize: ResponsiveLayout.getResponsiveFontSize(context, 14),
+            fontWeight: FontWeight.w600,
+            color: Colors.black87,
+          ),
+        ),
+        SizedBox(height: ResponsiveLayout.getResponsiveSpacing(context, 4)),
+        Wrap(
+          spacing: ResponsiveLayout.getResponsiveSpacing(context, 4),
+          runSpacing: ResponsiveLayout.getResponsiveSpacing(context, 4),
+          children: MarketplaceCategories.getServiceCategories().map((category) {
+            final isSelected = _selectedCategory == category;
+            return FilterChip(
+              label: Text(
+                category,
+                style: TextStyle(
+                  fontSize: ResponsiveLayout.getResponsiveFontSize(context, 11),
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                  color: isSelected ? Colors.white : Colors.black87,
+                ),
+              ),
+              selected: isSelected,
+              onSelected: (selected) {
+                setState(() {
+                  _selectedCategory = selected ? category : 'All';
+                  _selectedSubcategory = null;
+                });
+              },
+              selectedColor: MarketplaceTheme.primaryGreen.withOpacity(0.2),
+              checkmarkColor: MarketplaceTheme.primaryGreen,
+              backgroundColor: isSelected ? MarketplaceTheme.primaryGreen : Colors.white,
+              side: BorderSide(
+                color: isSelected ? MarketplaceTheme.primaryGreen : Colors.grey.shade400,
                 width: isSelected ? 2 : 1,
               ),
               padding: EdgeInsets.symmetric(
@@ -716,9 +725,7 @@ class _ModernMarketplaceHomeState extends State<ModernMarketplaceHome>
 
   // Filtered stream methods
   Stream<QuerySnapshot> _getFilteredProductsStream() {
-    Query query = FirebaseFirestore.instance
-        .collection('marketplace_products')
-        .where('status', isEqualTo: 'active');
+    Query query = FirebaseFirestore.instance.collection('products');
     
     // Apply category filter
     if (_selectedCategory != 'All') {
@@ -734,9 +741,7 @@ class _ModernMarketplaceHomeState extends State<ModernMarketplaceHome>
   }
 
   Stream<QuerySnapshot> _getFilteredServicesStream() {
-    Query query = FirebaseFirestore.instance
-        .collection('marketplace_services')
-        .where('status', isEqualTo: 'active');
+    Query query = FirebaseFirestore.instance.collection('services');
     
     // Apply category filter
     if (_selectedCategory != 'All') {
@@ -856,6 +861,73 @@ class _ModernMarketplaceHomeState extends State<ModernMarketplaceHome>
     );
   }
   
+  Widget _buildErrorState(String errorMessage) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 64,
+              color: MarketplaceTheme.error,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Something went wrong',
+              style: MarketplaceTheme.headingLarge.copyWith(
+                color: MarketplaceTheme.gray900,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              errorMessage,
+              style: MarketplaceTheme.bodyMedium.copyWith(
+                color: MarketplaceTheme.gray600,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: () {
+                final marketplace = context.read<EnhancedMarketplaceProvider>();
+                marketplace.retryInitialization();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: MarketplaceTheme.primaryBlue,
+                foregroundColor: MarketplaceTheme.white,
+              ),
+              child: const Text('Try Again'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildLoadingState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(MarketplaceTheme.primaryBlue),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Loading marketplace...',
+            style: MarketplaceTheme.bodyMedium.copyWith(
+              color: MarketplaceTheme.gray600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+
+  
   Widget _buildTabSection() {
     return Container(
       color: MarketplaceTheme.white,
@@ -903,15 +975,15 @@ class _ModernMarketplaceHomeState extends State<ModernMarketplaceHome>
               final data = doc.data() as Map<String, dynamic>;
               return Product(
                 id: doc.id,
-                vendorId: data['vendorId'] ?? '',
-                name: data['name'] ?? '',
-                description: data['description'] ?? '',
-                images: List<String>.from(data['images'] ?? []),
+                vendorId: data['vendorId'] ?? data['vendor_id'] ?? '',
+                name: data['name'] ?? data['title'] ?? 'Untitled Product',
+                description: data['description'] ?? data['desc'] ?? 'No description available',
+                images: List<String>.from(data['images'] ?? data['imageUrls'] ?? []),
                 price: (data['price'] ?? 0.0).toDouble(),
-                inventory: data['inventory'] ?? 0,
+                inventory: data['inventory'] ?? data['stock'] ?? 0,
                 category: data['category'] ?? '',
                 subcategory: data['subcategory'] ?? '',
-                shippingOptions: List<String>.from(data['shippingOptions'] ?? []),
+                shippingOptions: List<String>.from(data['shippingOptions'] ?? data['shipping_options'] ?? []),
               );
             }).toList();
             
@@ -919,17 +991,17 @@ class _ModernMarketplaceHomeState extends State<ModernMarketplaceHome>
               final data = doc.data() as Map<String, dynamic>;
               return Service(
                 id: doc.id,
-                vendorId: data['vendorId'] ?? '',
-                title: data['title'] ?? '',
-                description: data['description'] ?? '',
-                images: List<String>.from(data['images'] ?? []),
+                vendorId: data['vendorId'] ?? data['vendor_id'] ?? '',
+                title: data['title'] ?? data['name'] ?? 'Untitled Service',
+                description: data['description'] ?? data['desc'] ?? 'No description available',
+                images: List<String>.from(data['images'] ?? data['imageUrls'] ?? []),
                 packages: (data['packages'] as List? ?? []).map((p) => ServicePackage(
-                  name: p['name'] ?? '',
-                  description: p['description'] ?? '',
+                  name: p['name'] ?? p['title'] ?? '',
+                  description: p['description'] ?? p['desc'] ?? '',
                   price: (p['price'] ?? 0.0).toDouble(),
-                  deliveryTime: p['deliveryTime'] ?? '',
+                  deliveryTime: p['deliveryTime'] ?? p['delivery_time'] ?? '',
                 )).toList(),
-                deliveryTime: data['deliveryTime'] ?? 0,
+                deliveryTime: data['deliveryTime'] ?? data['delivery_time'] ?? 0,
                 category: data['category'] ?? '',
                 subcategory: data['subcategory'] ?? '',
                 requirements: List<String>.from(data['requirements'] ?? []),
@@ -993,15 +1065,15 @@ class _ModernMarketplaceHomeState extends State<ModernMarketplaceHome>
           final data = doc.data() as Map<String, dynamic>;
           return Product(
             id: doc.id,
-            vendorId: data['vendorId'] ?? '',
-            name: data['name'] ?? '',
-            description: data['description'] ?? '',
-            images: List<String>.from(data['images'] ?? []),
+            vendorId: data['vendorId'] ?? data['vendor_id'] ?? '',
+            name: data['name'] ?? data['title'] ?? 'Untitled Product',
+            description: data['description'] ?? data['desc'] ?? 'No description available',
+            images: List<String>.from(data['images'] ?? data['imageUrls'] ?? []),
             price: (data['price'] ?? 0.0).toDouble(),
-            inventory: data['inventory'] ?? 0,
+            inventory: data['inventory'] ?? data['stock'] ?? 0,
             category: data['category'] ?? '',
             subcategory: data['subcategory'] ?? '',
-            shippingOptions: List<String>.from(data['shippingOptions'] ?? []),
+            shippingOptions: List<String>.from(data['shippingOptions'] ?? data['shipping_options'] ?? []),
           );
         }).toList();
 
@@ -1044,17 +1116,17 @@ class _ModernMarketplaceHomeState extends State<ModernMarketplaceHome>
           final data = doc.data() as Map<String, dynamic>;
           return Service(
             id: doc.id,
-            vendorId: data['vendorId'] ?? '',
-            title: data['title'] ?? '',
-            description: data['description'] ?? '',
-            images: List<String>.from(data['images'] ?? []),
+            vendorId: data['vendorId'] ?? data['vendor_id'] ?? '',
+            title: data['title'] ?? data['name'] ?? 'Untitled Service',
+            description: data['description'] ?? data['desc'] ?? 'No description available',
+            images: List<String>.from(data['images'] ?? data['imageUrls'] ?? []),
             packages: (data['packages'] as List? ?? []).map((p) => ServicePackage(
-              name: p['name'] ?? '',
-              description: p['description'] ?? '',
+              name: p['name'] ?? p['title'] ?? '',
+              description: p['description'] ?? p['desc'] ?? '',
               price: (p['price'] ?? 0.0).toDouble(),
-              deliveryTime: p['deliveryTime'] ?? '',
+              deliveryTime: p['deliveryTime'] ?? p['delivery_time'] ?? '',
             )).toList(),
-            deliveryTime: data['deliveryTime'] ?? 0,
+            deliveryTime: data['deliveryTime'] ?? data['delivery_time'] ?? 0,
             category: data['category'] ?? '',
             subcategory: data['subcategory'] ?? '',
             requirements: List<String>.from(data['requirements'] ?? []),
@@ -1716,9 +1788,5 @@ class _ModernMarketplaceHomeState extends State<ModernMarketplaceHome>
   
 
   
-  void _startVoiceSearch() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Voice search coming soon!')),
-    );
-  }
+
 }

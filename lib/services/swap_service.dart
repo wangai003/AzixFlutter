@@ -132,8 +132,8 @@ class SwapService {
       }
       
       // Check if account has enough XLM for the transaction
-      final xlmCheck = await _stellarService.hasEnoughXlmForTransaction(publicKey);
-      if (!xlmCheck['hasEnough']) {
+      final hasEnoughXlm = await _stellarService.hasEnoughXlmForTransaction(publicKey);
+      if (!hasEnoughXlm) {
         return {
           'success': false,
           'message': 'Insufficient XLM balance for adding trustline',

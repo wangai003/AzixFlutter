@@ -277,7 +277,9 @@ class _AllTransactionsScreenState extends State<AllTransactionsScreen> {
                     ],
                   ),
                 )
-              : TransactionList(transactions: filtered),
+              : TransactionList(
+                transactions: filtered,
+              ),
           ),
         ],
       ),

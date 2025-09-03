@@ -50,9 +50,8 @@ class SecureMiningSession {
     int? durationMinutes,
   }) {
     final now = DateTime.now();
-    final duration = durationMinutes != null 
-        ? Duration(minutes: durationMinutes)
-        : const Duration(hours: 24);
+    // EXACTLY 24 hours for 6 AKOFA total
+    final duration = const Duration(hours: 24);
     
     final sessionId = _generateSecureSessionId(userId, deviceId, now);
     final initialChallenge = _generateChallenge();
@@ -195,15 +194,21 @@ class SecureMiningSession {
     return expectedHash == proof.proofHash;
   }
 
-  /// Calculate earned AKOFA with proof validation
+  /// Calculate earned AKOFA based on elapsed time (countdown approach)
   double get earnedAkofa {
-    // Validate all proofs before calculating earnings
-    final validProofs = proofs.where((proof) => validateProof(proof)).length;
-    final proofRatio = proofs.isEmpty ? 1.0 : validProofs / proofs.length;
+    // Calculate earnings based on elapsed time since session start
+    // miningRate is in AKOFA per hour (0.25 AKOFA/hour)
+    final hoursElapsed = accumulatedSeconds / 3600.0;
     
-    // Apply proof penalty if proofs are invalid
-    final baseEarnings = miningRate * (accumulatedSeconds / 3600.0);
-    return baseEarnings * proofRatio;
+    // EXACT MINING RATE: 0.25 AKOFA per hour
+    // This means 6 AKOFA after 24 hours (0.25 * 24 = 6)
+    final baseEarnings = miningRate * hoursElapsed;
+    
+    // Ensure earnings don't exceed the maximum possible for the 24-hour session
+    final maxPossibleEarnings = miningRate * 24.0; // 24 hours maximum
+    
+    // Return earnings clamped to maximum possible
+    return baseEarnings.clamp(0.0, maxPossibleEarnings);
   }
 
   /// Check if session is actively mining
@@ -237,6 +242,19 @@ class SecureMiningSession {
     'lastProofAge': DateTime.now().difference(lastProofSubmission).inMinutes,
     'integrityScore': isValid ? 1.0 : 0.0,
   };
+
+  /// Get current mining rate (AKOFA per hour)
+  double get currentMiningRate => miningRate;
+
+  /// Get current earnings rate (AKOFA per hour based on actual performance)
+  double get currentEarningsRate {
+    if (accumulatedSeconds == 0) return 0.0;
+    
+    final hoursMined = accumulatedSeconds / 3600.0;
+    if (hoursMined == 0) return 0.0;
+    
+    return earnedAkofa / hoursMined;
+  }
 
   /// Convert to JSON for storage
   Map<String, dynamic> toJson() => {

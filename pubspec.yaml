@@ -51,6 +51,7 @@ dependencies:
   flutter_svg: ^2.0.9
   provider: ^6.1.1
   flutter_stripe: ^11.5.0
+  flutterwave_standard: ^1.0.7
   
   # Stellar SDK and encryption
   stellar_flutter_sdk: ^2.1.0

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -25,6 +26,7 @@ class _UltraModernMiningScreenState extends State<UltraModernMiningScreen>
   late AnimationController _rotationController;
   late AnimationController _glowController;
   Timer? _uiUpdateTimer;
+  Timer? _balanceRefreshTimer;
   bool _showAdvancedMetrics = false;
   String _selectedTimeframe = '24H';
 
@@ -55,6 +57,12 @@ class _UltraModernMiningScreenState extends State<UltraModernMiningScreen>
     
     // Start UI updates
     _startUIUpdates();
+    
+    // Start balance refresh timer (every 30 seconds)
+    _balanceRefreshTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _refreshBalance(),
+    );
   }
 
   @override
@@ -63,6 +71,7 @@ class _UltraModernMiningScreenState extends State<UltraModernMiningScreen>
     _rotationController.dispose();
     _glowController.dispose();
     _uiUpdateTimer?.cancel();
+    _balanceRefreshTimer?.cancel();
     super.dispose();
   }
 
@@ -71,6 +80,31 @@ class _UltraModernMiningScreenState extends State<UltraModernMiningScreen>
       const Duration(seconds: 1),
       (_) => mounted ? setState(() {}) : null,
     );
+  }
+
+  void _refreshBalance() {
+    if (mounted) {
+      final provider = context.read<SecureStellarProvider>();
+      print('🔄 Manually refreshing balance...');
+      provider.refreshBalance();
+    }
+  }
+
+  void _debugInfo(SecureStellarProvider provider) {
+    final session = provider.currentMiningSession;
+    print('🔍 MINING DEBUG INFO:');
+    print('  - Has Wallet: ${provider.hasWallet}');
+    print('  - Public Key: ${provider.publicKey}');
+    print('  - Balance: ${provider.balance}');
+    print('  - Current Session: ${session?.sessionId ?? 'None'}');
+    print('  - Session Active: ${session?.isActive ?? false}');
+    print('  - Mining Rate: ${session?.miningRate ?? 0.0} AKOFA/hour');
+    print('  - Session Start: ${session?.sessionStart ?? 'None'}');
+    print('  - Session End: ${session?.sessionEnd ?? 'None'}');
+    print('  - Elapsed Time: ${session != null ? DateTime.now().difference(session.sessionStart).inMinutes : 0} minutes');
+    print('  - Accumulated Seconds: ${session?.accumulatedSeconds ?? 0}');
+    print('  - Earned AKOFA: ${session?.earnedAkofa ?? 0.0}');
+    print('  - Progress: ${session != null ? (DateTime.now().difference(session.sessionStart).inSeconds / session.sessionEnd.difference(session.sessionStart).inSeconds * 100).toStringAsFixed(2) : '0'}%');
   }
 
   @override
@@ -175,85 +209,15 @@ class _UltraModernMiningScreenState extends State<UltraModernMiningScreen>
         ),
       ),
       actions: [
-        // Security Status
-        _buildSecurityIndicator(provider),
-        const SizedBox(width: UltraModernTheme.spacingSm),
-        
-        // Wallet Balance
-        _buildWalletIndicator(provider),
-        const SizedBox(width: UltraModernTheme.spacingLg),
+        // No floating indicators - wallet info is in the stats grid
       ],
     );
   }
 
-  Widget _buildSecurityIndicator(SecureStellarProvider provider) {
-    final isSecure = provider.currentMiningSession?.isValid ?? true;
-    
-    return UltraModernWidgets.glassContainer(
-      padding: const EdgeInsets.symmetric(
-        horizontal: UltraModernTheme.spacingMd,
-        vertical: UltraModernTheme.spacingSm,
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: isSecure ? UltraModernTheme.successGreen : UltraModernTheme.errorRed,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: isSecure ? UltraModernTheme.successGreen : UltraModernTheme.errorRed,
-                  blurRadius: 4,
-                  offset: const Offset(0, 0),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: UltraModernTheme.spacingXs),
-          Text(
-            isSecure ? 'Secure' : 'Alert',
-            style: UltraModernTheme.caption1.copyWith(
-              color: isSecure ? UltraModernTheme.successGreen : UltraModernTheme.errorRed,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
-  Widget _buildWalletIndicator(SecureStellarProvider provider) {
-    return GestureDetector(
-      onTap: () => _showWalletDetails(provider),
-      child: UltraModernWidgets.glassContainer(
-        padding: const EdgeInsets.symmetric(
-          horizontal: UltraModernTheme.spacingMd,
-          vertical: UltraModernTheme.spacingSm,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(
-              Icons.account_balance_wallet,
-              color: UltraModernTheme.primaryGold,
-              size: 16,
-            ),
-            const SizedBox(width: UltraModernTheme.spacingXs),
-            Text(
-              '${double.tryParse(provider.balance)?.toStringAsFixed(2) ?? '0.00'} ₳',
-              style: UltraModernTheme.monoBody.copyWith(
-                color: UltraModernTheme.primaryGold,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+
+
+
 
   Widget _buildHeroMiningSection(SecureStellarProvider provider, bool isDesktop) {
     final session = provider.currentMiningSession;
@@ -468,7 +432,9 @@ class _UltraModernMiningScreenState extends State<UltraModernMiningScreen>
 
   Widget _buildProgressSection(SecureMiningSession session) {
     final totalDuration = session.sessionEnd.difference(session.sessionStart).inSeconds;
-    final progress = session.accumulatedSeconds / totalDuration;
+    // EXACT PROGRESS: Based on actual elapsed time for 24-hour session
+    final elapsedTime = DateTime.now().difference(session.sessionStart).inSeconds;
+    final progress = elapsedTime / totalDuration;
     final remainingTime = session.sessionEnd.difference(DateTime.now());
     
     return Column(
@@ -544,7 +510,8 @@ class _UltraModernMiningScreenState extends State<UltraModernMiningScreen>
   Widget _buildStatsGrid(SecureStellarProvider provider, bool isDesktop) {
     final session = provider.currentMiningSession;
     final metrics = provider.securityMetrics;
-    final balance = double.tryParse(provider.balance) ?? 0.0;
+    // Use real-time balance from provider with proper error handling
+    final balance = provider.balance.isNotEmpty ? double.tryParse(provider.balance) ?? 0.0 : 0.0;
     
     final stats = [
       {
@@ -585,12 +552,21 @@ class _UltraModernMiningScreenState extends State<UltraModernMiningScreen>
       },
       {
         'title': 'Mining Rate',
-        'value': '${session?.miningRate ?? 0.25}/hr',
-        'subtitle': 'Current rate',
+        'value': '0.25/hr',
+        'subtitle': 'Fixed rate',
         'icon': Icons.speed,
         'color': UltraModernTheme.warningAmber,
-        'trend': _calculateMiningRateTrend(session),
-        'progress': _calculateMiningRateProgress(session),
+        'trend': 'Standard',
+        'progress': 1.0,
+      },
+      {
+        'title': 'Time Mined',
+        'value': '${session != null ? (session!.accumulatedSeconds / 60).toStringAsFixed(1) : '0.0'} min',
+        'subtitle': 'Active mining time',
+        'icon': Icons.timer,
+        'color': UltraModernTheme.cyberpunkPurple,
+        'trend': session != null ? '${(session!.accumulatedSeconds / 3600).toStringAsFixed(3)}h' : '0h',
+        'progress': session != null ? (session!.accumulatedSeconds / 3600).clamp(0.0, 1.0) : 0.0,
       },
       {
         'title': 'Efficiency',
@@ -824,9 +800,10 @@ class _UltraModernMiningScreenState extends State<UltraModernMiningScreen>
   double _calculateEfficiency(SecureMiningSession? session) {
     if (session == null) return 0.0;
     
-    // Calculate efficiency based on uptime vs session duration
+    // Calculate efficiency based on actual elapsed time vs 24-hour session duration
     final totalDuration = session.sessionEnd.difference(session.sessionStart).inSeconds;
-    final efficiency = (session.accumulatedSeconds / totalDuration) * 100;
+    final elapsedTime = DateTime.now().difference(session.sessionStart).inSeconds;
+    final efficiency = (elapsedTime / totalDuration) * 100;
     return efficiency.clamp(0.0, 100.0);
   }
 
@@ -890,49 +867,85 @@ class _UltraModernMiningScreenState extends State<UltraModernMiningScreen>
             ),
           ),
           
-          // Secondary Controls
-          if (session != null && session.isActive) ...[
-            const SizedBox(height: UltraModernTheme.spacingMd),
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: provider.isLoading ? null : () async {
-                      if (canPause) {
-                        await provider.pauseMining();
-                      } else if (canResume) {
-                        await provider.resumeMining();
-                      }
-                    },
-                    style: UltraModernTheme.secondaryButton,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(canPause ? Icons.pause : Icons.play_arrow),
-                        const SizedBox(width: UltraModernTheme.spacingSm),
-                        Text(canPause ? 'Pause' : 'Resume'),
-                      ],
+                     // Secondary Controls
+           if (session != null && session.isActive) ...[
+             const SizedBox(height: UltraModernTheme.spacingMd),
+             Row(
+               children: [
+                 Expanded(
+                   child: ElevatedButton(
+                     onPressed: provider.isLoading ? null : () async {
+                       if (canPause) {
+                         await provider.pauseMining();
+                       } else if (canResume) {
+                         await provider.resumeMining();
+                       }
+                     },
+                     style: UltraModernTheme.secondaryButton,
+                     child: Row(
+                       mainAxisAlignment: MainAxisAlignment.center,
+                       children: [
+                         Icon(canPause ? Icons.pause : Icons.play_arrow),
+                         const SizedBox(width: UltraModernTheme.spacingSm),
+                         Text(canPause ? 'Pause' : 'Resume'),
+                       ],
+                     ),
+                   ),
+                 ),
+                 const SizedBox(width: UltraModernTheme.spacingMd),
+                 Expanded(
+                   child: ElevatedButton(
+                     onPressed: () => setState(() => _showAdvancedMetrics = !_showAdvancedMetrics),
+                     style: UltraModernTheme.secondaryButton,
+                     child: Row(
+                       mainAxisAlignment: MainAxisAlignment.center,
+                       children: [
+                         Icon(_showAdvancedMetrics ? Icons.expand_less : Icons.expand_more),
+                         const SizedBox(width: UltraModernTheme.spacingSm),
+                         const Text('Metrics'),
+                       ],
+                     ),
+                   ),
+                 ),
+               ],
+             ),
+           ],
+           
+                       // Debug buttons (only show in debug mode)
+            if (kDebugMode) ...[
+              const SizedBox(height: UltraModernTheme.spacingMd),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => _debugInfo(provider),
+                      style: UltraModernTheme.secondaryButton.copyWith(
+                        backgroundColor: WidgetStateProperty.all(Colors.orange),
+                      ),
+                      child: const Text('DEBUG: Show Info'),
                     ),
                   ),
-                ),
-                const SizedBox(width: UltraModernTheme.spacingMd),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () => setState(() => _showAdvancedMetrics = !_showAdvancedMetrics),
-                    style: UltraModernTheme.secondaryButton,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(_showAdvancedMetrics ? Icons.expand_less : Icons.expand_more),
-                        const SizedBox(width: UltraModernTheme.spacingSm),
-                        const Text('Metrics'),
-                      ],
+                  const SizedBox(width: UltraModernTheme.spacingMd),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        await provider.refreshMiningSession();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Mining session refreshed'),
+                            backgroundColor: UltraModernTheme.successGreen,
+                          ),
+                        );
+                      },
+                      style: UltraModernTheme.secondaryButton.copyWith(
+                        backgroundColor: WidgetStateProperty.all(Colors.blue),
+                      ),
+                      child: const Text('DEBUG: Refresh'),
                     ),
                   ),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
         ],
       ),
     );

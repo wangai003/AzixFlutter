@@ -8,7 +8,7 @@ import '../providers/stellar_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/responsive_layout.dart';
 import '../widgets/send_dialog.dart';
-import '../widgets/buy_dialog.dart';
+import '../widgets/enhanced_buy_akofa_dialog.dart';
 import '../widgets/wallet_card.dart';
 import '../widgets/quick_actions_row.dart';
 import '../widgets/transaction_list.dart';
@@ -39,6 +39,8 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
         if (hasWallet && stellarProvider.publicKey != null) {
           stellarProvider.checkAkofaTrustline();
           stellarProvider.refreshBalance();
+          // Load transactions from blockchain after wallet status is confirmed
+          stellarProvider.loadTransactionsFromBlockchain();
         }
       });
     });
@@ -99,6 +101,7 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
       body: RefreshIndicator(
         onRefresh: () async {
           await stellarProvider.refreshBalance();
+          await stellarProvider.loadTransactionsFromBlockchain();
         },
         color: AppTheme.primaryGold,
         backgroundColor: AppTheme.black,
@@ -162,11 +165,21 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Recent Transactions', 
-                    style: AppTheme.headingMedium.copyWith(
-                      color: AppTheme.primaryGold,
-                      fontSize: 24,
-                    )
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Recent Transactions', 
+                        style: AppTheme.headingMedium.copyWith(
+                          color: AppTheme.primaryGold,
+                          fontSize: 24,
+                        )
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.refresh, color: AppTheme.primaryGold),
+                        onPressed: () => stellarProvider.loadTransactionsFromBlockchain(),
+                        tooltip: 'Refresh transactions',
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 16),
                   Container(
@@ -179,7 +192,9 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
                         width: 1,
                       ),
                     ),
-                    child: TransactionList(transactions: stellarProvider.transactions),
+                    child: TransactionList(
+                      transactions: stellarProvider.transactions,
+                    ),
                   ),
                 ],
               ),
@@ -210,14 +225,26 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
           onBuy: () => _showBuyAkofaDialog(context),
         ),
         const SizedBox(height: 32),
-        Text('Recent Transactions', 
-          style: AppTheme.headingMedium.copyWith(
-            color: AppTheme.primaryGold,
-            fontSize: isTablet ? 22 : null,
-          )
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('Recent Transactions', 
+              style: AppTheme.headingMedium.copyWith(
+                color: AppTheme.primaryGold,
+                fontSize: isTablet ? 22 : null,
+              )
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh, color: AppTheme.primaryGold),
+              onPressed: () => stellarProvider.loadTransactionsFromBlockchain(),
+              tooltip: 'Refresh transactions',
+            ),
+          ],
         ),
         const SizedBox(height: 12),
-        TransactionList(transactions: stellarProvider.transactions),
+        TransactionList(
+          transactions: stellarProvider.transactions,
+        ),
       ],
     );
   }
@@ -280,7 +307,7 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
   void _showBuyAkofaDialog(BuildContext context) {
                       showDialog(
                         context: context,
-                        builder: (context) => const BuyDialog(),
+                        builder: (context) => EnhancedBuyAkofaDialog(),
     );
   }
   
