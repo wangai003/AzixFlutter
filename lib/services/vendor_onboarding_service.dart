@@ -35,7 +35,6 @@ class VendorOnboardingService {
       await FirebaseFirestore.instance.collection('vendor_applications').add(application);
       return true;
     } catch (e) {
-      print('Error submitting goods vendor application: $e');
       return false;
     }
   }
@@ -66,7 +65,6 @@ class VendorOnboardingService {
       await FirebaseFirestore.instance.collection('vendor_applications').add(application);
       return true;
     } catch (e) {
-      print('Error submitting service vendor application: $e');
       return false;
     }
   }

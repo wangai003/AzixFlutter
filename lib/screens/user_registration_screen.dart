@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:intl_phone_field/phone_number.dart';
 import '../providers/auth_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/responsive_layout.dart';
+import '../widgets/phone_number_field.dart';
 import 'main_navigation.dart';
 
 class UserRegistrationScreen extends StatefulWidget {
@@ -16,9 +18,10 @@ class _UserRegistrationScreenState extends State<UserRegistrationScreen> {
   final _formKey = GlobalKey<FormState>();
   final _phoneController = TextEditingController();
   final _referralController = TextEditingController();
-  
+
   bool _isLoading = false;
   String? _errorMessage;
+  String _completePhoneNumber = '';
 
   @override
   void dispose() {
@@ -40,7 +43,7 @@ class _UserRegistrationScreenState extends State<UserRegistrationScreen> {
       
       // Complete user registration with phone and referral
       final success = await authProvider.completeGoogleUserRegistration(
-        _phoneController.text.trim(),
+        _completePhoneNumber.isNotEmpty ? _completePhoneNumber : _phoneController.text.trim(),
         referralCode: _referralController.text.trim().isEmpty ? null : _referralController.text.trim(),
       );
 
@@ -152,36 +155,20 @@ class _UserRegistrationScreenState extends State<UserRegistrationScreen> {
           child: Column(
             children: [
               // Phone Number Field
-              TextFormField(
+              PhoneNumberField(
                 controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
-                decoration: InputDecoration(
-                  labelText: 'Phone Number',
-                  labelStyle: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
-                  hintText: '+1234567890',
-                  hintStyle: AppTheme.bodyMedium.copyWith(color: AppTheme.grey.withOpacity(0.5)),
-                  prefixIcon: Icon(Icons.phone, color: AppTheme.primaryGold),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: AppTheme.grey.withOpacity(0.3)),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: AppTheme.grey.withOpacity(0.3)),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: AppTheme.primaryGold, width: 2),
-                  ),
-                  filled: true,
-                  fillColor: AppTheme.darkGrey.withOpacity(0.3),
-                ),
+                label: 'Phone Number',
+                hint: 'Enter your phone number',
+                onChanged: (phone) {
+                  setState(() {
+                    _completePhoneNumber = phone.completeNumber;
+                  });
+                },
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
                     return 'Phone number is required';
                   }
-                  if (value.trim().length < 10) {
+                  if (value.trim().length < 7) {
                     return 'Please enter a valid phone number';
                   }
                   return null;

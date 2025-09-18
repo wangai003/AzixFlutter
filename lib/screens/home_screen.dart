@@ -31,7 +31,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
       if (stellarProvider.hasWallet) {
         stellarProvider.refreshBalance();
-        stellarProvider.checkAkofaTrustline();
+        // Trustline is now handled automatically
       }
     });
   }
@@ -49,7 +49,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final isMobile = ResponsiveLayout.isMobile(context);
     
     // Debug print
-    print('HomeScreen build - hasWallet: ${stellarProvider.hasWallet}, publicKey: ${stellarProvider.publicKey}');
     
     return Scaffold(
       body: Container(

@@ -202,7 +202,6 @@ class _MiningTestScreenState extends State<MiningTestScreen> {
       }
     });
     
-    print('[$timestamp] $message');
   }
 
   void _clearLog() {

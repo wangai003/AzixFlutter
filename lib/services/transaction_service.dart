@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart' hide Transaction;
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/transaction.dart';
+import 'akofa_tag_service.dart';
 
 class TransactionService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -23,12 +24,8 @@ class TransactionService {
     try {
       final user = _auth.currentUser;
       if (user == null) {
-        print('❌ No authenticated user found');
         return;
       }
-
-      print('📝 Recording transaction: $type for user ${user.uid}');
-      print('📝 Amount: $amount $assetCode');
 
       // Create transaction data
       final transactionData = {
@@ -71,10 +68,7 @@ class TransactionService {
           'userView': true,
         });
       });
-
-      print('✅ Transaction recorded successfully');
     } catch (e) {
-      print('❌ Error recording transaction: $e');
       throw Exception('Failed to record transaction: $e');
     }
   }
@@ -87,6 +81,24 @@ class TransactionService {
     String? stellarHash,
     Map<String, dynamic>? additionalMetadata,
   }) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    // Resolve recipient's Akofa tag
+    String? recipientAkofaTag;
+    String? recipientAddress;
+    try {
+      final tagResult = await AkofaTagService.getUserTag(user.uid);
+      if (tagResult['success']) {
+        recipientAkofaTag = tagResult['tag'];
+        recipientAddress = tagResult['publicKey'];
+      }
+    } catch (e) {
+      // If tag resolution fails, use user ID as fallback
+      recipientAkofaTag = user.uid;
+      recipientAddress = user.uid;
+    }
+
     await recordTransaction(
       type: 'buyAkofa',
       amount: amount,
@@ -94,9 +106,9 @@ class TransactionService {
       description: 'Bought $amount AKOFA via $paymentMethod',
       transactionHash: stellarHash,
       senderAkofaTag: 'Flutterwave',
-      recipientAkofaTag: _auth.currentUser?.uid,
+      recipientAkofaTag: recipientAkofaTag,
       senderAddress: 'Flutterwave',
-      recipientAddress: _auth.currentUser?.uid,
+      recipientAddress: recipientAddress,
       additionalMetadata: {
         'paymentMethod': paymentMethod,
         'flutterwaveRef': flutterwaveRef,
@@ -115,6 +127,21 @@ class TransactionService {
     final user = _auth.currentUser;
     if (user == null) return;
 
+    // Resolve recipient's Akofa tag
+    String? recipientAkofaTag;
+    String? recipientAddress;
+    try {
+      final tagResult = await AkofaTagService.getUserTag(user.uid);
+      if (tagResult['success']) {
+        recipientAkofaTag = tagResult['tag'];
+        recipientAddress = tagResult['publicKey'];
+      }
+    } catch (e) {
+      // If tag resolution fails, use user ID as fallback
+      recipientAkofaTag = user.uid;
+      recipientAddress = user.uid;
+    }
+
     await recordTransaction(
       type: 'mining',
       amount: amount,
@@ -122,9 +149,9 @@ class TransactionService {
       description: 'Mining reward of $amount AKOFA',
       transactionHash: stellarHash,
       senderAkofaTag: 'SYSTEM',
-      recipientAkofaTag: user.uid,
+      recipientAkofaTag: recipientAkofaTag,
       senderAddress: 'SYSTEM_ISSUER',
-      recipientAddress: user.uid,
+      recipientAddress: recipientAddress,
       additionalMetadata: {
         'rewardType': 'mining',
         'miningSession': 'active',
@@ -146,6 +173,21 @@ class TransactionService {
     final user = _auth.currentUser;
     if (user == null) return;
 
+    // Resolve sender's Akofa tag
+    String? senderAkofaTag;
+    String? senderAddress;
+    try {
+      final tagResult = await AkofaTagService.getUserTag(user.uid);
+      if (tagResult['success']) {
+        senderAkofaTag = tagResult['tag'];
+        senderAddress = tagResult['publicKey'];
+      }
+    } catch (e) {
+      // If tag resolution fails, use user ID as fallback
+      senderAkofaTag = user.uid;
+      senderAddress = user.uid;
+    }
+
     await recordTransaction(
       type: 'send',
       amount: amount,
@@ -153,9 +195,9 @@ class TransactionService {
       description: 'Sent $amount $assetCode',
       memo: memo,
       transactionHash: stellarHash,
-      senderAkofaTag: user.uid,
+      senderAkofaTag: senderAkofaTag,
       recipientAkofaTag: recipientAkofaTag,
-      senderAddress: user.uid,
+      senderAddress: senderAddress,
       recipientAddress: recipientAddress,
       additionalMetadata: {
         'transactionType': 'transfer',
@@ -177,6 +219,21 @@ class TransactionService {
     final user = _auth.currentUser;
     if (user == null) return;
 
+    // Resolve recipient's Akofa tag
+    String? recipientAkofaTag;
+    String? recipientAddress;
+    try {
+      final tagResult = await AkofaTagService.getUserTag(user.uid);
+      if (tagResult['success']) {
+        recipientAkofaTag = tagResult['tag'];
+        recipientAddress = tagResult['publicKey'];
+      }
+    } catch (e) {
+      // If tag resolution fails, use user ID as fallback
+      recipientAkofaTag = user.uid;
+      recipientAddress = user.uid;
+    }
+
     await recordTransaction(
       type: 'receive',
       amount: amount,
@@ -185,9 +242,9 @@ class TransactionService {
       memo: memo,
       transactionHash: stellarHash,
       senderAkofaTag: senderAkofaTag,
-      recipientAkofaTag: user.uid,
+      recipientAkofaTag: recipientAkofaTag,
       senderAddress: senderAddress,
-      recipientAddress: user.uid,
+      recipientAddress: recipientAddress,
       additionalMetadata: {
         'transactionType': 'transfer',
         ...?additionalMetadata,
@@ -212,7 +269,6 @@ class TransactionService {
           .map((doc) => Transaction.fromFirestore(doc))
           .toList();
     } catch (e) {
-      print('❌ Error getting user transactions: $e');
       return [];
     }
   }
@@ -230,7 +286,6 @@ class TransactionService {
       }
       return null;
     } catch (e) {
-      print('❌ Error getting transaction: $e');
       return null;
     }
   }
@@ -243,19 +298,20 @@ class TransactionService {
 
       await _firestore.runTransaction((transaction) async {
         // Delete from main collection
-        transaction.delete(_firestore.collection('transactions').doc(transactionId));
+        transaction.delete(
+          _firestore.collection('transactions').doc(transactionId),
+        );
 
         // Delete from user collection
-        transaction.delete(_firestore
-            .collection('USER')
-            .doc(user.uid)
-            .collection('transactions')
-            .doc(transactionId));
+        transaction.delete(
+          _firestore
+              .collection('USER')
+              .doc(user.uid)
+              .collection('transactions')
+              .doc(transactionId),
+        );
       });
-
-      print('✅ Transaction deleted successfully');
     } catch (e) {
-      print('❌ Error deleting transaction: $e');
       throw Exception('Failed to delete transaction: $e');
     }
   }
@@ -265,8 +321,6 @@ class TransactionService {
     try {
       final user = _auth.currentUser;
       if (user == null) return;
-
-      print('🧹 Cleaning up duplicate transactions...');
 
       final querySnapshot = await _firestore
           .collection('USER')
@@ -281,7 +335,7 @@ class TransactionService {
       for (final doc in transactions) {
         final data = doc.data();
         final key = '${data['type']}_${data['amount']}_${data['timestamp']}';
-        
+
         if (seen.contains(key)) {
           duplicates.add(doc.id);
         } else {
@@ -289,15 +343,9 @@ class TransactionService {
         }
       }
 
-      print('🔍 Found ${duplicates.length} duplicate transactions');
-
       for (final duplicateId in duplicates) {
         await deleteTransaction(duplicateId);
       }
-
-      print('✅ Cleanup completed');
-    } catch (e) {
-      print('❌ Error during cleanup: $e');
-    }
+    } catch (e) {}
   }
 }

@@ -124,7 +124,6 @@ class MiningSecurityService {
           .map((doc) => (doc.data()['timestamp'] as Timestamp).toDate())
           .toList();
     } catch (e) {
-      print('Error loading user attempts: $e');
       _userAttempts[userId] = [];
     }
   }
@@ -159,7 +158,6 @@ class MiningSecurityService {
 
       return SecurityValidationResult.success();
     } catch (e) {
-      print('Error checking device limit: $e');
       return SecurityValidationResult.failure(
         'Device validation failed',
         SecurityViolationType.systemError,
@@ -189,7 +187,6 @@ class MiningSecurityService {
 
       return SecurityValidationResult.success();
     } catch (e) {
-      print('Error checking session limit: $e');
       return SecurityValidationResult.failure(
         'Session validation failed',
         SecurityViolationType.systemError,
@@ -239,7 +236,6 @@ class MiningSecurityService {
 
       return SecurityValidationResult.success();
     } catch (e) {
-      print('Error validating mining rate: $e');
       return SecurityValidationResult.failure(
         'Mining rate validation failed',
         SecurityViolationType.systemError,
@@ -268,7 +264,6 @@ class MiningSecurityService {
 
       return SecurityValidationResult.success();
     } catch (e) {
-      print('Error detecting fraudulent activity: $e');
       return SecurityValidationResult.success(); // Don't block on detection errors
     }
   }
@@ -313,7 +308,6 @@ class MiningSecurityService {
 
       return SecurityValidationResult.success();
     } catch (e) {
-      print('Error checking suspicious timing: $e');
       return SecurityValidationResult.success();
     }
   }
@@ -350,7 +344,6 @@ class MiningSecurityService {
 
       return SecurityValidationResult.success();
     } catch (e) {
-      print('Error checking excessive earnings: $e');
       return SecurityValidationResult.success();
     }
   }
@@ -387,7 +380,6 @@ class MiningSecurityService {
 
       return SecurityValidationResult.success();
     } catch (e) {
-      print('Error checking device switching: $e');
       return SecurityValidationResult.success();
     }
   }
@@ -429,7 +421,6 @@ class MiningSecurityService {
           .toList();
 
     } catch (e) {
-      print('Error recording validation attempt: $e');
     }
   }
 
@@ -450,7 +441,6 @@ class MiningSecurityService {
         'source': 'mining_security_service',
       });
     } catch (e) {
-      print('Error logging security event: $e');
     }
   }
 
@@ -559,7 +549,6 @@ class MiningSecurityService {
         'riskLevel': _calculateRiskLevel(violations.docs.length, attempts.docs.length),
       };
     } catch (e) {
-      print('Error getting security statistics: $e');
       return {};
     }
   }

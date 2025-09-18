@@ -10,7 +10,7 @@ import '../providers/security_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/stellar_wallet_prompt.dart';
-import 'stellar_wallet_screen.dart';
+import 'enhanced_wallet_screen.dart';
 import '../providers/admin_provider.dart';
 import 'admin/admin_dashboard_screen.dart';
 import '../services/auth_service.dart';
@@ -26,33 +26,45 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _isLoading = false;
-  
+
   // Display settings
-  final List<String> _languages = ['English', 'Spanish', 'French', 'German', 'Chinese'];
+  final List<String> _languages = [
+    'English',
+    'Spanish',
+    'French',
+    'German',
+    'Chinese',
+  ];
   final List<String> _currencies = ['USD', 'EUR', 'GBP', 'JPY', 'AUD'];
   String _selectedLanguage = 'English';
   String _selectedCurrency = 'USD';
   bool _isDarkMode = true;
   bool _autoBackupEnabled = false;
-  
+
   // Security settings for UI display
   late List<SecuritySetting> _securitySettings;
-  
+
   UserModel? _userModel;
   String? _profileError;
   final AuthService _authService = AuthService();
-  
+
   @override
   void initState() {
     super.initState();
     _initializeSecuritySettings();
     _fetchUserProfile();
   }
-  
+
   void _initializeSecuritySettings() {
-    final securityProvider = Provider.of<SecurityProvider>(context, listen: false);
-    final notificationProvider = Provider.of<NotificationProvider>(context, listen: false);
-    
+    final securityProvider = Provider.of<SecurityProvider>(
+      context,
+      listen: false,
+    );
+    final notificationProvider = Provider.of<NotificationProvider>(
+      context,
+      listen: false,
+    );
+
     _securitySettings = [
       SecuritySetting(
         id: '1',
@@ -77,7 +89,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     ];
   }
-  
+
   Future<void> _fetchUserProfile() async {
     setState(() {
       _isLoading = true;
@@ -100,19 +112,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
       });
     }
   }
-  
+
   Future<void> _saveSettings() async {
     setState(() => _isLoading = true);
     try {
       final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
-      final securityProvider = Provider.of<SecurityProvider>(context, listen: false);
-      final notificationProvider = Provider.of<NotificationProvider>(context, listen: false);
+      final securityProvider = Provider.of<SecurityProvider>(
+        context,
+        listen: false,
+      );
+      final notificationProvider = Provider.of<NotificationProvider>(
+        context,
+        listen: false,
+      );
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final user = _userModel;
       // Save security settings
-      await securityProvider.setTwoFactorEnabled(_securitySettings[0].isEnabled);
-      await securityProvider.setBiometricsEnabled(_securitySettings[1].isEnabled);
-      await notificationProvider.setTransactionNotificationsEnabled(_securitySettings[2].isEnabled);
+      await securityProvider.setTwoFactorEnabled(
+        _securitySettings[0].isEnabled,
+      );
+      await securityProvider.setBiometricsEnabled(
+        _securitySettings[1].isEnabled,
+      );
+      await notificationProvider.setTransactionNotificationsEnabled(
+        _securitySettings[2].isEnabled,
+      );
       // Save preferences to Firestore
       if (user != null) {
         final preferences = {
@@ -122,7 +146,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'autoBackup': _autoBackupEnabled,
         };
         final authService = AuthService();
-        await authService.updateUserFields(user.id, {'preferences': preferences});
+        await authService.updateUserFields(user.id, {
+          'preferences': preferences,
+        });
         await _fetchUserProfile();
       }
       ScaffoldMessenger.of(context).showSnackBar(
@@ -131,9 +157,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (e) {
       // Handle error
       debugPrint('Error saving settings: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error saving settings: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error saving settings: $e')));
     } finally {
       setState(() => _isLoading = false);
     }
@@ -144,21 +170,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final authProvider = Provider.of<AuthProvider>(context);
     final stellarProvider = Provider.of<StellarProvider>(context);
     final user = _userModel;
-    
+
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [
-            AppTheme.black,
-            Color(0xFF212121),
-          ],
+          colors: [AppTheme.black, Color(0xFF212121)],
         ),
       ),
       child: SafeArea(
         child: _isLoading
-            ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryGold))
+            ? const Center(
+                child: CircularProgressIndicator(color: AppTheme.primaryGold),
+              )
             : Column(
                 children: [
                   _buildAppBar(),
@@ -191,7 +216,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         _buildSettingItem(
                           icon: Icons.account_balance_wallet,
                           title: 'Stellar Wallet',
-                          subtitle: stellarProvider.hasWallet 
+                          subtitle: stellarProvider.hasWallet
                               ? 'Manage your Stellar wallet'
                               : 'Create a Stellar wallet',
                           onTap: () {
@@ -199,7 +224,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (context) => const StellarWalletScreen(),
+                                  builder: (context) =>
+                                      const EnhancedWalletScreen(),
                                 ),
                               );
                             } else {
@@ -210,11 +236,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 builder: (context) => Dialog(
                                   backgroundColor: Colors.transparent,
                                   elevation: 0,
-                                  insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                                  insetPadding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                    vertical: 24,
+                                  ),
                                   child: SizedBox(
-                                    width: MediaQuery.of(context).size.width > 600 
-                                        ? 400 
-                                        : MediaQuery.of(context).size.width * 0.85,
+                                    width:
+                                        MediaQuery.of(context).size.width > 600
+                                        ? 400
+                                        : MediaQuery.of(context).size.width *
+                                              0.85,
                                     child: const StellarWalletPrompt(),
                                   ),
                                 ),
@@ -222,9 +253,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             }
                           },
                         ),
-                        
+
                         const SizedBox(height: 24),
-                        
+
                         // Appearance section
                         _buildSectionHeader('Appearance'),
                         _buildSwitchItem(
@@ -264,9 +295,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             }
                           },
                         ),
-                        
+
                         const SizedBox(height: 24),
-                        
+
                         // Security section
                         _buildSectionHeader('Security'),
                         ..._securitySettings.map((setting) {
@@ -282,12 +313,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             },
                           );
                         }).toList(),
-                        
+
                         const SizedBox(height: 24),
-                        
+
                         // Data & Storage section
                         _buildSectionHeader('Data & Storage'),
-                        
+
                         // Development & Testing section (only show in debug mode)
                         if (kDebugMode) ...[
                           const SizedBox(height: 24),
@@ -295,12 +326,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           _buildSettingItem(
                             icon: Icons.bug_report,
                             title: 'Transaction Tests',
-                            subtitle: 'Test transaction recording functionality',
+                            subtitle:
+                                'Test transaction recording functionality',
                             onTap: () {
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (context) => const TransactionTestScreen(),
+                                  builder: (context) =>
+                                      const TransactionTestScreen(),
                                 ),
                               );
                             },
@@ -333,9 +366,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             _showExportDataDialog();
                           },
                         ),
-                        
+
                         const SizedBox(height: 24),
-                        
+
                         // About section
                         _buildSectionHeader('About'),
                         _buildSettingItem(
@@ -360,24 +393,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             // Navigate to terms of service
                           },
                         ),
-                        
+
                         // Admin Dashboard button (only for admins)
                         Builder(
                           builder: (context) {
-                            final isAdmin = Provider.of<AdminProvider>(context, listen: false).isAdmin;
+                            final isAdmin = Provider.of<AdminProvider>(
+                              context,
+                              listen: false,
+                            ).isAdmin;
                             if (!isAdmin) {
                               return Column(
                                 children: [
                                   _buildSettingItem(
                                     icon: Icons.refresh,
                                     title: 'Refresh Admin Status',
-                                    subtitle: 'Click if you recently changed your role',
+                                    subtitle:
+                                        'Click if you recently changed your role',
                                     onTap: () async {
-                                      final adminProvider = Provider.of<AdminProvider>(context, listen: false);
+                                      final adminProvider =
+                                          Provider.of<AdminProvider>(
+                                            context,
+                                            listen: false,
+                                          );
                                       await adminProvider.refreshAdminStatus();
-                                      ScaffoldMessenger.of(context).showSnackBar(
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
                                         const SnackBar(
-                                          content: Text('Admin status refreshed. Check again.'),
+                                          content: Text(
+                                            'Admin status refreshed. Check again.',
+                                          ),
                                           backgroundColor: Colors.blue,
                                         ),
                                       );
@@ -394,30 +439,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               onTap: () {
                                 Navigator.of(context).push(
                                   MaterialPageRoute(
-                                    builder: (context) => const AdminDashboardScreen(),
+                                    builder: (context) =>
+                                        const AdminDashboardScreen(),
                                   ),
                                 );
                               },
                             );
                           },
                         ),
-                        
+
                         const SizedBox(height: 24),
-                        
+
                         // Save button
                         CustomButton(
                           text: 'Save Settings',
                           onPressed: _saveSettings,
                           width: double.infinity,
-                        )
-                            .animate()
-                            .fadeIn(
-                              duration: const Duration(milliseconds: 600),
-                              delay: const Duration(milliseconds: 400),
-                            ),
-                        
+                        ).animate().fadeIn(
+                          duration: const Duration(milliseconds: 600),
+                          delay: const Duration(milliseconds: 400),
+                        ),
+
                         const SizedBox(height: 16),
-                        
+
                         // Sign out button
                         CustomButton(
                           text: 'Sign Out',
@@ -426,13 +470,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           },
                           isOutlined: true,
                           width: double.infinity,
-                        )
-                            .animate()
-                            .fadeIn(
-                              duration: const Duration(milliseconds: 600),
-                              delay: const Duration(milliseconds: 500),
-                            ),
-                        
+                        ).animate().fadeIn(
+                          duration: const Duration(milliseconds: 600),
+                          delay: const Duration(milliseconds: 500),
+                        ),
+
                         const SizedBox(height: 40),
                       ],
                     ),
@@ -445,20 +487,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _buildAppBar() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
-      child: Row(
-        children: [
-          Text(
-            'Settings',
-            style: AppTheme.headingLarge.copyWith(
-              color: AppTheme.primaryGold,
-              fontWeight: FontWeight.bold,
-            ),
+          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+          child: Row(
+            children: [
+              Text(
+                'Settings',
+                style: AppTheme.headingLarge.copyWith(
+                  color: AppTheme.primaryGold,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const Spacer(),
+            ],
           ),
-          const Spacer(),
-        ],
-      ),
-    )
+        )
         .animate()
         .fadeIn(duration: const Duration(milliseconds: 500))
         .slideY(begin: -0.2, end: 0, curve: Curves.easeOut);
@@ -466,77 +508,71 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _buildAccountInfo(UserModel? user) {
     return Container(
-      padding: const EdgeInsets.all(16.0),
-      decoration: BoxDecoration(
-        color: AppTheme.darkGrey.withOpacity(0.3),
-        borderRadius: BorderRadius.circular(16.0),
-        border: Border.all(
-          color: AppTheme.grey.withOpacity(0.3),
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 60,
-            height: 60,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: AppTheme.primaryGold,
-                width: 2,
+          padding: const EdgeInsets.all(16.0),
+          decoration: BoxDecoration(
+            color: AppTheme.darkGrey.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(16.0),
+            border: Border.all(color: AppTheme.grey.withOpacity(0.3)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppTheme.primaryGold, width: 2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.primaryGold.withOpacity(0.3),
+                      blurRadius: 10,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: CircleAvatar(
+                  backgroundColor: AppTheme.darkGrey,
+                  backgroundImage:
+                      user?.photoUrl != null && user!.photoUrl!.isNotEmpty
+                      ? NetworkImage(user.photoUrl!) as ImageProvider
+                      : null,
+                  child: (user?.photoUrl == null || user!.photoUrl!.isEmpty)
+                      ? Text(
+                          user?.displayName?.isNotEmpty == true
+                              ? user!.displayName![0].toUpperCase()
+                              : 'A',
+                          style: AppTheme.headingLarge.copyWith(
+                            color: AppTheme.primaryGold,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 24,
+                          ),
+                        )
+                      : null,
+                ),
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: AppTheme.primaryGold.withOpacity(0.3),
-                  blurRadius: 10,
-                  spreadRadius: 2,
-                ),
-              ],
-            ),
-            child: CircleAvatar(
-              backgroundColor: AppTheme.darkGrey,
-              backgroundImage: user?.photoUrl != null && user!.photoUrl!.isNotEmpty
-                  ? NetworkImage(user.photoUrl!) as ImageProvider
-                  : null,
-              child: (user?.photoUrl == null || user!.photoUrl!.isEmpty)
-                  ? Text(
-                      user?.displayName?.isNotEmpty == true
-                          ? user!.displayName![0].toUpperCase()
-                          : 'A',
-                      style: AppTheme.headingLarge.copyWith(
-                        color: AppTheme.primaryGold,
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      user?.displayName ?? 'Anonymous User',
+                      style: AppTheme.bodyLarge.copyWith(
+                        color: AppTheme.white,
                         fontWeight: FontWeight.bold,
-                        fontSize: 24,
                       ),
-                    )
-                  : null,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  user?.displayName ?? 'Anonymous User',
-                  style: AppTheme.bodyLarge.copyWith(
-                    color: AppTheme.white,
-                    fontWeight: FontWeight.bold,
-                  ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      user?.email ?? 'No email provided',
+                      style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  user?.email ?? 'No email provided',
-                  style: AppTheme.bodyMedium.copyWith(
-                    color: AppTheme.grey,
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
-    )
+        )
         .animate()
         .fadeIn(
           duration: const Duration(milliseconds: 600),
@@ -560,12 +596,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           fontWeight: FontWeight.bold,
         ),
       ),
-    )
-        .animate()
-        .fadeIn(
-          duration: const Duration(milliseconds: 600),
-          delay: const Duration(milliseconds: 300),
-        );
+    ).animate().fadeIn(
+      duration: const Duration(milliseconds: 600),
+      delay: const Duration(milliseconds: 300),
+    );
   }
 
   Widget _buildSettingItem({
@@ -575,68 +609,63 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required VoidCallback onTap,
   }) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 16.0),
-      decoration: BoxDecoration(
-        color: AppTheme.darkGrey.withOpacity(0.3),
-        borderRadius: BorderRadius.circular(16.0),
-        border: Border.all(
-          color: AppTheme.grey.withOpacity(0.3),
-        ),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(16.0),
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryGold.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(12.0),
-                  ),
-                  child: Icon(
-                    icon,
-                    color: AppTheme.primaryGold,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: AppTheme.bodyMedium.copyWith(
-                          color: AppTheme.white,
-                          fontWeight: FontWeight.bold,
-                        ),
+          margin: const EdgeInsets.only(bottom: 16.0),
+          decoration: BoxDecoration(
+            color: AppTheme.darkGrey.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(16.0),
+            border: Border.all(color: AppTheme.grey.withOpacity(0.3)),
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(16.0),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryGold.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(12.0),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        subtitle,
-                        style: AppTheme.bodySmall.copyWith(
-                          color: AppTheme.grey,
-                        ),
+                      child: Icon(icon, color: AppTheme.primaryGold),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: AppTheme.bodyMedium.copyWith(
+                              color: AppTheme.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            subtitle,
+                            style: AppTheme.bodySmall.copyWith(
+                              color: AppTheme.grey,
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                    const Icon(
+                      Icons.arrow_forward_ios,
+                      color: AppTheme.grey,
+                      size: 16,
+                    ),
+                  ],
                 ),
-                const Icon(
-                  Icons.arrow_forward_ios,
-                  color: AppTheme.grey,
-                  size: 16,
-                ),
-              ],
+              ),
             ),
           ),
-        ),
-      ),
-    )
+        )
         .animate()
         .fadeIn(
           duration: const Duration(milliseconds: 600),
@@ -658,61 +687,57 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required ValueChanged<bool> onChanged,
   }) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 16.0),
-      padding: const EdgeInsets.all(16.0),
-      decoration: BoxDecoration(
-        color: AppTheme.darkGrey.withOpacity(0.3),
-        borderRadius: BorderRadius.circular(16.0),
-        border: Border.all(
-          color: AppTheme.grey.withOpacity(0.3),
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: value
-                  ? AppTheme.primaryGold.withOpacity(0.2)
-                  : AppTheme.grey.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(12.0),
-            ),
-            child: Icon(
-              icon,
-              color: value ? AppTheme.primaryGold : AppTheme.grey,
-            ),
+          margin: const EdgeInsets.only(bottom: 16.0),
+          padding: const EdgeInsets.all(16.0),
+          decoration: BoxDecoration(
+            color: AppTheme.darkGrey.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(16.0),
+            border: Border.all(color: AppTheme.grey.withOpacity(0.3)),
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: AppTheme.bodyMedium.copyWith(
-                    color: AppTheme.white,
-                    fontWeight: FontWeight.bold,
-                  ),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: value
+                      ? AppTheme.primaryGold.withOpacity(0.2)
+                      : AppTheme.grey.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12.0),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: AppTheme.bodySmall.copyWith(
-                    color: AppTheme.grey,
-                  ),
+                child: Icon(
+                  icon,
+                  color: value ? AppTheme.primaryGold : AppTheme.grey,
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: value,
+                onChanged: onChanged,
+                activeColor: AppTheme.primaryGold,
+              ),
+            ],
           ),
-          Switch(
-            value: value,
-            onChanged: onChanged,
-            activeColor: AppTheme.primaryGold,
-          ),
-        ],
-      ),
-    )
+        )
         .animate()
         .fadeIn(
           duration: const Duration(milliseconds: 600),
@@ -734,83 +759,78 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required ValueChanged<T?> onChanged,
   }) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 16.0),
-      padding: const EdgeInsets.all(16.0),
-      decoration: BoxDecoration(
-        color: AppTheme.darkGrey.withOpacity(0.3),
-        borderRadius: BorderRadius.circular(16.0),
-        border: Border.all(
-          color: AppTheme.grey.withOpacity(0.3),
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: AppTheme.primaryGold.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(12.0),
-            ),
-            child: Icon(
-              icon,
-              color: AppTheme.primaryGold,
-            ),
+          margin: const EdgeInsets.only(bottom: 16.0),
+          padding: const EdgeInsets.all(16.0),
+          decoration: BoxDecoration(
+            color: AppTheme.darkGrey.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(16.0),
+            border: Border.all(color: AppTheme.grey.withOpacity(0.3)),
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: AppTheme.bodyMedium.copyWith(
-                    color: AppTheme.white,
-                    fontWeight: FontWeight.bold,
-                  ),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryGold.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12.0),
                 ),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12.0),
-                  decoration: BoxDecoration(
-                    color: AppTheme.darkGrey.withOpacity(0.5),
-                    borderRadius: BorderRadius.circular(8.0),
-                    border: Border.all(
-                      color: AppTheme.grey.withOpacity(0.3),
+                child: Icon(icon, color: AppTheme.primaryGold),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.white,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
-                  child: DropdownButton<T>(
-                    value: value,
-                    onChanged: onChanged,
-                    items: items.map((item) {
-                      return DropdownMenuItem<T>(
-                        value: item,
-                        child: Text(
-                          item.toString(),
-                          style: AppTheme.bodyMedium.copyWith(
-                            color: AppTheme.white,
-                          ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                      decoration: BoxDecoration(
+                        color: AppTheme.darkGrey.withOpacity(0.5),
+                        borderRadius: BorderRadius.circular(8.0),
+                        border: Border.all(
+                          color: AppTheme.grey.withOpacity(0.3),
                         ),
-                      );
-                    }).toList(),
-                    style: AppTheme.bodyMedium.copyWith(
-                      color: AppTheme.white,
+                      ),
+                      child: DropdownButton<T>(
+                        value: value,
+                        onChanged: onChanged,
+                        items: items.map((item) {
+                          return DropdownMenuItem<T>(
+                            value: item,
+                            child: Text(
+                              item.toString(),
+                              style: AppTheme.bodyMedium.copyWith(
+                                color: AppTheme.white,
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                        style: AppTheme.bodyMedium.copyWith(
+                          color: AppTheme.white,
+                        ),
+                        dropdownColor: AppTheme.darkGrey,
+                        isExpanded: true,
+                        underline: const SizedBox(),
+                        icon: const Icon(
+                          Icons.arrow_drop_down,
+                          color: AppTheme.primaryGold,
+                        ),
+                      ),
                     ),
-                    dropdownColor: AppTheme.darkGrey,
-                    isExpanded: true,
-                    underline: const SizedBox(),
-                    icon: const Icon(
-                      Icons.arrow_drop_down,
-                      color: AppTheme.primaryGold,
-                    ),
-                  ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
-    )
+        )
         .animate()
         .fadeIn(
           duration: const Duration(milliseconds: 600),
@@ -831,15 +851,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         backgroundColor: AppTheme.darkGrey,
         title: Text(
           'Clear Cache',
-          style: AppTheme.headingSmall.copyWith(
-            color: AppTheme.white,
-          ),
+          style: AppTheme.headingSmall.copyWith(color: AppTheme.white),
         ),
         content: Text(
           'This will clear all cached data. This action cannot be undone.',
-          style: AppTheme.bodyMedium.copyWith(
-            color: AppTheme.white,
-          ),
+          style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
         ),
         actions: [
           TextButton(
@@ -848,9 +864,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
             child: Text(
               'Cancel',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.grey,
-              ),
+              style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
             ),
           ),
           ElevatedButton(
@@ -885,15 +899,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         backgroundColor: AppTheme.darkGrey,
         title: Text(
           'Export Data',
-          style: AppTheme.headingSmall.copyWith(
-            color: AppTheme.white,
-          ),
+          style: AppTheme.headingSmall.copyWith(color: AppTheme.white),
         ),
         content: Text(
           'This will export all your personal data. Where would you like to save it?',
-          style: AppTheme.bodyMedium.copyWith(
-            color: AppTheme.white,
-          ),
+          style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
         ),
         actions: [
           TextButton(
@@ -902,9 +912,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
             child: Text(
               'Cancel',
-              style: AppTheme.bodyMedium.copyWith(
-                color: AppTheme.grey,
-              ),
+              style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
             ),
           ),
           ElevatedButton(
@@ -934,13 +942,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _showEditProfileDialog() {
     final user = _userModel;
-    final TextEditingController nameController = TextEditingController(text: user?.displayName ?? '');
-    final TextEditingController emailController = TextEditingController(text: user?.email ?? '');
+    final TextEditingController nameController = TextEditingController(
+      text: user?.displayName ?? '',
+    );
+    final TextEditingController emailController = TextEditingController(
+      text: user?.email ?? '',
+    );
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.darkGrey,
-        title: Text('Edit Profile', style: AppTheme.headingSmall.copyWith(color: AppTheme.white)),
+        title: Text(
+          'Edit Profile',
+          style: AppTheme.headingSmall.copyWith(color: AppTheme.white),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -959,7 +974,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: Text('Cancel', style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey)),
+            child: Text(
+              'Cancel',
+              style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
+            ),
           ),
           ElevatedButton(
             onPressed: () async {
@@ -967,25 +985,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (newName.isNotEmpty && user != null) {
                 setState(() => _isLoading = true);
                 try {
-                  final authProvider = Provider.of<AuthProvider>(context, listen: false);
+                  final authProvider = Provider.of<AuthProvider>(
+                    context,
+                    listen: false,
+                  );
                   final firebaseUser = authProvider.user;
                   final authService = AuthService();
-                  await authService.updateUserFields(user.id, {'displayName': newName});
+                  await authService.updateUserFields(user.id, {
+                    'displayName': newName,
+                  });
                   if (firebaseUser != null) {
                     await firebaseUser.updateDisplayName(newName);
                   }
                   await _fetchUserProfile();
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated successfully')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Profile updated successfully'),
+                    ),
+                  );
                 } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('Error: $e')));
                 } finally {
                   setState(() => _isLoading = false);
                   Navigator.of(context).pop();
                 }
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryGold),
-            child: Text('Save', style: AppTheme.bodyMedium.copyWith(color: AppTheme.black, fontWeight: FontWeight.bold)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryGold,
+            ),
+            child: Text(
+              'Save',
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.black,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ],
       ),
@@ -998,7 +1035,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.darkGrey,
-        title: Text('Change Password', style: AppTheme.headingSmall.copyWith(color: AppTheme.white)),
+        title: Text(
+          'Change Password',
+          style: AppTheme.headingSmall.copyWith(color: AppTheme.white),
+        ),
         content: TextField(
           controller: passwordController,
           decoration: const InputDecoration(labelText: 'New Password'),
@@ -1007,32 +1047,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: Text('Cancel', style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey)),
+            child: Text(
+              'Cancel',
+              style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
+            ),
           ),
           ElevatedButton(
             onPressed: () async {
               final newPassword = passwordController.text.trim();
               if (newPassword.length < 6) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password must be at least 6 characters')));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Password must be at least 6 characters'),
+                  ),
+                );
                 return;
               }
               setState(() => _isLoading = true);
               try {
                 // Use FirebaseAuth directly for password change
-                final user = Provider.of<AuthProvider>(context, listen: false).user;
+                final user = Provider.of<AuthProvider>(
+                  context,
+                  listen: false,
+                ).user;
                 if (user != null) {
                   await user.updatePassword(newPassword);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password changed successfully')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Password changed successfully'),
+                    ),
+                  );
                 }
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('Error: $e')));
               } finally {
                 setState(() => _isLoading = false);
                 Navigator.of(context).pop();
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryGold),
-            child: Text('Change', style: AppTheme.bodyMedium.copyWith(color: AppTheme.black, fontWeight: FontWeight.bold)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryGold,
+            ),
+            child: Text(
+              'Change',
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.black,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ],
       ),
@@ -1044,31 +1108,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.darkGrey,
-        title: Text('Delete Account', style: AppTheme.headingSmall.copyWith(color: AppTheme.white)),
-        content: Text('Are you sure you want to permanently delete your account? This action cannot be undone.', style: AppTheme.bodyMedium.copyWith(color: AppTheme.white)),
+        title: Text(
+          'Delete Account',
+          style: AppTheme.headingSmall.copyWith(color: AppTheme.white),
+        ),
+        content: Text(
+          'Are you sure you want to permanently delete your account? This action cannot be undone.',
+          style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: Text('Cancel', style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey)),
+            child: Text(
+              'Cancel',
+              style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
+            ),
           ),
           ElevatedButton(
             onPressed: () async {
               setState(() => _isLoading = true);
               try {
-                final user = Provider.of<AuthProvider>(context, listen: false).user;
+                final user = Provider.of<AuthProvider>(
+                  context,
+                  listen: false,
+                ).user;
                 if (user != null) {
                   await user.delete();
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Account deleted successfully')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Account deleted successfully'),
+                    ),
+                  );
                   Navigator.of(context).pop();
                 }
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('Error: $e')));
               } finally {
                 setState(() => _isLoading = false);
               }
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: Text('Delete', style: AppTheme.bodyMedium.copyWith(color: AppTheme.white, fontWeight: FontWeight.bold)),
+            child: Text(
+              'Delete',
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ],
       ),

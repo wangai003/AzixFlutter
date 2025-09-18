@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'package:provider/provider.dart';
@@ -19,6 +20,9 @@ import 'providers/unified_cart_provider.dart';
 import 'providers/search_provider.dart';
 import 'providers/wishlist_provider.dart';
 import 'providers/marketplace/marketplace_provider.dart';
+import 'providers/enhanced_wallet_provider.dart';
+import 'wallet/providers/wallet_provider.dart';
+import 'wallet/providers/wallet_auth_provider.dart';
 import 'services/secure_mining_service.dart';
 import 'services/mining_security_service.dart';
 import 'services/app_initialization_service.dart';
@@ -35,13 +39,65 @@ import 'screens/marketplace/functional_responsive_marketplace.dart';
 import 'screens/onboarding/goods_vendor_onboarding_screen.dart';
 import 'screens/onboarding/service_vendor_onboarding_screen.dart';
 import 'screens/user_registration_screen.dart';
+import 'screens/enhanced_wallet_screen.dart';
+
+// Debug configuration - set to false to completely disable debug filtering
+// When disabled, all debug messages including DebugService errors will show in console
+const bool ENABLE_DEBUG_FILTERING = true;
+
+// Override the global print function with our custom logger
+void print(Object? object) {
+  customPrint(object);
+}
+
+// Custom logger that filters out noisy debug messages
+void customPrint(Object? object) {
+  final message = object.toString();
+
+  // Filter out various noisy debug messages that clutter the console
+  final filteredMessages = [
+    'DebugService: Error serving requests',
+    'Cannot send Null',
+    'DEBUG: Firebase initialized successfully',
+    'DEBUG: Notification service initialized successfully',
+    '🔄 StellarProvider: checkWalletStatus() called',
+    '🔄 StellarProvider: Checking if wallet exists...',
+    '🔄 StellarProvider: _hasWallet =',
+    '✅ StellarProvider: Wallet found',
+    '❌ StellarProvider: No wallet found',
+    '🔄 StellarProvider: Calling _stellarService.getTransactionHistory()',
+    '🔍 StellarProvider: loadTransactionsFromBlockchain() called',
+    '🔍 Loading transactions from blockchain...',
+    '📡 Calling Stellar SDK operations.forAccount...',
+    '✅ StellarProvider: Loaded',
+    'transactions from blockchain',
+  ];
+
+  bool shouldFilter = false;
+  if (ENABLE_DEBUG_FILTERING && kDebugMode) {
+    for (final filter in filteredMessages) {
+      if (message.contains(filter)) {
+        shouldFilter = true;
+        break;
+      }
+    }
+  }
+
+  if (!shouldFilter) {
+    // Use debugPrint instead of print to avoid the DebugService errors
+    debugPrint(message);
+  }
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Global error handler for Flutter framework errors
   FlutterError.onError = (FlutterErrorDetails details) {
-    FlutterError.dumpErrorToConsole(details);
+    // Only dump errors in debug mode to reduce console noise
+    if (kDebugMode) {
+      FlutterError.dumpErrorToConsole(details);
+    }
     // Optionally, send to a logging service
   };
 
@@ -49,19 +105,18 @@ Future<void> main() async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-    print('DEBUG: Firebase initialized successfully');
-    
+    customPrint('DEBUG: Firebase initialized successfully');
+
     // Initialize notification service
     await NotificationService.initialize();
-    print('DEBUG: Notification service initialized successfully');
-    
+    customPrint('DEBUG: Notification service initialized successfully');
+
     // Initialize the complete app system
     await AppInitializationService.initializeApp();
-    
   } catch (e, stack) {
     // Print and optionally log the error
-    print('Failed to initialize Firebase: $e');
-    print(stack);
+    customPrint('Failed to initialize Firebase: $e');
+    customPrint(stack);
     // Optionally, show a fallback UI or error page
   }
 
@@ -90,7 +145,10 @@ class MyApp extends StatelessWidget {
           },
         ),
         // Enhanced secure mining provider
-        ChangeNotifierProxyProvider<local_auth.AuthProvider, SecureStellarProvider>(
+        ChangeNotifierProxyProvider<
+          local_auth.AuthProvider,
+          SecureStellarProvider
+        >(
           create: (_) => SecureStellarProvider(),
           update: (_, auth, previousProvider) {
             if (auth.isAuthenticated && previousProvider != null) {
@@ -106,24 +164,28 @@ class MyApp extends StatelessWidget {
         Provider<SecureMiningService>(
           create: (_) => SecureMiningService()..initialize(),
         ),
-        Provider<MiningSecurityService>(
-          create: (_) => MiningSecurityService(),
-        ),
+        Provider<MiningSecurityService>(create: (_) => MiningSecurityService()),
         ChangeNotifierProvider(create: (_) => ChatProvider()),
         ChangeNotifierProvider(create: (_) => AdminProvider()),
         ChangeNotifierProvider(create: (_) => CartProvider()),
         ChangeNotifierProvider(create: (_) => UnifiedCartProvider()),
         ChangeNotifierProvider(create: (_) => SearchProvider()),
         ChangeNotifierProvider(create: (_) => WishlistProvider()),
+        // New wallet system providers
+        ChangeNotifierProvider(create: (_) => WalletProvider()),
+        ChangeNotifierProvider(create: (_) => WalletAuthProvider()),
+        // Enhanced wallet provider with real-time monitoring
+        ChangeNotifierProvider(create: (_) => EnhancedWalletProvider()),
         // Enhanced marketplace provider with Stellar integration
-        ChangeNotifierProxyProvider<StellarProvider, EnhancedMarketplaceProvider>(
-          create: (_) => EnhancedMarketplaceProvider(
-            stellarService: StellarService(),
-          ),
+        ChangeNotifierProxyProvider<
+          StellarProvider,
+          EnhancedMarketplaceProvider
+        >(
+          create: (_) =>
+              EnhancedMarketplaceProvider(stellarService: StellarService()),
           update: (_, stellarProvider, previousMarketplaceProvider) {
-            return previousMarketplaceProvider ?? EnhancedMarketplaceProvider(
-              stellarService: StellarService(),
-            );
+            return previousMarketplaceProvider ??
+                EnhancedMarketplaceProvider(stellarService: StellarService());
           },
         ),
       ],
@@ -134,27 +196,35 @@ class MyApp extends StatelessWidget {
             debugShowCheckedModeBanner: false,
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
-            themeMode: themeProvider.isDarkMode ? ThemeMode.dark : ThemeMode.light,
+            themeMode: themeProvider.isDarkMode
+                ? ThemeMode.dark
+                : ThemeMode.light,
             home: const Wrapper(),
             builder: (context, child) {
               // Apply a responsive layout wrapper to the entire app
+              final currentScale = MediaQuery.of(context).textScaleFactor;
+              final clampedScale = currentScale.clamp(0.8, 1.2);
               return MediaQuery(
                 // Ensure text scaling doesn't break layouts
-                data: MediaQuery.of(context).copyWith(
-                  textScaleFactor: MediaQuery.of(context).textScaleFactor.clamp(0.8, 1.2),
-                ),
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(clampedScale)),
                 child: child!,
               );
             },
             routes: {
               '/all-transactions': (context) => const AllTransactionsScreen(),
               '/admin/dashboard': (context) => const AdminDashboardScreen(),
-              '/marketplace': (context) => const FunctionalResponsiveMarketplace(),
+              '/marketplace': (context) =>
+                  const FunctionalResponsiveMarketplace(),
               '/vendor/products': (context) => const ProductManagementScreen(),
               '/vendor/services': (context) => const ServiceManagementScreen(),
-              '/onboarding/goods': (context) => const GoodsVendorOnboardingScreen(),
-              '/onboarding/service': (context) => const ServiceVendorOnboardingScreen(),
+              '/onboarding/goods': (context) =>
+                  const GoodsVendorOnboardingScreen(),
+              '/onboarding/service': (context) =>
+                  const ServiceVendorOnboardingScreen(),
               '/user-registration': (context) => const UserRegistrationScreen(),
+              '/enhanced-wallet': (context) => const EnhancedWalletScreen(),
             },
           );
         },
@@ -169,7 +239,10 @@ class HomeScreen extends StatelessWidget {
   Future<String?> _getUserRole() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return null;
-    final doc = await FirebaseFirestore.instance.collection('USER').doc(user.uid).get();
+    final doc = await FirebaseFirestore.instance
+        .collection('USER')
+        .doc(user.uid)
+        .get();
     return doc.data()?['role'] as String?;
   }
 

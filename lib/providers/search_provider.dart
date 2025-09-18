@@ -435,7 +435,6 @@ class SearchProvider extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setStringList('search_history', _searchHistory);
     } catch (e) {
-      print('Error saving search history: $e');
     }
   }
 
@@ -445,7 +444,6 @@ class SearchProvider extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       _searchHistory = prefs.getStringList('search_history') ?? [];
     } catch (e) {
-      print('Error loading search history: $e');
     }
   }
 
@@ -495,7 +493,6 @@ class SearchProvider extends ChangeNotifier {
       _serviceCategories = serviceCats.map((key, value) => MapEntry(key, value.toList()));
 
     } catch (e) {
-      print('Error loading categories: $e');
     }
   }
 

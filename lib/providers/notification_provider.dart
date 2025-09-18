@@ -31,7 +31,6 @@ class NotificationProvider extends ChangeNotifier {
       _isInitialized = true;
       notifyListeners();
     } catch (e) {
-      print('Error loading notification settings: $e');
     }
   }
 
@@ -80,7 +79,6 @@ class NotificationProvider extends ChangeNotifier {
       await prefs.setBool('marketingNotificationsEnabled', _marketingNotificationsEnabled);
       await prefs.setBool('systemNotificationsEnabled', _systemNotificationsEnabled);
     } catch (e) {
-      print('Error saving notification settings: $e');
     }
   }
 }

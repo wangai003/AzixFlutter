@@ -7,7 +7,9 @@ class AppTheme {
   static const Color white = Colors.white;
   static const Color black = Colors.black;
   static const Color grey = Color(0xFF9E9E9E);
+  static const Color gray = Color(0xFF9E9E9E); // Alias for grey
   static const Color darkGrey = Color(0xFF424242);
+  static const Color darkGray = Color(0xFF424242); // Alias for darkGrey
   static const Color lightGrey = Color(0xFFE0E0E0);
   static const Color red = Color(0xFFE53935);
   static const Color green = Color(0xFF4CAF50);
@@ -419,4 +421,8 @@ class AppTheme {
   static const Duration animationFast = Duration(milliseconds: 200);
   static const Duration animationMedium = Duration(milliseconds: 300);
   static const Duration animationSlow = Duration(milliseconds: 500);
+
+  // Custom Icons
+  static const IconData receive = Icons.call_received;
+  static const IconData encrypt = Icons.lock;
 }

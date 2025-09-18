@@ -52,7 +52,6 @@ class _FunctionalCartScreenState extends State<FunctionalCartScreen> {
         _cartItems.removeWhere((item) => item.product == null && item.service == null);
       }
     } catch (e) {
-      print('Error loading cart: $e');
     } finally {
       setState(() => _isLoading = false);
     }
@@ -78,7 +77,6 @@ class _FunctionalCartScreenState extends State<FunctionalCartScreen> {
           return CartItem(product: product, quantity: quantity);
         }
       } catch (e) {
-        print('Error loading product $id: $e');
       }
     } else if (type == 'service') {
       try {
@@ -100,7 +98,6 @@ class _FunctionalCartScreenState extends State<FunctionalCartScreen> {
           );
         }
       } catch (e) {
-        print('Error loading service $id: $e');
       }
     }
     
@@ -578,7 +575,6 @@ class _FunctionalCartScreenState extends State<FunctionalCartScreen> {
           .doc(user.uid)
           .set(cartData);
     } catch (e) {
-      print('Error saving cart: $e');
     }
   }
   

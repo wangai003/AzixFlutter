@@ -87,7 +87,6 @@ class ChatProvider with ChangeNotifier {
       
       _isLoading = false;
     } catch (e) {
-      print('Error loading communities: $e');
       _isLoading = false;
       notifyListeners();
     }
@@ -127,7 +126,6 @@ class ChatProvider with ChangeNotifier {
         notifyListeners();
       });
     } catch (e) {
-      print('Error loading discover communities: $e');
     }
   }
   
@@ -197,7 +195,6 @@ class ChatProvider with ChangeNotifier {
       // Refresh communities list
       await loadCommunities();
     } catch (e) {
-      print('Error creating community: $e');
       rethrow;
     }
   }
@@ -224,7 +221,6 @@ class ChatProvider with ChangeNotifier {
         }
       }
     } catch (e) {
-      print('Error joining community: $e');
       rethrow;
     }
   }
@@ -258,7 +254,6 @@ class ChatProvider with ChangeNotifier {
         await loadCommunities();
       }
     } catch (e) {
-      print('Error leaving community: $e');
       rethrow;
     }
   }
@@ -277,7 +272,6 @@ class ChatProvider with ChangeNotifier {
             final ref = _storage.refFromURL(imageUrl);
             await ref.delete();
           } catch (e) {
-            print('Error deleting image from storage: $e');
           }
         }
         
@@ -303,7 +297,6 @@ class ChatProvider with ChangeNotifier {
         throw Exception('You can only delete communities you created.');
       }
     } catch (e) {
-      print('Error deleting community: $e');
       rethrow;
     }
   }
@@ -376,7 +369,6 @@ class ChatProvider with ChangeNotifier {
       _replyToMessage = null;
       notifyListeners();
     } catch (e) {
-      print('Error sending message: $e');
       rethrow;
     }
   }
@@ -429,7 +421,6 @@ class ChatProvider with ChangeNotifier {
       
       notifyListeners();
     } catch (e) {
-      print('Error toggling reaction: $e');
       rethrow;
     }
   }

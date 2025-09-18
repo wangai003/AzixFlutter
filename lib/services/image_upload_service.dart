@@ -37,7 +37,6 @@ class ImageUploadService {
         downloadUrls.add(url);
         onProgress?.call(i + 1, imageBytes.length, 1.0);
       } catch (e) {
-        print('Error uploading image $i: $e');
         // Continue with other images even if one fails
       }
     }
@@ -202,7 +201,6 @@ class ImageUploadService {
       final ref = _storage.refFromURL(imageUrl);
       await ref.delete();
     } catch (e) {
-      print('Error deleting image: $e');
       // Don't throw error for delete failures
     }
   }
@@ -220,7 +218,6 @@ class ImageUploadService {
       final ref = _storage.refFromURL(imageUrl);
       return await ref.getMetadata();
     } catch (e) {
-      print('Error getting image metadata: $e');
       return null;
     }
   }
@@ -292,7 +289,6 @@ class ImageUploadService {
       // You'd need to track this in Firestore or implement a Cloud Function
       return 0;
     } catch (e) {
-      print('Error getting storage usage: $e');
       return 0;
     }
   }
@@ -315,11 +311,9 @@ class ImageUploadService {
         
         if (!activeImageUrls.contains(downloadUrl)) {
           await item.delete();
-          print('Deleted unused image: ${item.name}');
         }
       }
     } catch (e) {
-      print('Error during cleanup: $e');
     }
   }
 }

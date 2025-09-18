@@ -610,7 +610,6 @@ class MarketplacePaymentService {
       }
       
     } catch (e) {
-      print('Error processing expired escrows: $e');
     }
   }
   
@@ -633,7 +632,6 @@ class MarketplacePaymentService {
       }).toList();
       
     } catch (e) {
-      print('Error getting payment history: $e');
       return [];
     }
   }

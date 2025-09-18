@@ -5,6 +5,7 @@ import '../providers/auth_provider.dart';
 import '../models/transaction.dart';
 import '../theme/app_theme.dart';
 import '../widgets/transaction_list.dart';
+import '../services/blockchain_transaction_service.dart';
 
 class AllTransactionsScreen extends StatefulWidget {
   const AllTransactionsScreen({Key? key}) : super(key: key);
@@ -22,8 +23,13 @@ class _AllTransactionsScreenState extends State<AllTransactionsScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<StellarProvider>(context, listen: false).loadTransactions();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
+      await stellarProvider.loadTransactions();
+
+      // Debug: Print transaction details
+      if (stellarProvider.transactions.isNotEmpty) {
+      }
     });
   }
 
@@ -246,11 +252,53 @@ class _AllTransactionsScreenState extends State<AllTransactionsScreen> {
                   ),
                   const SizedBox(height: 16),
                   ElevatedButton(
-                    onPressed: () => stellarProvider.loadTransactions(),
+                    onPressed: () async {
+                      await stellarProvider.loadTransactions();
+                      if (stellarProvider.error != null) {
+                      }
+                    },
                     child: Text('Reload Transactions'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.primaryGold,
                       foregroundColor: AppTheme.black,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    onPressed: () async {
+                      final debugInfo = await stellarProvider.debugTransactionLoading();
+                    },
+                    child: Text('Debug Transaction Loading'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    onPressed: () async {
+                      final testResult = await BlockchainTransactionService.testStellarConnection();
+
+                      if (testResult) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('✅ Stellar SDK connection successful'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('❌ Stellar SDK connection failed'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    },
+                    child: Text('Test Stellar SDK Connection'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
                     ),
                   ),
                 ],

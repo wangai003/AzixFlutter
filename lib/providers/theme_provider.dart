@@ -30,7 +30,6 @@ class ThemeProvider extends ChangeNotifier {
       _isInitialized = true;
       notifyListeners();
     } catch (e) {
-      print('Error loading theme settings: $e');
     }
   }
 
@@ -76,7 +75,6 @@ class ThemeProvider extends ChangeNotifier {
       await prefs.setString('language', _language);
       await prefs.setString('currency', _currency);
     } catch (e) {
-      print('Error saving theme settings: $e');
     }
   }
 }

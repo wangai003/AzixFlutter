@@ -192,7 +192,6 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
         _loadingSession = false;
       });
     } catch (e) {
-      print('Error restoring mining session: $e');
       setState(() {
         _loadingSession = false;
       });
@@ -333,7 +332,6 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
     final finalEarned = earned < 0.001 ? 0.001 : earned;
     
     if (finalEarned <= 0) {
-      print('Warning: Final earned amount is 0 or negative, skipping reward');
       return;
     }
     
@@ -351,7 +349,6 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
           .get();
         
         if (existingHistory.docs.isNotEmpty) {
-          print('Mining reward already credited for this session');
           return;
         }
       }
@@ -491,7 +488,6 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
         Navigator.of(context).pop();
       }
       
-      print('Error crediting mining reward: $e');
       if (mounted) {
         // Show error dialog
         showDialog(
@@ -600,7 +596,6 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
       _achievements = prefs.getStringList('mining_achievements') ?? [];
       setState(() {});
     } catch (e) {
-      print('Error loading mining stats: $e');
     }
   }
 
@@ -614,7 +609,6 @@ class _PiHomeScreenState extends State<PiHomeScreen> with SingleTickerProviderSt
       await prefs.setDouble('mining_total_mined', _totalMined);
       await prefs.setStringList('mining_achievements', _achievements);
     } catch (e) {
-      print('Error saving mining stats: $e');
     }
   }
 

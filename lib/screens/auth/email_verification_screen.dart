@@ -74,7 +74,6 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> with 
       }
     } catch (e) {
       // Silently handle errors during auto-check
-      print('Auto-verification check error: $e');
     }
   }
 

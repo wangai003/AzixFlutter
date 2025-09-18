@@ -276,7 +276,6 @@ class DisputeResolutionService {
           break;
       }
     } catch (e) {
-      print('Error executing resolution: $e');
     }
   }
 
@@ -301,7 +300,6 @@ class DisputeResolutionService {
 
       await _firestore.collection('escrow').add(escrowData);
     } catch (e) {
-      print('Error initializing escrow: $e');
     }
   }
 
@@ -334,7 +332,6 @@ class DisputeResolutionService {
       await _processEscrowRelease(escrowData, recipient, releaseAmount);
 
     } catch (e) {
-      print('Error releasing escrow: $e');
     }
   }
 
@@ -376,7 +373,6 @@ class DisputeResolutionService {
         },
       );
     } catch (e) {
-      print('Error processing escrow release: $e');
     }
   }
 
@@ -429,7 +425,6 @@ class DisputeResolutionService {
         },
       );
     } catch (e) {
-      print('Error processing store credit: $e');
     }
   }
 
@@ -467,7 +462,6 @@ class DisputeResolutionService {
         data: {'disputeId': disputeId},
       );
     } catch (e) {
-      print('Error issuing vendor warning: $e');
     }
   }
 
@@ -502,7 +496,6 @@ class DisputeResolutionService {
         },
       );
     } catch (e) {
-      print('Error suspending vendor: $e');
     }
   }
 
@@ -535,7 +528,6 @@ class DisputeResolutionService {
         ),
       );
     } catch (e) {
-      print('Error updating trust scores: $e');
     }
   }
 
@@ -567,7 +559,6 @@ class DisputeResolutionService {
         );
       }
     } catch (e) {
-      print('Error auto-assigning mediator: $e');
     }
   }
 
@@ -594,7 +585,6 @@ class DisputeResolutionService {
       // Notify admin/mediators
       await _notifyAdminOfNewDispute(disputeId, type);
     } catch (e) {
-      print('Error sending dispute notifications: $e');
     }
   }
 
@@ -623,7 +613,6 @@ class DisputeResolutionService {
         );
       }
     } catch (e) {
-      print('Error notifying admin: $e');
     }
   }
 
@@ -641,7 +630,6 @@ class DisputeResolutionService {
         data: {'disputeId': disputeId},
       );
     } catch (e) {
-      print('Error notifying of dispute response: $e');
     }
   }
 
@@ -683,7 +671,6 @@ class DisputeResolutionService {
         data: {'disputeId': disputeId},
       );
     } catch (e) {
-      print('Error notifying of mediator assignment: $e');
     }
   }
 
@@ -717,7 +704,6 @@ class DisputeResolutionService {
         data: {'disputeId': disputeId, 'resolution': resolution.toJson()},
       );
     } catch (e) {
-      print('Error notifying of dispute resolution: $e');
     }
   }
 

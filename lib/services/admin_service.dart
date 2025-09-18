@@ -268,7 +268,6 @@ class AdminService {
       }
       return false;
     } catch (e) {
-      print('Error checking admin status: $e');
       return false;
     }
   }
@@ -347,7 +346,6 @@ class AdminService {
       });
       return true;
     } catch (e) {
-      print('Error approving application: $e');
       return false;
     }
   }
@@ -361,7 +359,6 @@ class AdminService {
       });
       return true;
     } catch (e) {
-      print('Error rejecting application: $e');
       return false;
     }
   }

@@ -79,7 +79,6 @@ class SwapService {
   Future<Map<String, dynamic>> addAssetTrustline(String publicKey, String assetCode, String assetIssuer) async {
     try {
       if (kDebugMode) {
-        print('Adding trustline for $assetCode (issuer: $assetIssuer)');
       }
       
       // XLM is native and doesn't need a trustline
@@ -182,7 +181,6 @@ class SwapService {
         } catch (recordError) {
           // Just log the error, don't fail the operation
           if (kDebugMode) {
-            print('Failed to record trustline in Firestore: $recordError');
           }
         }
         
@@ -282,7 +280,6 @@ class SwapService {
   ) async {
     try {
       if (kDebugMode) {
-        print('Executing swap: $amount $fromAssetCode -> $toAssetCode');
       }
       
       // Get wallet credentials
@@ -507,7 +504,6 @@ class SwapService {
       }).toList();
     } catch (e) {
       if (kDebugMode) {
-        print('Error getting swap history: $e');
       }
       return [];
     }

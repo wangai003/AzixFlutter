@@ -564,7 +564,6 @@ class _FunctionalSearchScreenState extends State<FunctionalSearchScreen>
       final suggestions = await _searchService.getSuggestions(query);
       setState(() => _suggestions = suggestions);
     } catch (e) {
-      print('Error getting suggestions: $e');
     }
   }
 

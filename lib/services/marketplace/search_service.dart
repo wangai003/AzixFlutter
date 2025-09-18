@@ -570,7 +570,6 @@ class AdvancedSearchService {
       });
     } catch (e) {
       // Don't let analytics failure affect search results
-      print('Failed to record search analytics: $e');
     }
   }
   

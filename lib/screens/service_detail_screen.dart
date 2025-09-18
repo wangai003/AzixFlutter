@@ -8,10 +8,14 @@ import 'order_confirmation_screen.dart';
 
 class ServiceDetailScreen extends StatelessWidget {
   final Service service;
-  const ServiceDetailScreen({Key? key, required this.service}) : super(key: key);
+  const ServiceDetailScreen({Key? key, required this.service})
+    : super(key: key);
 
   Future<Map<String, dynamic>?> _fetchVendor() async {
-          final doc = await FirebaseFirestore.instance.collection('USER').doc(service.vendorId).get();
+    final doc = await FirebaseFirestore.instance
+        .collection('USER')
+        .doc(service.vendorId)
+        .get();
     return doc.data();
   }
 
@@ -36,7 +40,11 @@ class ServiceDetailScreen extends StatelessWidget {
   void _showOrderDialog(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('You must be logged in to order a service.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You must be logged in to order a service.'),
+        ),
+      );
       return;
     }
     int selectedPackage = 0;
@@ -60,7 +68,8 @@ class ServiceDetailScreen extends StatelessWidget {
                       child: Text(service.packages[i].name),
                     ),
                   ),
-                  onChanged: (val) => setState(() => selectedPackage = val ?? 0),
+                  onChanged: (val) =>
+                      setState(() => selectedPackage = val ?? 0),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -112,8 +121,14 @@ class ServiceDetailScreen extends StatelessWidget {
                       ),
                     );
                   } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to place order: '
-                        '${e.toString()}')));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'Failed to place order: '
+                          '${e.toString()}',
+                        ),
+                      ),
+                    );
                   }
                 },
                 child: const Text('Submit Order'),
@@ -138,16 +153,19 @@ class ServiceDetailScreen extends StatelessWidget {
                 height: 220,
                 child: PageView(
                   children: service.images
-                      .map((url) => Image.network(
-                            url, 
-                            fit: BoxFit.cover, 
-                            width: double.infinity,
-                            errorBuilder: (context, error, stackTrace) => Image.network(
-                              'https://placehold.co/600x400/FFD700/000000?text=Service+Image', 
-                              fit: BoxFit.cover, 
-                              width: double.infinity
-                            ),
-                          ))
+                      .map(
+                        (url) => Image.network(
+                          url,
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          errorBuilder: (context, error, stackTrace) =>
+                              Image.network(
+                                'https://placehold.co/600x400/FFD700/000000?text=Service+Image',
+                                fit: BoxFit.cover,
+                                width: double.infinity,
+                              ),
+                        ),
+                      )
                       .toList(),
                 ),
               ),
@@ -156,7 +174,13 @@ class ServiceDetailScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(service.title, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                  Text(
+                    service.title,
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   Text('Category: ${service.category}'),
                   const SizedBox(height: 8),
@@ -165,21 +189,40 @@ class ServiceDetailScreen extends StatelessWidget {
                   Text(service.description),
                   const SizedBox(height: 24),
                   // Packages
-                  const Text('Packages:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                  ...service.packages.map((pkg) => Card(
-                        margin: const EdgeInsets.symmetric(vertical: 8),
-                        child: ListTile(
-                          title: Text(pkg.name),
-                          subtitle: Text(pkg.description),
-                          trailing: Column(
+                  const Text(
+                    'Packages:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                  ),
+                  ...service.packages.map(
+                    (pkg) => Card(
+                      margin: const EdgeInsets.symmetric(vertical: 8),
+                      child: ListTile(
+                        title: Text(pkg.name),
+                        subtitle: Text(pkg.description),
+                        trailing: SizedBox(
+                          width: 100,
+                          child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
-                              Text('Price: ${pkg.price}'),
-                              Text('Delivery: ${pkg.deliveryTime} days'),
+                              Text(
+                                'Price: ${pkg.price}',
+                                style: const TextStyle(fontSize: 12),
+                                textAlign: TextAlign.right,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                'Delivery: ${pkg.deliveryTime} days',
+                                style: const TextStyle(fontSize: 10),
+                                textAlign: TextAlign.right,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ],
                           ),
                         ),
-                      )),
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 24),
                   // Vendor info
                   FutureBuilder<Map<String, dynamic>?>(
@@ -199,8 +242,14 @@ class ServiceDetailScreen extends StatelessWidget {
                         );
                       }
                       return ListTile(
-                        leading: vendor['profilePic'] != null && vendor['profilePic'] != ''
-                            ? CircleAvatar(backgroundImage: NetworkImage(vendor['profilePic']))
+                        leading:
+                            vendor['profilePic'] != null &&
+                                vendor['profilePic'] != ''
+                            ? CircleAvatar(
+                                backgroundImage: NetworkImage(
+                                  vendor['profilePic'],
+                                ),
+                              )
                             : const CircleAvatar(child: Icon(Icons.person)),
                         title: Text(vendor['displayName'] ?? 'Vendor'),
                         subtitle: const Text('View Vendor Profile'),
@@ -216,7 +265,10 @@ class ServiceDetailScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 32),
-                  const Text('Reviews', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                  const Text(
+                    'Reviews',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                  ),
                   StreamBuilder<QuerySnapshot>(
                     stream: _reviewsStream(),
                     builder: (context, snapshot) {
@@ -243,7 +295,11 @@ class ServiceDetailScreen extends StatelessWidget {
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.star, color: Colors.amber, size: 18),
+                                  const Icon(
+                                    Icons.star,
+                                    color: Colors.amber,
+                                    size: 18,
+                                  ),
                                   Text('${data['rating'] ?? '-'}'),
                                 ],
                               ),
@@ -254,12 +310,26 @@ class ServiceDetailScreen extends StatelessWidget {
                             onPressed: () async {
                               final user = FirebaseAuth.instance.currentUser;
                               if (user == null) {
-                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('You must be logged in to leave a review.')));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'You must be logged in to leave a review.',
+                                    ),
+                                  ),
+                                );
                                 return;
                               }
-                              final isVerified = await _isVerifiedBuyer(user.uid);
+                              final isVerified = await _isVerifiedBuyer(
+                                user.uid,
+                              );
                               if (!isVerified) {
-                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Only buyers who have purchased this service can leave a review.')));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Only buyers who have purchased this service can leave a review.',
+                                    ),
+                                  ),
+                                );
                                 return;
                               }
                               int rating = 5;
@@ -272,38 +342,57 @@ class ServiceDetailScreen extends StatelessWidget {
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Row(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: List.generate(5, (i) => IconButton(
-                                          icon: Icon(
-                                            Icons.star,
-                                            color: i < rating ? Colors.amber : Colors.grey,
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: List.generate(
+                                          5,
+                                          (i) => IconButton(
+                                            icon: Icon(
+                                              Icons.star,
+                                              color: i < rating
+                                                  ? Colors.amber
+                                                  : Colors.grey,
+                                            ),
+                                            onPressed: () {
+                                              rating = i + 1;
+                                              (context as Element)
+                                                  .markNeedsBuild();
+                                            },
                                           ),
-                                          onPressed: () {
-                                            rating = i + 1;
-                                            (context as Element).markNeedsBuild();
-                                          },
-                                        )),
+                                        ),
                                       ),
                                       TextField(
                                         controller: commentController,
-                                        decoration: const InputDecoration(labelText: 'Comment'),
+                                        decoration: const InputDecoration(
+                                          labelText: 'Comment',
+                                        ),
                                         maxLines: 2,
                                       ),
                                     ],
                                   ),
                                   actions: [
-                                    TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(context),
+                                      child: const Text('Cancel'),
+                                    ),
                                     ElevatedButton(
                                       onPressed: () async {
-                                        final reviewerName = user.displayName ?? user.email ?? 'User';
-                                        await FirebaseFirestore.instance.collection('reviews').add({
-                                          'serviceId': service.id,
-                                          'reviewerId': user.uid,
-                                          'reviewerName': reviewerName,
-                                          'rating': rating,
-                                          'comment': commentController.text.trim(),
-                                          'timestamp': FieldValue.serverTimestamp(),
-                                        });
+                                        final reviewerName =
+                                            user.displayName ??
+                                            user.email ??
+                                            'User';
+                                        await FirebaseFirestore.instance
+                                            .collection('reviews')
+                                            .add({
+                                              'serviceId': service.id,
+                                              'reviewerId': user.uid,
+                                              'reviewerName': reviewerName,
+                                              'rating': rating,
+                                              'comment': commentController.text
+                                                  .trim(),
+                                              'timestamp':
+                                                  FieldValue.serverTimestamp(),
+                                            });
                                         Navigator.pop(context);
                                       },
                                       child: const Text('Submit'),
@@ -326,4 +415,4 @@ class ServiceDetailScreen extends StatelessWidget {
       ),
     );
   }
-} 
+}

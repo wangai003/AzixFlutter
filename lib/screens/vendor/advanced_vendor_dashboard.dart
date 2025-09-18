@@ -838,21 +838,17 @@ class _AdvancedVendorDashboardState extends State<AdvancedVendorDashboard>
   // Action methods
   void _showAddProductDialog() {
     // TODO: Implement add product dialog
-    print('Show add product dialog');
   }
   
   void _showAddServiceDialog() {
     // TODO: Implement add service dialog
-    print('Show add service dialog');
   }
   
   void _exportData() {
     // TODO: Implement data export
-    print('Export data');
   }
   
   void _showNotifications() {
     // TODO: Show notifications
-    print('Show notifications');
   }
 }

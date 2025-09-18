@@ -159,7 +159,6 @@ class NotificationService {
       
       return docRef.id;
     } catch (e) {
-      print('Error creating notification: $e');
       rethrow;
     }
   }
@@ -364,7 +363,6 @@ class NotificationService {
         'readAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      print('Error marking notification as read: $e');
     }
   }
 
@@ -387,7 +385,6 @@ class NotificationService {
       
       await batch.commit();
     } catch (e) {
-      print('Error marking all notifications as read: $e');
     }
   }
 
@@ -399,7 +396,6 @@ class NotificationService {
           .doc(notificationId)
           .delete();
     } catch (e) {
-      print('Error deleting notification: $e');
     }
   }
 
@@ -418,7 +414,6 @@ class NotificationService {
       
       await batch.commit();
     } catch (e) {
-      print('Error deleting all notifications: $e');
     }
   }
 

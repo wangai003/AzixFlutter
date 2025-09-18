@@ -285,7 +285,6 @@ class VendorVerificationService {
       });
 
     } catch (e) {
-      print('Error updating trust score: $e');
     }
   }
 
@@ -317,7 +316,6 @@ class VendorVerificationService {
         'updatedAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      print('Error granting vendor privileges: $e');
     }
   }
 
@@ -347,7 +345,6 @@ class VendorVerificationService {
         );
       }
     } catch (e) {
-      print('Error notifying admin: $e');
     }
   }
 
@@ -396,7 +393,6 @@ class VendorVerificationService {
         applicationId: vendorData['verificationApplicationId'],
       );
     } catch (e) {
-      print('Error getting vendor verification info: $e');
       return null;
     }
   }

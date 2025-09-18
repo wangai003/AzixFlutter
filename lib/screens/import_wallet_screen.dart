@@ -3,7 +3,7 @@ import 'package:lottie/lottie.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../providers/stellar_provider.dart';
-import 'wallet_screen.dart';
+import 'enhanced_wallet_screen.dart';
 
 class ImportWalletScreen extends StatefulWidget {
   const ImportWalletScreen({Key? key}) : super(key: key);
@@ -23,8 +23,13 @@ class _ImportWalletScreenState extends State<ImportWalletScreen> {
       _isImporting = true;
       _error = null;
     });
-    final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
-    final result = await stellarProvider.recoverWalletWithSecretKey(_secretKeyController.text.trim());
+    final stellarProvider = Provider.of<StellarProvider>(
+      context,
+      listen: false,
+    );
+    final result = await stellarProvider.recoverWalletWithSecretKey(
+      _secretKeyController.text.trim(),
+    );
     setState(() {
       _isImporting = false;
       _success = result;
@@ -33,7 +38,7 @@ class _ImportWalletScreenState extends State<ImportWalletScreen> {
     if (result) {
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (context) => const WalletScreen()),
+        MaterialPageRoute(builder: (context) => const EnhancedWalletScreen()),
         (route) => false,
       );
     }
@@ -54,11 +59,22 @@ class _ImportWalletScreenState extends State<ImportWalletScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Lottie.asset('assets/animations/login_animation.json', height: 160),
+              Lottie.asset(
+                'assets/animations/login_animation.json',
+                height: 160,
+              ),
               const SizedBox(height: 32),
-              Text('Import Your Wallet', style: AppTheme.headingLarge.copyWith(color: AppTheme.primaryGold)),
+              Text(
+                'Import Your Wallet',
+                style: AppTheme.headingLarge.copyWith(
+                  color: AppTheme.primaryGold,
+                ),
+              ),
               const SizedBox(height: 16),
-              Text('Paste your secret key or upload a backup file.', style: AppTheme.bodyLarge.copyWith(color: AppTheme.white)),
+              Text(
+                'Paste your secret key or upload a backup file.',
+                style: AppTheme.bodyLarge.copyWith(color: AppTheme.white),
+              ),
               const SizedBox(height: 32),
               TextField(
                 controller: _secretKeyController,
@@ -70,7 +86,9 @@ class _ImportWalletScreenState extends State<ImportWalletScreen> {
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide.none,
                   ),
-                  hintStyle: AppTheme.bodyMedium.copyWith(color: AppTheme.white.withOpacity(0.5)),
+                  hintStyle: AppTheme.bodyMedium.copyWith(
+                    color: AppTheme.white.withOpacity(0.5),
+                  ),
                 ),
                 style: AppTheme.bodyLarge.copyWith(color: AppTheme.white),
               ),
@@ -78,7 +96,10 @@ class _ImportWalletScreenState extends State<ImportWalletScreen> {
               if (_error != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 16),
-                  child: Text(_error!, style: AppTheme.bodyMedium.copyWith(color: Colors.red)),
+                  child: Text(
+                    _error!,
+                    style: AppTheme.bodyMedium.copyWith(color: Colors.red),
+                  ),
                 ),
               ElevatedButton(
                 onPressed: _isImporting ? null : _importWallet,
@@ -101,4 +122,4 @@ class _ImportWalletScreenState extends State<ImportWalletScreen> {
       ),
     );
   }
-} 
+}

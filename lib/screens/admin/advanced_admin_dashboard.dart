@@ -883,14 +883,11 @@ class _AdvancedAdminDashboardState extends State<AdvancedAdminDashboard>
   
   // Action methods
   void _generateReport() {
-    print('Generate system report');
   }
   
   void _viewSystemLogs() {
-    print('View system logs');
   }
   
   void _initiateBackup() {
-    print('Initiate system backup');
   }
 }

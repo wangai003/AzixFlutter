@@ -276,7 +276,6 @@ class AuthProvider extends ChangeNotifier {
     try {
       return await _authService.needsEmailVerification(_user!.uid);
     } catch (e) {
-      print('Error checking email verification: $e');
       return false;
     }
   }

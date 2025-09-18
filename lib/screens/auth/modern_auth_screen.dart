@@ -20,7 +20,7 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
   final _passwordController = TextEditingController();
   final _firstNameController = TextEditingController();
   final _lastNameController = TextEditingController();
-  
+
   bool _isSignUp = false;
   bool _isPasswordVisible = false;
 
@@ -217,9 +217,8 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
                                       return null;
                                     },
                                   ),
-                                  const SizedBox(height: 16),
                                 ],
-                                
+
                                 // Email field
                                 TextFormField(
                                   controller: _emailController,

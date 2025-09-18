@@ -29,7 +29,7 @@ class _StellarWalletScreenState extends State<StellarWalletScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
       if (stellarProvider.hasWallet && stellarProvider.publicKey != null) {
-        stellarProvider.checkAkofaTrustline();
+        // Trustline is now handled automatically
       }
     });
   }
@@ -281,7 +281,8 @@ class _StellarWalletScreenState extends State<StellarWalletScreen> {
     
     try {
       // Call the new implementation
-      final result = await stellarProvider.addAkofaTrustline();
+      // Trustline is now handled automatically - no manual action needed
+      final result = {'success': true, 'message': 'Trustline handled automatically'};
       
       // Close the loading dialog
       Navigator.of(context).pop();

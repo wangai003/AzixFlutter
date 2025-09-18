@@ -258,7 +258,6 @@ class PaymentService {
       final doc = await _firestore.collection('wallets').doc(userId).get();
       return doc.exists ? doc.data() : null;
     } catch (e) {
-      print('Error getting AKOFA wallet: $e');
       return null;
     }
   }
@@ -278,7 +277,6 @@ class PaymentService {
         'createdAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      print('Error recording payment transaction: $e');
     }
   }
 
@@ -296,7 +294,6 @@ class PaymentService {
         'updatedAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      print('Error updating order payment status: $e');
     }
   }
 
@@ -354,7 +351,6 @@ class PaymentService {
         );
       }
     } catch (e) {
-      print('Error sending payment notifications: $e');
     }
   }
 
@@ -554,7 +550,6 @@ class PaymentService {
         'createdAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      print('Error recording refund transaction: $e');
     }
   }
 

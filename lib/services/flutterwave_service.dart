@@ -49,8 +49,6 @@ class FlutterwaveService {
       // Round to 7 decimal places to avoid "decimal point cannot exceed seven digits" error
       final roundedAkofaCoins = double.parse(akofaCoins.toStringAsFixed(7));
       
-      print('💰 Calculated AKOFA: $akofaCoins');
-      print('🔢 Rounded to 7 decimals: $roundedAkofaCoins');
       
       // Create unique transaction reference
       final transactionRef = 'AKOFA_${DateTime.now().millisecondsSinceEpoch}_${authProvider.user!.uid}';
@@ -77,22 +75,18 @@ class FlutterwaveService {
             initialBalanceValue = 0.0;
           }
           
-          print('🔄 Initial AKOFA balance: $initialBalanceValue');
           
           // Credit user with Akofa coins - this performs REAL on-chain Stellar transaction
-          print('🚀 Initiating REAL Stellar transaction for ${roundedAkofaCoins.toStringAsFixed(7)} AKOFA...');
           final creditResult = await stellarProvider.creditUserAsset('AKOFA', roundedAkofaCoins);
           
           // Check if the Stellar transaction actually succeeded
           if (creditResult['success'] != true) {
-            print('❌ Stellar transaction failed: ${creditResult['message']}');
             return {
               'success': false,
               'message': 'Stellar blockchain transaction failed: ${creditResult['message']}',
             };
           }
           
-          print('✅ Stellar transaction confirmed! Hash: ${creditResult['hash']}');
           
           // Wait a moment for blockchain confirmation
           await Future.delayed(const Duration(seconds: 2));
@@ -109,12 +103,9 @@ class FlutterwaveService {
             balanceValue = 0.0;
           }
           
-          print('🔄 New AKOFA balance: $balanceValue');
-          print('🔄 Balance change: ${balanceValue - initialBalanceValue}');
           
           // Verify the balance was actually updated on-chain
           if (balanceValue <= initialBalanceValue) {
-            print('❌ Balance not updated on-chain! Initial: $initialBalanceValue, New: $balanceValue');
             return {
               'success': false,
               'message': 'Stellar blockchain transaction failed. Balance not updated. Please try again.',
@@ -125,14 +116,12 @@ class FlutterwaveService {
           final expectedBalance = initialBalanceValue + roundedAkofaCoins;
           final tolerance = 0.0000001; // Allow small rounding differences (7 decimal precision)
           if ((balanceValue - expectedBalance).abs() > tolerance) {
-            print('❌ Balance mismatch! Expected: $expectedBalance, Actual: $balanceValue');
             return {
               'success': false,
               'message': 'Stellar transaction amount mismatch. Expected: ${expectedBalance.toStringAsFixed(7)}, Got: ${balanceValue.toStringAsFixed(7)}',
             };
           }
           
-          print('✅ Stellar transaction confirmed! Balance updated from $initialBalanceValue to $balanceValue');
           
           // Generate a unique transaction hash for this operation
           final transactionHash = creditResult['hash'] ?? 'STELLAR_${DateTime.now().millisecondsSinceEpoch}_${authProvider.user!.uid}';
@@ -153,7 +142,6 @@ class FlutterwaveService {
           );
           
           // CRITICAL: Refresh transactions from blockchain to show the new transaction immediately
-          print('🔄 Refreshing transactions from blockchain to show new purchase...');
           await stellarProvider.refreshTransactionsAfterOperation();
           
           return {
@@ -169,7 +157,6 @@ class FlutterwaveService {
           
         } catch (stellarError) {
           // If Stellar transaction fails, don't record anything
-          print('❌ Stellar transaction failed: $stellarError');
           return {
             'success': false,
             'message': 'Stellar blockchain transaction failed: $stellarError. Please try again.',

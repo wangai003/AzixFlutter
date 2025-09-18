@@ -101,7 +101,6 @@ class MarketplaceProvider extends ChangeNotifier {
         (sum, item) => sum + (item.product.price * item.quantity)
       );
 
-      print('💰 Processing cart payment: ${totalAmount.toStringAsFixed(6)} AKOFA');
 
       // Check user balance first
       final userBalance = await _getUserAkofaBalance(user.uid);
@@ -183,7 +182,6 @@ class MarketplaceProvider extends ChangeNotifier {
             }
           }
         } catch (e) {
-          print('❌ Payment failed for vendor $vendorId: $e');
           // Rollback previous payments if any vendor fails
           await _rollbackPayments(paymentResults, orderId);
           throw Exception('Payment failed for vendor $vendorId: $e');
@@ -205,7 +203,6 @@ class MarketplaceProvider extends ChangeNotifier {
       _isProcessingPayment = false;
       notifyListeners();
 
-      print('✅ Cart payment completed successfully');
       return {
         'success': true,
         'orderId': orderId,
@@ -216,7 +213,6 @@ class MarketplaceProvider extends ChangeNotifier {
     } catch (e) {
       _isProcessingPayment = false;
       _setError('Payment failed: $e');
-      print('❌ Cart payment failed: $e');
       return {
         'success': false,
         'error': e.toString(),
@@ -238,7 +234,6 @@ class MarketplaceProvider extends ChangeNotifier {
         throw Exception('User not authenticated');
       }
 
-      print('💰 Processing service payment: ${serviceOrder.price.toStringAsFixed(6)} AKOFA');
 
       // Check user balance
       final userBalance = await _getUserAkofaBalance(user.uid);
@@ -296,7 +291,6 @@ class MarketplaceProvider extends ChangeNotifier {
       _isProcessingPayment = false;
       notifyListeners();
 
-      print('✅ Service payment completed successfully');
       return {
         'success': true,
         'orderId': serviceOrder.id,
@@ -307,7 +301,6 @@ class MarketplaceProvider extends ChangeNotifier {
     } catch (e) {
       _isProcessingPayment = false;
       _setError('Service payment failed: $e');
-      print('❌ Service payment failed: $e');
       return {
         'success': false,
         'error': e.toString(),
@@ -324,7 +317,6 @@ class MarketplaceProvider extends ChangeNotifier {
       final balance = await _stellarService.getAkofaBalance(''); // Uses current user's wallet
       return double.tryParse(balance) ?? 0.0;
     } catch (e) {
-      print('Error getting AKOFA balance: $e');
       // Fallback to Firestore balance
       final userDoc = await _firestore.collection('USER').doc(userId).get();
       final userData = userDoc.data();
@@ -375,7 +367,6 @@ class MarketplaceProvider extends ChangeNotifier {
 
   /// Rollback payments in case of failure
   Future<void> _rollbackPayments(Map<String, Map<String, dynamic>> paymentResults, String orderId) async {
-    print('🔄 Rolling back payments for order $orderId');
     
     // Update order status to failed
     await _firestore.collection('orders').doc(orderId).update({
@@ -391,7 +382,6 @@ class MarketplaceProvider extends ChangeNotifier {
       final result = entry.value;
       
       if (result['method'] == 'stellar') {
-        print('⚠️ Stellar payment to vendor $vendorId cannot be automatically reversed. Hash: ${result['hash']}');
         // Log for manual resolution
         await _firestore.collection('payment_issues').add({
           'type': 'rollback_needed',
@@ -524,7 +514,6 @@ class MarketplaceProvider extends ChangeNotifier {
             .toList();
       }
     } catch (e) {
-      print('Error loading vendor orders: $e');
     }
 
     notifyListeners();
@@ -687,7 +676,6 @@ class MarketplaceProvider extends ChangeNotifier {
         });
       }
     } catch (e) {
-      print('Error handling order cancellation: $e');
     }
   }
 
@@ -758,7 +746,6 @@ class MarketplaceProvider extends ChangeNotifier {
         'createdAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      print('Error sending buyer notification: $e');
     }
   }
 

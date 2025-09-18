@@ -679,7 +679,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           .doc(user.uid)
           .delete();
     } catch (e) {
-      print('Error clearing cart: $e');
     }
   }
 }

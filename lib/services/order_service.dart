@@ -292,7 +292,6 @@ class OrderService {
         },
       );
     } catch (e) {
-      print('Error sending order notifications: $e');
     }
   }
 

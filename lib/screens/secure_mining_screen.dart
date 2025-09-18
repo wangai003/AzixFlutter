@@ -30,7 +30,7 @@ class _SecureMiningScreenState extends State<SecureMiningScreen>
       vsync: this,
     );
     _pulseController.repeat(reverse: true);
-    
+
     // Start UI updates
     _startUIUpdates();
   }
@@ -54,63 +54,75 @@ class _SecureMiningScreenState extends State<SecureMiningScreen>
     return Consumer2<SecureStellarProvider, local_auth.AuthProvider>(
       builder: (context, stellarProvider, authProvider, _) {
         final session = stellarProvider.currentMiningSession;
-        
+
         return Scaffold(
           backgroundColor: AppTheme.black,
           appBar: AppBar(
             backgroundColor: AppTheme.black,
             elevation: 0,
             title: Text(
-              'Secure Mining',
+              '',
               style: AppTheme.headingMedium.copyWith(color: AppTheme.white),
             ),
             actions: [
+              IconButton(
+                icon: const Icon(Icons.refresh, color: AppTheme.primaryGold),
+                onPressed: () => stellarProvider.refreshMiningSession(),
+                tooltip: 'Refresh Mining Data',
+              ),
               IconButton(
                 icon: Icon(
                   _showSecurityPanel ? Icons.security : Icons.security_outlined,
                   color: AppTheme.primaryGold,
                 ),
-                onPressed: () => setState(() => _showSecurityPanel = !_showSecurityPanel),
+                onPressed: () =>
+                    setState(() => _showSecurityPanel = !_showSecurityPanel),
                 tooltip: 'Security Panel',
               ),
             ],
           ),
-          body: SingleChildScrollView(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
+          body: RefreshIndicator(
+            onRefresh: () async {
+              await stellarProvider.refreshMiningSession();
+              await stellarProvider.refreshBalance();
+            },
+            color: AppTheme.primaryGold,
+            backgroundColor: AppTheme.darkGrey,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
                 children: [
                   // Security alerts banner
                   if (stellarProvider.securityAlerts.isNotEmpty)
                     _buildSecurityAlerts(stellarProvider.securityAlerts),
-                  
+
                   const SizedBox(height: 16),
-                  
+
                   // Mining status card
                   _buildMiningStatusCard(session, stellarProvider),
-                  
+
                   const SizedBox(height: 16),
-                  
+
                   // Security panel
-                  if (_showSecurityPanel)
-                    _buildSecurityPanel(stellarProvider),
-                  
+                  if (_showSecurityPanel) _buildSecurityPanel(stellarProvider),
+
                   const SizedBox(height: 16),
-                  
+
                   // Mining controls
                   _buildMiningControls(session, stellarProvider),
-                  
+
                   const SizedBox(height: 16),
-                  
+
                   // Session details
-                  if (session != null)
-                    _buildSessionDetails(session),
-                  
+                  if (session != null) _buildSessionDetails(session),
+
                   const SizedBox(height: 16),
-                  
+
                   // Security metrics
                   _buildSecurityMetrics(stellarProvider.securityMetrics),
                 ],
               ),
+            ),
           ),
         );
       },
@@ -143,23 +155,31 @@ class _SecureMiningScreenState extends State<SecureMiningScreen>
             ],
           ),
           const SizedBox(height: 8),
-          ...alerts.map((alert) => Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Text(
-              '• $alert',
-              style: AppTheme.bodySmall.copyWith(color: Colors.orange.shade300),
+          ...alerts.map(
+            (alert) => Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                '• $alert',
+                style: AppTheme.bodySmall.copyWith(
+                  color: Colors.orange.shade300,
+                ),
+              ),
             ),
-          )),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildMiningStatusCard(SecureMiningSession? session, SecureStellarProvider provider) {
+  Widget _buildMiningStatusCard(
+    SecureMiningSession? session,
+    SecureStellarProvider provider,
+  ) {
     final isActive = session?.isActive ?? false;
     final isPaused = session?.isPaused ?? false;
     final earned = session?.earnedAkofa ?? 0.0;
-    
+    final miningRate = session?.miningRate ?? 0.25;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
@@ -174,12 +194,23 @@ class _SecureMiningScreenState extends State<SecureMiningScreen>
         ),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: isActive ? AppTheme.primaryGold.withOpacity(0.5) : AppTheme.grey.withOpacity(0.3),
+          color: isActive
+              ? AppTheme.primaryGold.withOpacity(0.5)
+              : AppTheme.grey.withOpacity(0.3),
         ),
+        boxShadow: isActive
+            ? [
+                BoxShadow(
+                  color: AppTheme.primaryGold.withOpacity(0.2),
+                  blurRadius: 10,
+                  spreadRadius: 2,
+                ),
+              ]
+            : null,
       ),
       child: Column(
         children: [
-          // Status indicator
+          // Status indicator with real-time animation
           Container(
             width: 120,
             height: 120,
@@ -189,27 +220,43 @@ class _SecureMiningScreenState extends State<SecureMiningScreen>
                 color: isActive ? AppTheme.primaryGold : AppTheme.grey,
                 width: 3,
               ),
+              gradient: isActive
+                  ? LinearGradient(
+                      colors: [
+                        AppTheme.primaryGold.withOpacity(0.2),
+                        AppTheme.primaryGold.withOpacity(0.1),
+                      ],
+                    )
+                  : null,
             ),
             child: Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(
-                    isActive ? Icons.play_circle_filled : Icons.pause_circle_filled,
+                    isActive
+                        ? Icons.play_circle_filled
+                        : Icons.pause_circle_filled,
                     size: 40,
                     color: isActive ? AppTheme.primaryGold : AppTheme.grey,
                   ).animate(
-                    effects: isActive ? [
-                      const ScaleEffect(
-                        duration: Duration(seconds: 2),
-                        begin: Offset(1.0, 1.0),
-                        end: Offset(1.1, 1.1),
-                      ),
-                    ] : [],
+                    effects: isActive
+                        ? [
+                            const ScaleEffect(
+                              duration: Duration(seconds: 2),
+                              begin: Offset(1.0, 1.0),
+                              end: Offset(1.1, 1.1),
+                            ),
+                          ]
+                        : [],
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    isActive ? 'MINING' : isPaused ? 'PAUSED' : 'INACTIVE',
+                    isActive
+                        ? 'MINING'
+                        : isPaused
+                        ? 'PAUSED'
+                        : 'INACTIVE',
                     style: AppTheme.bodySmall.copyWith(
                       color: isActive ? AppTheme.primaryGold : AppTheme.grey,
                       fontWeight: FontWeight.bold,
@@ -219,36 +266,93 @@ class _SecureMiningScreenState extends State<SecureMiningScreen>
               ),
             ),
           ),
-          
+
           const SizedBox(height: 20),
-          
-          // Earnings display
+
+          // Real-time earnings display with animation
           Text(
             'Earned AKOFA',
             style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
           ),
           const SizedBox(height: 8),
-          Text(
-            '${earned.toStringAsFixed(6)} ₳',
-            style: AppTheme.headingLarge.copyWith(
-              color: AppTheme.primaryGold,
-              fontWeight: FontWeight.bold,
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            child: Text(
+              '${earned.toStringAsFixed(6)} ₳',
+              key: ValueKey(earned),
+              style: AppTheme.headingLarge.copyWith(
+                color: AppTheme.primaryGold,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
-          
+
+          const SizedBox(height: 8),
+
+          // Mining rate display
+          Text(
+            '${miningRate} AKOFA/hour',
+            style: AppTheme.bodySmall.copyWith(
+              color: AppTheme.grey,
+              fontSize: 12,
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          // Wallet destination display (subtle and minimalistic)
+          if (provider.publicKey != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppTheme.black.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: AppTheme.primaryGold.withOpacity(0.2),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.account_balance_wallet,
+                    size: 14,
+                    color: AppTheme.primaryGold.withOpacity(0.7),
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      'Rewards to: ${provider.publicKey!.substring(0, 8)}...${provider.publicKey!.substring(provider.publicKey!.length - 4)}',
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.primaryGold.withOpacity(0.8),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           const SizedBox(height: 16),
-          
-          // Session progress
+
+          // Session progress with real-time updates
           if (session != null) _buildSessionProgress(session),
+
+          // Real-time mining stats
+          if (isActive && session != null) _buildRealTimeStats(session),
         ],
       ),
     );
   }
 
   Widget _buildSessionProgress(SecureMiningSession session) {
-    final progress = session.accumulatedSeconds / (24 * 3600); // 24 hour session
+    final progress =
+        session.accumulatedSeconds / (24 * 3600); // 24 hour session
     final remainingTime = session.sessionEnd.difference(DateTime.now());
-    
+
     return Column(
       children: [
         Row(
@@ -274,6 +378,81 @@ class _SecureMiningScreenState extends State<SecureMiningScreen>
         Text(
           'Time Remaining: ${_formatDuration(remainingTime)}',
           style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRealTimeStats(SecureMiningSession session) {
+    final now = DateTime.now();
+    final elapsedTime = now.difference(session.sessionStart);
+    final currentCycleElapsed = now.difference(session.lastResume);
+    final hoursElapsed = elapsedTime.inSeconds / 3600.0;
+    final currentRate = session.earnedAkofa / hoursElapsed;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryGold.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.primaryGold.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Real-Time Stats',
+            style: AppTheme.bodyMedium.copyWith(
+              color: AppTheme.primaryGold,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildStatItem('Elapsed', _formatDuration(elapsedTime)),
+              _buildStatItem(
+                'Current Rate',
+                '${currentRate.toStringAsFixed(4)} ₳/h',
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildStatItem('Proofs', '${session.totalProofsSubmitted}'),
+              _buildStatItem(
+                'Cycle Time',
+                _formatDuration(currentCycleElapsed),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatItem(String label, String value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: AppTheme.bodySmall.copyWith(
+            color: AppTheme.grey,
+            fontSize: 10,
+          ),
+        ),
+        Text(
+          value,
+          style: AppTheme.bodySmall.copyWith(
+            color: AppTheme.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+          ),
         ),
       ],
     );
@@ -305,7 +484,7 @@ class _SecureMiningScreenState extends State<SecureMiningScreen>
             ],
           ),
           const SizedBox(height: 12),
-          
+
           // Last security check
           Row(
             children: [
@@ -321,23 +500,29 @@ class _SecureMiningScreenState extends State<SecureMiningScreen>
               ),
             ],
           ),
-          
+
           const SizedBox(height: 8),
-          
+
           // Session validation status
           if (provider.currentMiningSession != null)
             Row(
               children: [
                 Icon(
-                  provider.currentMiningSession!.isValid ? Icons.check_circle : Icons.error,
-                  color: provider.currentMiningSession!.isValid ? Colors.green : Colors.red,
+                  provider.currentMiningSession!.isValid
+                      ? Icons.check_circle
+                      : Icons.error,
+                  color: provider.currentMiningSession!.isValid
+                      ? Colors.green
+                      : Colors.red,
                   size: 16,
                 ),
                 const SizedBox(width: 8),
                 Text(
                   'Session Integrity: ${provider.currentMiningSession!.isValid ? "Valid" : "Compromised"}',
                   style: AppTheme.bodySmall.copyWith(
-                    color: provider.currentMiningSession!.isValid ? Colors.green : Colors.red,
+                    color: provider.currentMiningSession!.isValid
+                        ? Colors.green
+                        : Colors.red,
                   ),
                 ),
               ],
@@ -347,26 +532,42 @@ class _SecureMiningScreenState extends State<SecureMiningScreen>
     );
   }
 
-  Widget _buildMiningControls(SecureMiningSession? session, SecureStellarProvider provider) {
+  Widget _buildMiningControls(
+    SecureMiningSession? session,
+    SecureStellarProvider provider,
+  ) {
     final canStart = session == null || !session.isActive;
     final canPause = session?.isActive == true && session?.isPaused == false;
     final canResume = session?.isPaused == true;
-    
-    return Row(
+
+    return Column(
       children: [
-        // Start/Stop button
-        Expanded(
+        // Main control button - changes based on session state
+        SizedBox(
+          width: double.infinity,
           child: ElevatedButton(
-            onPressed: provider.isLoading ? null : () async {
-              if (canStart) {
-                await _startMining(provider);
-              } else {
-                await _showEndMiningDialog(provider);
-              }
-            },
+            onPressed: provider.isLoading
+                ? null
+                : () async {
+                    if (canStart) {
+                      await _startMining(provider);
+                    } else if (canPause) {
+                      await provider.pauseMining();
+                    } else if (canResume) {
+                      await provider.resumeMining();
+                    }
+                  },
             style: ElevatedButton.styleFrom(
-              backgroundColor: canStart ? AppTheme.primaryGold : Colors.red,
-              foregroundColor: AppTheme.black,
+              backgroundColor: canStart
+                  ? AppTheme.primaryGold
+                  : canPause
+                  ? Colors.orange
+                  : canResume
+                  ? AppTheme.primaryGold
+                  : AppTheme.darkGrey,
+              foregroundColor: canStart || canResume
+                  ? AppTheme.black
+                  : AppTheme.white,
               padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -378,34 +579,65 @@ class _SecureMiningScreenState extends State<SecureMiningScreen>
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : Text(
-                    canStart ? 'Start Secure Mining' : 'End Mining',
-                    style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.bold),
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        canStart
+                            ? Icons.play_arrow
+                            : canPause
+                            ? Icons.pause
+                            : canResume
+                            ? Icons.play_arrow
+                            : Icons.stop,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        canStart
+                            ? 'Start Secure Mining'
+                            : canPause
+                            ? 'Pause Mining'
+                            : canResume
+                            ? 'Resume Mining'
+                            : 'Mining Active',
+                        style: AppTheme.bodyMedium.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
                   ),
           ),
         ),
-        
-        const SizedBox(width: 12),
-        
-        // Pause/Resume button
+
+        // Session info text
         if (session != null && session.isActive)
-          ElevatedButton(
-            onPressed: provider.isLoading ? null : () async {
-              if (canPause) {
-                await provider.pauseMining();
-              } else if (canResume) {
-                await provider.resumeMining();
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.darkGrey,
-              foregroundColor: AppTheme.white,
-              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              session.isPaused
+                  ? 'Mining is paused. Resume to continue earning AKOFA.'
+                  : 'Mining session will run for 24 hours. You can pause/resume at any time.',
+              style: AppTheme.bodySmall.copyWith(
+                color: AppTheme.grey,
+                fontSize: 12,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+
+        // Session end time display
+        if (session != null && session.isActive)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'Session ends: ${_formatTime(session.sessionEnd)} (${_formatDuration(session.sessionEnd.difference(DateTime.now()))} remaining)',
+              style: AppTheme.bodySmall.copyWith(
+                color: AppTheme.primaryGold,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
               ),
             ),
-            child: Icon(canPause ? Icons.pause : Icons.play_arrow),
           ),
       ],
     );
@@ -431,14 +663,26 @@ class _SecureMiningScreenState extends State<SecureMiningScreen>
             ),
           ),
           const SizedBox(height: 12),
-          
-          _buildDetailRow('Session ID', session.sessionId.substring(0, 8) + '...'),
+
+          _buildDetailRow(
+            'Session ID',
+            session.sessionId.substring(0, 8) + '...',
+          ),
           _buildDetailRow('Mining Rate', '${session.miningRate} AKOFA/hour'),
           _buildDetailRow('Started', _formatTime(session.sessionStart)),
           _buildDetailRow('Ends', _formatTime(session.sessionEnd)),
-          _buildDetailRow('Accumulated Time', _formatDuration(Duration(seconds: session.accumulatedSeconds))),
-          _buildDetailRow('Proofs Submitted', '${session.totalProofsSubmitted}'),
-          _buildDetailRow('Valid Proofs', '${session.proofs.where((p) => session.validateProof(p)).length}'),
+          _buildDetailRow(
+            'Accumulated Time',
+            _formatDuration(Duration(seconds: session.accumulatedSeconds)),
+          ),
+          _buildDetailRow(
+            'Proofs Submitted',
+            '${session.totalProofsSubmitted}',
+          ),
+          _buildDetailRow(
+            'Valid Proofs',
+            '${session.proofs.where((p) => session.validateProof(p)).length}',
+          ),
         ],
       ),
     );
@@ -450,10 +694,7 @@ class _SecureMiningScreenState extends State<SecureMiningScreen>
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
-          ),
+          Text(label, style: AppTheme.bodySmall.copyWith(color: AppTheme.grey)),
           Text(
             value,
             style: AppTheme.bodySmall.copyWith(color: AppTheme.white),
@@ -465,7 +706,7 @@ class _SecureMiningScreenState extends State<SecureMiningScreen>
 
   Widget _buildSecurityMetrics(Map<String, dynamic> metrics) {
     if (metrics.isEmpty) return const SizedBox.shrink();
-    
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
@@ -485,11 +726,20 @@ class _SecureMiningScreenState extends State<SecureMiningScreen>
             ),
           ),
           const SizedBox(height: 12),
-          
+
           _buildDetailRow('Total Sessions', '${metrics['totalSessions'] ?? 0}'),
-          _buildDetailRow('Flagged Sessions', '${metrics['flaggedSessions'] ?? 0}'),
-          _buildDetailRow('Trust Level', '${metrics['trustLevel'] ?? 'Unknown'}'),
-          _buildDetailRow('Integrity Score', '${((metrics['integrityScore'] ?? 0.0) * 100).toStringAsFixed(1)}%'),
+          _buildDetailRow(
+            'Flagged Sessions',
+            '${metrics['flaggedSessions'] ?? 0}',
+          ),
+          _buildDetailRow(
+            'Trust Level',
+            '${metrics['trustLevel'] ?? 'Unknown'}',
+          ),
+          _buildDetailRow(
+            'Integrity Score',
+            '${((metrics['integrityScore'] ?? 0.0) * 100).toStringAsFixed(1)}%',
+          ),
         ],
       ),
     );
@@ -498,7 +748,7 @@ class _SecureMiningScreenState extends State<SecureMiningScreen>
   Future<void> _startMining(SecureStellarProvider provider) async {
     try {
       final success = await provider.startSecureMining();
-      
+
       if (success && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -517,47 +767,10 @@ class _SecureMiningScreenState extends State<SecureMiningScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     }
-  }
-
-  Future<void> _showEndMiningDialog(SecureStellarProvider provider) async {
-    return showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.black,
-        title: Text(
-          'End Mining Session',
-          style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
-        ),
-        content: Text(
-          'Are you sure you want to end your mining session? Your earned AKOFA will be credited to your wallet.',
-          style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.of(context).pop();
-              // Session ending is handled automatically
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: AppTheme.white,
-            ),
-            child: const Text('End Session'),
-          ),
-        ],
-      ),
-    );
   }
 
   String _formatTime(DateTime time) {

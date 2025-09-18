@@ -319,7 +319,6 @@ class UnifiedCartProvider extends ChangeNotifier {
         await _saveToCloud(user.uid);
       }
     } catch (e) {
-      print('Error saving cart to persistence: $e');
     }
   }
 
@@ -339,7 +338,6 @@ class UnifiedCartProvider extends ChangeNotifier {
         await _loadFromLocalStorage();
       }
     } catch (e) {
-      print('Error loading cart from persistence: $e');
     }
   }
 
@@ -350,7 +348,6 @@ class UnifiedCartProvider extends ChangeNotifier {
       final cartData = _items.map((item) => item.toJson()).toList();
       await prefs.setString('unified_cart', json.encode(cartData));
     } catch (e) {
-      print('Error saving cart to local storage: $e');
     }
   }
 
@@ -368,7 +365,6 @@ class UnifiedCartProvider extends ChangeNotifier {
         );
       }
     } catch (e) {
-      print('Error loading cart from local storage: $e');
     }
   }
 
@@ -381,7 +377,6 @@ class UnifiedCartProvider extends ChangeNotifier {
         'updatedAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      print('Error saving cart to cloud: $e');
     }
   }
 
@@ -404,7 +399,6 @@ class UnifiedCartProvider extends ChangeNotifier {
       }
       return false;
     } catch (e) {
-      print('Error loading cart from cloud: $e');
       return false;
     }
   }
@@ -443,7 +437,6 @@ class UnifiedCartProvider extends ChangeNotifier {
       // _items.clear();
       // notifyListeners();
     } catch (e) {
-      print('Error clearing cart on logout: $e');
     }
   }
 

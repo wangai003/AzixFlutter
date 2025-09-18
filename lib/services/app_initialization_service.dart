@@ -23,8 +23,6 @@ class AppInitializationService {
     _isInitializing = true;
 
     try {
-      print('🚀 Initializing Enhanced Mining System...');
-
       // Step 1: Firebase initialization (should already be done in main)
       await _ensureFirebaseInitialized();
 
@@ -41,11 +39,8 @@ class AppInitializationService {
       await _restoreUserSession();
 
       _isInitialized = true;
-      print('✅ App initialization completed successfully');
       return true;
-
     } catch (e) {
-      print('❌ App initialization failed: $e');
       _isInitialized = false;
       return false;
     } finally {
@@ -59,10 +54,7 @@ class AppInitializationService {
       if (Firebase.apps.isEmpty) {
         await Firebase.initializeApp();
       }
-      print('✅ Firebase initialized');
-    } catch (e) {
-      print('⚠️ Firebase already initialized or error: $e');
-    }
+    } catch (e) {}
   }
 
   /// Initialize platform-specific features
@@ -75,10 +67,7 @@ class AppInitializationService {
         // Mobile-specific initialization
         await _initializeMobileFeatures();
       }
-      print('✅ Platform features initialized');
-    } catch (e) {
-      print('⚠️ Platform initialization warning: $e');
-    }
+    } catch (e) {}
   }
 
   /// Initialize web-specific features
@@ -86,38 +75,69 @@ class AppInitializationService {
     // Enable web-specific optimizations
     if (kIsWeb) {
       // Configure web-specific settings
-      print('🌐 Web mode activated');
-      
+
       // Set up web-compatible device identification
       final deviceId = WebCompatibility.getPlatformDeviceId();
-      print('📱 Web device ID: ${deviceId.substring(0, 10)}...');
     }
   }
 
   /// Initialize mobile-specific features
   static Future<void> _initializeMobileFeatures() async {
     // Initialize mobile-specific services
-    print('📱 Mobile mode activated');
   }
 
   /// Initialize security services
   static Future<void> _initializeSecurityServices() async {
     try {
       // Security service initialization is handled by providers
-      print('🔐 Security services ready');
-    } catch (e) {
-      print('⚠️ Security initialization warning: $e');
-    }
+    } catch (e) {}
   }
 
   /// Initialize mining system
   static Future<void> _initializeMiningSystem() async {
     try {
-      // Mining system initialization is handled by providers
-      print('⛏️ Mining system ready');
-    } catch (e) {
-      print('⚠️ Mining initialization warning: $e');
-    }
+      // Ensure mining persistence across app kills
+      await _ensureMiningPersistence();
+    } catch (e) {}
+  }
+
+  /// Ensure mining persistence across app kills and device restarts
+  static Future<void> _ensureMiningPersistence() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      // Check for any active mining sessions that need restoration
+      final activeSessions = await FirebaseFirestore.instance
+          .collection('USER')
+          .doc(user.uid)
+          .collection('active_mining_sessions')
+          .where('sessionEnd', isGreaterThan: Timestamp.now())
+          .get();
+
+      if (activeSessions.docs.isNotEmpty) {
+        // Ensure session persistence is properly configured
+        for (final doc in activeSessions.docs) {
+          final sessionData = doc.data();
+
+          // Update last activity timestamp to prevent expiration
+          await doc.reference.update({
+            'lastActivity': FieldValue.serverTimestamp(),
+            'appKillRecovery': true,
+            'recoveryTimestamp': FieldValue.serverTimestamp(),
+          });
+        }
+      }
+
+      // Set up background persistence monitoring
+      _setupBackgroundPersistenceMonitoring();
+    } catch (e) {}
+  }
+
+  /// Set up background persistence monitoring
+  static void _setupBackgroundPersistenceMonitoring() {
+    // This ensures mining state is preserved even if app is killed
+    // The RealTimeMiningService handles the actual persistence
   }
 
   /// Restore user session if available
@@ -125,25 +145,16 @@ class AppInitializationService {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
-        print('👤 User session restored: ${user.email?.substring(0, 3)}***');
-        
         // Verify user document exists
         final userDoc = await FirebaseFirestore.instance
             .collection('USER')
             .doc(user.uid)
             .get();
-            
+
         if (userDoc.exists) {
-          print('✅ User profile verified');
-        } else {
-          print('⚠️ User profile not found, may need registration');
-        }
-      } else {
-        print('👤 No existing user session');
-      }
-    } catch (e) {
-      print('⚠️ Session restoration warning: $e');
-    }
+        } else {}
+      } else {}
+    } catch (e) {}
   }
 
   /// Get initialization status
@@ -165,7 +176,7 @@ class AppInitializationService {
     try {
       // Check Firebase connection
       await FirebaseFirestore.instance.enableNetwork();
-      
+
       // Check authentication state
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return false;
@@ -175,10 +186,9 @@ class AppInitializationService {
           .collection('USER')
           .doc(user.uid)
           .get();
-      
+
       return userDoc.exists;
     } catch (e) {
-      print('❌ Mining readiness check failed: $e');
       return false;
     }
   }
@@ -192,32 +202,24 @@ class AppInitializationService {
           .get();
 
       if (!userDoc.exists) {
-        print('❌ User document not found');
         return false;
       }
 
       final userData = userDoc.data()!;
-      
+
       // Check if user has wallet configured
       final hasWallet = userData['hasWallet'] ?? false;
-      
+
       if (!hasWallet) {
-        print('⚠️ User needs to create wallet for mining');
         return false;
       }
 
       // Check mining eligibility
       final miningRateBoosted = userData['miningRateBoosted'] ?? false;
       final referralCount = userData['referralCount'] ?? 0;
-      
-      print('✅ User configured for mining:');
-      print('   - Wallet: $hasWallet');
-      print('   - Rate boosted: $miningRateBoosted');
-      print('   - Referrals: $referralCount');
-      
+
       return true;
     } catch (e) {
-      print('❌ Auto-configuration failed: $e');
       return false;
     }
   }
@@ -248,10 +250,7 @@ class AppInitializationService {
 
       // Mining readiness
       results['mining'] = await isMiningReady();
-
-    } catch (e) {
-      print('❌ Health check error: $e');
-    }
+    } catch (e) {}
 
     return results;
   }

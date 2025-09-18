@@ -14,7 +14,7 @@ class SecureMiningSession {
   final String initialChallenge;
   final List<MiningProof> proofs;
   final String sessionHash;
-  
+
   bool isPaused;
   DateTime? pausedAt;
   DateTime lastResume;
@@ -22,7 +22,7 @@ class SecureMiningSession {
   int totalProofsSubmitted;
   DateTime lastProofSubmission;
   String? serverValidationHash;
-  
+
   SecureMiningSession({
     required this.sessionId,
     required this.sessionStart,
@@ -52,11 +52,11 @@ class SecureMiningSession {
     final now = DateTime.now();
     // EXACTLY 24 hours for 6 AKOFA total
     final duration = const Duration(hours: 24);
-    
+
     final sessionId = _generateSecureSessionId(userId, deviceId, now);
     final initialChallenge = _generateChallenge();
     final sessionHash = _generateSessionHash(userId, deviceId, sessionId, now);
-    
+
     return SecureMiningSession(
       sessionId: sessionId,
       sessionStart: now,
@@ -77,10 +77,15 @@ class SecureMiningSession {
   }
 
   /// Generate cryptographically secure session ID
-  static String _generateSecureSessionId(String userId, String deviceId, DateTime timestamp) {
+  static String _generateSecureSessionId(
+    String userId,
+    String deviceId,
+    DateTime timestamp,
+  ) {
     final random = Random.secure();
     final nonce = List.generate(16, (_) => random.nextInt(256));
-    final input = '$userId:$deviceId:${timestamp.millisecondsSinceEpoch}:${nonce.join('')}';
+    final input =
+        '$userId:$deviceId:${timestamp.millisecondsSinceEpoch}:${nonce.join('')}';
     final bytes = utf8.encode(input);
     final digest = sha256.convert(bytes);
     return digest.toString();
@@ -94,8 +99,14 @@ class SecureMiningSession {
   }
 
   /// Generate session integrity hash
-  static String _generateSessionHash(String userId, String deviceId, String sessionId, DateTime timestamp) {
-    final input = '$userId:$deviceId:$sessionId:${timestamp.millisecondsSinceEpoch}';
+  static String _generateSessionHash(
+    String userId,
+    String deviceId,
+    String sessionId,
+    DateTime timestamp,
+  ) {
+    final input =
+        '$userId:$deviceId:$sessionId:${timestamp.millisecondsSinceEpoch}';
     final bytes = utf8.encode(input);
     return sha256.convert(bytes).toString();
   }
@@ -117,11 +128,11 @@ class SecureMiningSession {
     if (!isPaused && isActive) {
       isPaused = true;
       pausedAt = DateTime.now();
-      
+
       // Calculate accurate accumulated time
       final timeSinceResume = DateTime.now().difference(lastResume).inSeconds;
       accumulatedSeconds += timeSinceResume;
-      
+
       // Submit pause proof
       submitProof('pause', timeSinceResume);
     }
@@ -133,7 +144,7 @@ class SecureMiningSession {
       isPaused = false;
       lastResume = DateTime.now();
       pausedAt = null;
-      
+
       // Submit resume proof
       submitProof('resume', 0);
     }
@@ -143,17 +154,49 @@ class SecureMiningSession {
   void submitProof(String action, int seconds) {
     final timestamp = DateTime.now();
     final nonce = _generateNonce();
-    final challenge = _getCurrentChallenge();
-    
+    final challenge = getCurrentChallenge();
+
     final proof = MiningProof(
       timestamp: timestamp,
       action: action,
       seconds: seconds,
       nonce: nonce,
       challenge: challenge,
-      proofHash: _calculateProofHash(action, seconds, nonce, challenge, timestamp),
+      proofHash: _calculateProofHash(
+        action,
+        seconds,
+        nonce,
+        challenge,
+        timestamp,
+      ),
     );
-    
+
+    proofs.add(proof);
+    totalProofsSubmitted++;
+    lastProofSubmission = timestamp;
+  }
+
+  /// Submit advanced proof with custom nonce and difficulty
+  void submitAdvancedProof(
+    String action,
+    int seconds,
+    String customNonce,
+    String customHash,
+    int difficulty,
+  ) {
+    final timestamp = DateTime.now();
+    final challenge = getCurrentChallenge();
+
+    final proof = MiningProof(
+      timestamp: timestamp,
+      action: action,
+      seconds: seconds,
+      nonce: customNonce,
+      challenge: challenge,
+      proofHash: customHash,
+      difficulty: difficulty,
+    );
+
     proofs.add(proof);
     totalProofsSubmitted++;
     lastProofSubmission = timestamp;
@@ -167,7 +210,7 @@ class SecureMiningSession {
   }
 
   /// Get current mining challenge
-  String _getCurrentChallenge() {
+  String getCurrentChallenge() {
     // Rotate challenge every hour for security
     final hoursSinceStart = DateTime.now().difference(sessionStart).inHours;
     final input = '$initialChallenge:$hoursSinceStart';
@@ -176,8 +219,15 @@ class SecureMiningSession {
   }
 
   /// Calculate proof-of-work hash
-  String _calculateProofHash(String action, int seconds, String nonce, String challenge, DateTime timestamp) {
-    final input = '$sessionId:$action:$seconds:$nonce:$challenge:${timestamp.millisecondsSinceEpoch}';
+  String _calculateProofHash(
+    String action,
+    int seconds,
+    String nonce,
+    String challenge,
+    DateTime timestamp,
+  ) {
+    final input =
+        '$sessionId:$action:$seconds:$nonce:$challenge:${timestamp.millisecondsSinceEpoch}';
     final bytes = utf8.encode(input);
     return sha256.convert(bytes).toString();
   }
@@ -199,38 +249,44 @@ class SecureMiningSession {
     // Calculate earnings based on elapsed time since session start
     // miningRate is in AKOFA per hour (0.25 AKOFA/hour)
     final hoursElapsed = accumulatedSeconds / 3600.0;
-    
+
     // EXACT MINING RATE: 0.25 AKOFA per hour
     // This means 6 AKOFA after 24 hours (0.25 * 24 = 6)
     final baseEarnings = miningRate * hoursElapsed;
-    
+
     // Ensure earnings don't exceed the maximum possible for the 24-hour session
     final maxPossibleEarnings = miningRate * 24.0; // 24 hours maximum
-    
+
     // Return earnings clamped to maximum possible
     return baseEarnings.clamp(0.0, maxPossibleEarnings);
   }
 
   /// Check if session is actively mining
   bool get isActive => !isPaused && DateTime.now().isBefore(sessionEnd);
-  
+
   /// Check if session has expired
   bool get isExpired => DateTime.now().isAfter(sessionEnd);
 
   /// Validate session integrity
   bool get isValid {
     // Check session hash integrity
-    final expectedSessionHash = _generateSessionHash(userId, deviceId, sessionId, sessionStart);
+    final expectedSessionHash = _generateSessionHash(
+      userId,
+      deviceId,
+      sessionId,
+      sessionStart,
+    );
     if (expectedSessionHash != sessionHash) return false;
-    
+
     // Check proof frequency (should submit proof at least every 5 minutes)
     final now = DateTime.now();
-    if (!isPaused && now.difference(lastProofSubmission).inMinutes > 5) return false;
-    
+    if (!isPaused && now.difference(lastProofSubmission).inMinutes > 5)
+      return false;
+
     // Validate accumulated time doesn't exceed session duration
     final maxPossibleSeconds = now.difference(sessionStart).inSeconds;
     if (accumulatedSeconds > maxPossibleSeconds) return false;
-    
+
     return true;
   }
 
@@ -249,10 +305,10 @@ class SecureMiningSession {
   /// Get current earnings rate (AKOFA per hour based on actual performance)
   double get currentEarningsRate {
     if (accumulatedSeconds == 0) return 0.0;
-    
+
     final hoursMined = accumulatedSeconds / 3600.0;
     if (hoursMined == 0) return 0.0;
-    
+
     return earnedAkofa / hoursMined;
   }
 
@@ -286,10 +342,14 @@ class SecureMiningSession {
       deviceId: json['deviceId'],
       miningRate: (json['miningRate'] as num).toDouble(),
       initialChallenge: json['initialChallenge'],
-      proofs: (json['proofs'] as List).map((p) => MiningProof.fromJson(p)).toList(),
+      proofs: (json['proofs'] as List)
+          .map((p) => MiningProof.fromJson(p))
+          .toList(),
       sessionHash: json['sessionHash'],
       isPaused: json['isPaused'],
-      pausedAt: json['pausedAt'] != null ? DateTime.parse(json['pausedAt']) : null,
+      pausedAt: json['pausedAt'] != null
+          ? DateTime.parse(json['pausedAt'])
+          : null,
       lastResume: DateTime.parse(json['lastResume']),
       accumulatedSeconds: json['accumulatedSeconds'],
       totalProofsSubmitted: json['totalProofsSubmitted'],
@@ -314,6 +374,7 @@ class MiningProof {
   final String nonce;
   final String challenge;
   final String proofHash;
+  final int? difficulty; // Mining difficulty for advanced algorithms
 
   const MiningProof({
     required this.timestamp,
@@ -322,6 +383,7 @@ class MiningProof {
     required this.nonce,
     required this.challenge,
     required this.proofHash,
+    this.difficulty,
   });
 
   Map<String, dynamic> toJson() => {
@@ -331,6 +393,7 @@ class MiningProof {
     'nonce': nonce,
     'challenge': challenge,
     'proofHash': proofHash,
+    'difficulty': difficulty,
   };
 
   factory MiningProof.fromJson(Map<String, dynamic> json) {
@@ -341,6 +404,7 @@ class MiningProof {
       nonce: json['nonce'],
       challenge: json['challenge'],
       proofHash: json['proofHash'],
+      difficulty: json['difficulty'],
     );
   }
 }
@@ -390,7 +454,10 @@ class SecureMiningSessionHistory {
     'createdAt': FieldValue.serverTimestamp(),
   };
 
-  factory SecureMiningSessionHistory.fromFirestore(String id, Map<String, dynamic> data) {
+  factory SecureMiningSessionHistory.fromFirestore(
+    String id,
+    Map<String, dynamic> data,
+  ) {
     return SecureMiningSessionHistory(
       id: id,
       userId: data['userId'] ?? '',

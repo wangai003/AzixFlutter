@@ -72,8 +72,7 @@ class _StellarWalletCardState extends State<StellarWalletCard> {
         barrierDismissible: false,
         builder: (context) => FriendlyBotFundingDialog(
           onFundingComplete: () {
-            // After funding is complete, try to add the trustline
-            _addAkofaTrustline(context);
+            // After funding is complete, trustline is handled automatically
           },
         ),
       );
@@ -83,80 +82,16 @@ class _StellarWalletCardState extends State<StellarWalletCard> {
         return;
       }
     } else {
-      // Account has enough XLM, proceed with adding the trustline
-      _addAkofaTrustline(context);
+      // Account has enough XLM, trustline is handled automatically
     }
   }
   
-  // Add Akofa trustline
-  void _addAkofaTrustline(BuildContext context) async {
-    final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
-    
-    // Show loading dialog
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Dialog(
-        backgroundColor: Colors.transparent,
-        child: Center(
-          child: CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryGold),
-          ),
-        ),
-      ),
-    );
-    
-    try {
-      final result = await stellarProvider.addAkofaTrustline();
-      
-      // Close the loading dialog
-      if (context.mounted) {
-        Navigator.of(context).pop();
-      }
-      
-      if (result['success'] == true) {
-        // Trustline added successfully
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result['wasFunded'] == true 
-                ? 'Your account was funded and Akofa trustline was added successfully!' 
-                : 'Akofa trustline added successfully!'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      } else {
-        // Failed to add trustline
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result['message'] ?? 'Failed to add Akofa trustline'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      // Close the loading dialog
-      if (context.mounted) {
-        Navigator.of(context).pop();
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Unexpected error: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
+  // REMOVED - Trustline is now handled automatically
 
   @override
   Widget build(BuildContext context) {
     // For debugging purposes, always show the card
     // Comment this out for production
-    print("StellarWalletCard build - hasWallet: ${widget.hasWallet}, publicKey: ${widget.publicKey}");
     
     // If there's no wallet or the publicKey is null, don't show the card
     // Temporarily commented out for debugging
@@ -336,20 +271,37 @@ class _StellarWalletCardState extends State<StellarWalletCard> {
                                 fontSize: 28,
                               ),
                             )
-                          : Row(
+                          : Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
-                                const Icon(
-                                  Icons.warning,
-                                  color: Colors.orange,
-                                  size: 20,
+                                Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.warning,
+                                      color: Colors.orange,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Trustline Not Added',
+                                      style: AppTheme.bodyMedium.copyWith(
+                                        color: Colors.orange,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'Trustline Not Added',
-                                  style: AppTheme.bodyMedium.copyWith(
-                                    color: Colors.orange,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
+                                const SizedBox(height: 8),
+                                ElevatedButton.icon(
+                                  onPressed: () => _createAkofaTrustline(context),
+                                  icon: const Icon(Icons.add_link, size: 16),
+                                  label: const Text('Create Trustline'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppTheme.primaryGold,
+                                    foregroundColor: AppTheme.black,
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                    textStyle: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w600),
                                   ),
                                 ),
                               ],
@@ -560,5 +512,65 @@ class _StellarWalletCardState extends State<StellarWalletCard> {
           ),
       ],
     );
+  }
+
+  void _createAkofaTrustline(BuildContext context) async {
+    // Get the StellarProvider from the context
+    final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
+
+    // Show loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.black,
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryGold),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Creating AKOFA trustline...',
+              style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      final result = await stellarProvider.createAkofaTrustlineManually();
+
+      // Close loading dialog
+      Navigator.of(context).pop();
+
+      if (result['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message'] ?? 'Trustline created successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message'] ?? 'Failed to create trustline'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      // Close loading dialog
+      Navigator.of(context).pop();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 }

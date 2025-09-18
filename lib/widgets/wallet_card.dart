@@ -12,6 +12,7 @@ class WalletCard extends StatelessWidget {
   final String? publicKey;
   final bool hasAkofaTrustline;
   final VoidCallback onShowQR;
+  final VoidCallback? onCreateTrustline;
 
   const WalletCard({
     Key? key,
@@ -20,6 +21,7 @@ class WalletCard extends StatelessWidget {
     required this.publicKey,
     required this.hasAkofaTrustline,
     required this.onShowQR,
+    this.onCreateTrustline,
   }) : super(key: key);
 
   @override
@@ -124,12 +126,35 @@ class WalletCard extends StatelessWidget {
                           fontSize: 28,
                         )
                       )
-                    : Text(
-                        'No Akofa Trustline', 
-                        style: AppTheme.bodyMedium.copyWith(
-                          color: AppTheme.black,
-                          fontSize: 18,
-                        )
+                    : Column(
+                        children: [
+                          Text(
+                            'No Akofa Trustline', 
+                            style: AppTheme.bodyMedium.copyWith(
+                              color: AppTheme.black,
+                              fontSize: 18,
+                            )
+                          ),
+                          const SizedBox(height: 12),
+                          ElevatedButton(
+                            onPressed: onCreateTrustline,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.black,
+                              foregroundColor: AppTheme.primaryGold,
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            child: const Text(
+                              'Create Trustline',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                 ],
               ),

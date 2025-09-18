@@ -67,7 +67,6 @@ class MpesaService {
   Future<Map<String, dynamic>> initiateSTKPush(String phoneNumber, double amount, String accountReference) async {
     try {
       if (kDebugMode) {
-        print('Initiating STK Push for phone: $phoneNumber, amount: $amount');
       }
       
       // Format phone number (remove leading 0 or +254)
@@ -115,7 +114,6 @@ class MpesaService {
         final data = json.decode(response.body);
         
         if (kDebugMode) {
-          print('STK Push response: $data');
         }
         
         // Store transaction details in Firestore
@@ -135,7 +133,6 @@ class MpesaService {
         };
       } else {
         if (kDebugMode) {
-          print('STK Push failed: ${response.body}');
         }
         
         return {
@@ -145,7 +142,6 @@ class MpesaService {
       }
     } catch (e) {
       if (kDebugMode) {
-        print('Error in STK Push: $e');
       }
       
       return {
@@ -189,7 +185,6 @@ class MpesaService {
         final data = json.decode(response.body);
         
         if (kDebugMode) {
-          print('STK Query response: $data');
         }
         
         // Update transaction status in Firestore
@@ -209,7 +204,6 @@ class MpesaService {
         };
       } else {
         if (kDebugMode) {
-          print('STK Query failed: ${response.body}');
         }
         
         return {
@@ -219,7 +213,6 @@ class MpesaService {
       }
     } catch (e) {
       if (kDebugMode) {
-        print('Error in STK Query: $e');
       }
       
       return {
@@ -275,7 +268,6 @@ class MpesaService {
       
       if (querySnapshot.docs.isEmpty) {
         if (kDebugMode) {
-          print('No transaction found with checkoutRequestId: $checkoutRequestId');
         }
         return;
       }
@@ -304,11 +296,9 @@ class MpesaService {
       // 3. Submitting the transaction to the Stellar network
       
       if (kDebugMode) {
-        print('Credited $akofaAmount AKOFA tokens to user $userId');
       }
     } catch (e) {
       if (kDebugMode) {
-        print('Error crediting user account: $e');
       }
     }
   }
@@ -330,7 +320,6 @@ class MpesaService {
       }).toList();
     } catch (e) {
       if (kDebugMode) {
-        print('Error getting M-Pesa transaction history: $e');
       }
       return [];
     }

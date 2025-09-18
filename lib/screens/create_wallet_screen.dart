@@ -3,7 +3,7 @@ import 'package:lottie/lottie.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../providers/stellar_provider.dart';
-import 'wallet_screen.dart';
+import 'enhanced_wallet_screen.dart';
 
 class CreateWalletScreen extends StatefulWidget {
   const CreateWalletScreen({Key? key}) : super(key: key);
@@ -22,7 +22,10 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
       _isCreating = true;
       _error = null;
     });
-    final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
+    final stellarProvider = Provider.of<StellarProvider>(
+      context,
+      listen: false,
+    );
     final result = await stellarProvider.createWallet(context);
     setState(() {
       _isCreating = false;
@@ -32,7 +35,7 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
     if (result) {
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (context) => const WalletScreen()),
+        MaterialPageRoute(builder: (context) => const EnhancedWalletScreen()),
         (route) => false,
       );
     }
@@ -53,16 +56,30 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Lottie.asset('assets/animations/login_animation.json', height: 160),
+              Lottie.asset(
+                'assets/animations/login_animation.json',
+                height: 160,
+              ),
               const SizedBox(height: 32),
-              Text('Create Your Wallet', style: AppTheme.headingLarge.copyWith(color: AppTheme.primaryGold)),
+              Text(
+                'Create Your Wallet',
+                style: AppTheme.headingLarge.copyWith(
+                  color: AppTheme.primaryGold,
+                ),
+              ),
               const SizedBox(height: 16),
-              Text('Secure your wallet with a password or biometrics.', style: AppTheme.bodyLarge.copyWith(color: AppTheme.white)),
+              Text(
+                'Secure your wallet with a password or biometrics.',
+                style: AppTheme.bodyLarge.copyWith(color: AppTheme.white),
+              ),
               const SizedBox(height: 32),
               if (_error != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 16),
-                  child: Text(_error!, style: AppTheme.bodyMedium.copyWith(color: Colors.red)),
+                  child: Text(
+                    _error!,
+                    style: AppTheme.bodyMedium.copyWith(color: Colors.red),
+                  ),
                 ),
               ElevatedButton(
                 onPressed: _isCreating ? null : _createWallet,
@@ -85,4 +102,4 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
       ),
     );
   }
-} 
+}

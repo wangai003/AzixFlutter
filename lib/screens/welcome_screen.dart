@@ -110,7 +110,6 @@ class WelcomeScreen extends StatelessWidget {
                       // After successful Google sign-in, let the Wrapper handle the flow
                       // Don't manually navigate here - let the authentication state change
                       // trigger the proper flow in the Wrapper
-                      print('DEBUG: Google sign-in successful, letting Wrapper handle flow');
                     }
                   },
                   isLoading: authProvider.isLoading,

@@ -132,7 +132,6 @@ class SecureMiningService {
 
       return todaySessions.docs.length < _maxSessionsPerDay;
     } catch (e) {
-      print('Error checking session eligibility: $e');
       return false;
     }
   }
@@ -158,7 +157,6 @@ class SecureMiningService {
         return miningRate <= baseRate;
       }
     } catch (e) {
-      print('Error validating mining rate: $e');
       return false;
     }
   }
@@ -244,7 +242,6 @@ class SecureMiningService {
       await _saveSessionToServer(session);
 
     } catch (e) {
-      print('Error during server validation: $e');
     }
   }
 
@@ -257,7 +254,6 @@ class SecureMiningService {
 
   /// Flag security violation
   void _flagSecurityViolation(String violationType) {
-    print('SECURITY VIOLATION: $violationType for session ${_currentSession?.sessionId}');
     
     // Log to security audit trail
     _logSecurityEvent(violationType, {
@@ -278,7 +274,6 @@ class SecureMiningService {
         'severity': 'high',
       });
     } catch (e) {
-      print('Error logging security event: $e');
     }
   }
 
@@ -362,7 +357,6 @@ class SecureMiningService {
     _currentSession = null;
     _clearSessionLocally();
     
-    print('Session terminated: $reason');
   }
 
   /// Save session locally
@@ -371,7 +365,6 @@ class SecureMiningService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_sessionKey, json.encode(session.toJson()));
     } catch (e) {
-      print('Error saving session locally: $e');
     }
   }
 
@@ -383,7 +376,6 @@ class SecureMiningService {
           .doc(session.sessionId)
           .set(session.toFirestore(), SetOptions(merge: true));
     } catch (e) {
-      print('Error saving session to server: $e');
     }
   }
 
@@ -413,7 +405,6 @@ class SecureMiningService {
       
       return session;
     } catch (e) {
-      print('Error loading session: $e');
       await _clearSessionLocally();
       return null;
     }
@@ -425,7 +416,6 @@ class SecureMiningService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_sessionKey);
     } catch (e) {
-      print('Error clearing local session: $e');
     }
   }
 
@@ -438,7 +428,6 @@ class SecureMiningService {
           .collection('sessions')
           .add(history.toFirestore());
     } catch (e) {
-      print('Error saving session history: $e');
     }
   }
 
@@ -481,7 +470,6 @@ class SecureMiningService {
         'trustLevel': _calculateTrustLevel(flaggedSessions, totalSessions, avgIntegrityScore),
       };
     } catch (e) {
-      print('Error getting mining statistics: $e');
       return {};
     }
   }
@@ -531,7 +519,6 @@ class SecureMiningService {
 
       return null;
     } catch (e) {
-      print('Error restoring session: $e');
       return null;
     }
   }
@@ -553,7 +540,6 @@ class SecureMiningService {
       
       return null;
     } catch (e) {
-      print('Error restoring local session: $e');
       return null;
     }
   }
@@ -573,7 +559,6 @@ class SecureMiningService {
 
       return SecureMiningSession.fromJson(data);
     } catch (e) {
-      print('Error getting session from server: $e');
       return null;
     }
   }
@@ -595,7 +580,6 @@ class SecureMiningService {
       final doc = query.docs.first;
       return SecureMiningSession.fromJson(doc.data());
     } catch (e) {
-      print('Error getting active session from server: $e');
       return null;
     }
   }

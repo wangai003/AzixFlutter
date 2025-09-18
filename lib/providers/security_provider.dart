@@ -34,7 +34,6 @@ class SecurityProvider extends ChangeNotifier {
       }
       notifyListeners();
     } catch (e) {
-      print('Error checking biometrics: $e');
     }
   }
 
@@ -53,7 +52,6 @@ class SecurityProvider extends ChangeNotifier {
         ),
       );
     } catch (e) {
-      print('Error authenticating with biometrics: $e');
       return false;
     }
   }
@@ -68,7 +66,6 @@ class SecurityProvider extends ChangeNotifier {
       _isInitialized = true;
       notifyListeners();
     } catch (e) {
-      print('Error loading security settings: $e');
     }
   }
 
@@ -112,7 +109,6 @@ class SecurityProvider extends ChangeNotifier {
       await prefs.setBool('twoFactorEnabled', _twoFactorEnabled);
       await prefs.setBool('autoBackupEnabled', _autoBackupEnabled);
     } catch (e) {
-      print('Error saving security settings: $e');
     }
   }
 
@@ -126,7 +122,6 @@ class SecurityProvider extends ChangeNotifier {
       await Future.delayed(const Duration(seconds: 1));
       return true;
     } catch (e) {
-      print('Error clearing cache: $e');
       return false;
     }
   }
@@ -141,7 +136,6 @@ class SecurityProvider extends ChangeNotifier {
       await Future.delayed(const Duration(seconds: 2));
       return true;
     } catch (e) {
-      print('Error exporting user data: $e');
       return false;
     }
   }

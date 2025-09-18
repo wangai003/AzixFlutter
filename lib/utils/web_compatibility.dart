@@ -63,11 +63,9 @@ class WebCompatibility {
   static void handleWebError(dynamic error, {String? context}) {
     if (kIsWeb) {
       // Web-specific error handling
-      print('Web Error${context != null ? ' in $context' : ''}: $error');
       // Could send to web analytics here
     } else {
       // Mobile error handling
-      print('Mobile Error${context != null ? ' in $context' : ''}: $error');
     }
   }
   

@@ -1276,7 +1276,6 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
       await chatProvider.sendMessage(content);
       _messageController.clear();
     } catch (e) {
-      print('Error sending message: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to send message: $e'),

@@ -13,6 +13,7 @@ import '../widgets/wallet_card.dart';
 import '../widgets/quick_actions_row.dart';
 import '../widgets/transaction_list.dart';
 import '../widgets/stellar_wallet_prompt.dart';
+import '../widgets/friendly_bot_funding_dialog.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class WalletScreen extends StatefulWidget {
@@ -22,30 +23,34 @@ class WalletScreen extends StatefulWidget {
   State<WalletScreen> createState() => _WalletScreenState();
 }
 
-class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderStateMixin {
+class _WalletScreenState extends State<WalletScreen>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    
+
     // Check wallet status, Akofa trustline, and refresh balance when screen loads
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
-      
+      final stellarProvider = Provider.of<StellarProvider>(
+        context,
+        listen: false,
+      );
+
       // Always check wallet status to get the public key
       stellarProvider.checkWalletStatus().then((hasWallet) {
         if (hasWallet && stellarProvider.publicKey != null) {
-          stellarProvider.checkAkofaTrustline();
+          // Trustline is now handled automatically
           stellarProvider.refreshBalance();
           // Load transactions from blockchain after wallet status is confirmed
-          stellarProvider.loadTransactionsFromBlockchain();
-        }
+          stellarProvider.loadTransactionsFromBlockchain().then((_) {});
+        } else {}
       });
     });
   }
-  
+
   @override
   void dispose() {
     _tabController.dispose();
@@ -56,14 +61,49 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     final stellarProvider = Provider.of<StellarProvider>(context);
     final authProvider = Provider.of<AuthProvider>(context);
-    
+
     // Determine layout based on screen size
     final isDesktop = ResponsiveLayout.isDesktop(context);
     final isTablet = ResponsiveLayout.isTablet(context);
-    
+
     // If user doesn't have a wallet, show the wallet creation prompt
     if (!stellarProvider.hasWallet) {
       return Scaffold(
+        appBar: AppBar(
+          title: Text('Wallet', style: AppTheme.headingMedium),
+          backgroundColor: AppTheme.black,
+          elevation: 0,
+          actions: [
+            IconButton(
+              icon: const Icon(
+                Icons.verified_user,
+                color: AppTheme.primaryGold,
+              ),
+              tooltip: 'Create AKOFA Trustline',
+              onPressed: () => _createAkofaTrustline(context, stellarProvider),
+            ),
+            IconButton(
+              icon: const Icon(Icons.bug_report, color: AppTheme.primaryGold),
+              tooltip: 'Debug Transactions',
+              onPressed: () => _debugTransactions(context, stellarProvider),
+            ),
+            IconButton(
+              icon: const Icon(Icons.build, color: AppTheme.primaryGold),
+              tooltip: 'Account Maintenance',
+              onPressed: () {
+                showDialog(
+                  context: context,
+                  builder: (context) => const AccountMaintenanceDialog(),
+                ).then((result) {
+                  if (result != null) {
+                    // Refresh wallet status after maintenance
+                    stellarProvider.checkWalletStatus();
+                  }
+                });
+              },
+            ),
+          ],
+        ),
         body: RefreshIndicator(
           onRefresh: () async {
             await stellarProvider.checkWalletStatus();
@@ -96,8 +136,32 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
         ),
       );
     }
-    
+
     return Scaffold(
+      appBar: AppBar(
+        title: Text('Wallet', style: AppTheme.headingMedium),
+        backgroundColor: AppTheme.black,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.build, color: AppTheme.primaryGold),
+            tooltip: 'Account Maintenance',
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => const AccountMaintenanceDialog(),
+              ).then((result) {
+                if (result != null) {
+                  // Refresh wallet data after maintenance
+                  stellarProvider.refreshBalance();
+                  // Trustline is now handled automatically
+                  stellarProvider.loadTransactionsFromBlockchain();
+                }
+              });
+            },
+          ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: () async {
           await stellarProvider.refreshBalance();
@@ -118,16 +182,20 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
               ),
               vertical: 24.0,
             ),
-            child: isDesktop 
-              ? _buildDesktopLayout(context, stellarProvider, authProvider)
-              : _buildMobileTabletLayout(context, stellarProvider, isTablet),
+            child: isDesktop
+                ? _buildDesktopLayout(context, stellarProvider, authProvider)
+                : _buildMobileTabletLayout(context, stellarProvider, isTablet),
           ),
         ),
       ),
     );
   }
-  
-  Widget _buildDesktopLayout(BuildContext context, StellarProvider stellarProvider, AuthProvider authProvider) {
+
+  Widget _buildDesktopLayout(
+    BuildContext context,
+    StellarProvider stellarProvider,
+    AuthProvider authProvider,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -147,12 +215,16 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
                     akofaBalance: stellarProvider.akofaBalance,
                     publicKey: stellarProvider.publicKey,
                     hasAkofaTrustline: stellarProvider.hasAkofaTrustline,
-                    onShowQR: () => _showReceiveSheet(context, stellarProvider.publicKey),
+                    onShowQR: () =>
+                        _showReceiveSheet(context, stellarProvider.publicKey),
+                    onCreateTrustline: () =>
+                        _createAkofaTrustline(context, stellarProvider),
                   ),
                   const SizedBox(height: 24),
                   QuickActionsRow(
                     onSend: () => _showSendDialog(context),
-                    onReceive: () => _showReceiveSheet(context, stellarProvider.publicKey),
+                    onReceive: () =>
+                        _showReceiveSheet(context, stellarProvider.publicKey),
                     onBuy: () => _showBuyAkofaDialog(context),
                   ),
                 ],
@@ -168,15 +240,20 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('Recent Transactions', 
+                      Text(
+                        'Recent Transactions',
                         style: AppTheme.headingMedium.copyWith(
                           color: AppTheme.primaryGold,
                           fontSize: 24,
-                        )
+                        ),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.refresh, color: AppTheme.primaryGold),
-                        onPressed: () => stellarProvider.loadTransactionsFromBlockchain(),
+                        icon: const Icon(
+                          Icons.refresh,
+                          color: AppTheme.primaryGold,
+                        ),
+                        onPressed: () =>
+                            stellarProvider.loadTransactionsFromBlockchain(),
                         tooltip: 'Refresh transactions',
                       ),
                     ],
@@ -204,8 +281,12 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
       ],
     );
   }
-  
-  Widget _buildMobileTabletLayout(BuildContext context, StellarProvider stellarProvider, bool isTablet) {
+
+  Widget _buildMobileTabletLayout(
+    BuildContext context,
+    StellarProvider stellarProvider,
+    bool isTablet,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -221,18 +302,20 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
         const SizedBox(height: 24),
         QuickActionsRow(
           onSend: () => _showSendDialog(context),
-          onReceive: () => _showReceiveSheet(context, stellarProvider.publicKey),
+          onReceive: () =>
+              _showReceiveSheet(context, stellarProvider.publicKey),
           onBuy: () => _showBuyAkofaDialog(context),
         ),
         const SizedBox(height: 32),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('Recent Transactions', 
+            Text(
+              'Recent Transactions',
               style: AppTheme.headingMedium.copyWith(
                 color: AppTheme.primaryGold,
                 fontSize: isTablet ? 22 : null,
-              )
+              ),
             ),
             IconButton(
               icon: const Icon(Icons.refresh, color: AppTheme.primaryGold),
@@ -242,45 +325,42 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
           ],
         ),
         const SizedBox(height: 12),
-        TransactionList(
-          transactions: stellarProvider.transactions,
-        ),
+        TransactionList(transactions: stellarProvider.transactions),
       ],
     );
   }
-  
+
   Widget _buildHeader(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Wallet',
-          style: AppTheme.headingLarge.copyWith(
-            color: AppTheme.primaryGold,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Manage your assets and transactions',
-          style: AppTheme.bodyMedium.copyWith(
-            color: AppTheme.grey,
-          ),
-        ),
-      ],
-    ).animate()
-      .fadeIn(
-        duration: const Duration(milliseconds: 600),
-        curve: Curves.easeOut,
-      )
-      .slideY(
-        begin: 0.2,
-        end: 0,
-        duration: const Duration(milliseconds: 600),
-        curve: Curves.easeOut,
-      );
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Wallet',
+              style: AppTheme.headingLarge.copyWith(
+                color: AppTheme.primaryGold,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Manage your assets and transactions',
+              style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
+            ),
+          ],
+        )
+        .animate()
+        .fadeIn(
+          duration: const Duration(milliseconds: 600),
+          curve: Curves.easeOut,
+        )
+        .slideY(
+          begin: 0.2,
+          end: 0,
+          duration: const Duration(milliseconds: 600),
+          curve: Curves.easeOut,
+        );
   }
-  
+
   void _showReceiveSheet(BuildContext context, String? publicKey) {
     if (publicKey != null) {
       _showReceiveDialog(context, publicKey);
@@ -288,226 +368,303 @@ class _WalletScreenState extends State<WalletScreen> with SingleTickerProviderSt
   }
 
   void _showSendDialog(BuildContext context) async {
-    final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
-              await stellarProvider.loadWalletAssets();
-              if (!mounted) return;
-              showDialog(
-                context: context,
-                builder: (context) => SendDialog(
-                  assetCode: 'XLM',
-                  balance: stellarProvider.balance,
-                ),
-              ).then((success) {
-                if (success == true) {
-                  stellarProvider.refreshBalance();
-                }
-              });
-            }
+    final stellarProvider = Provider.of<StellarProvider>(
+      context,
+      listen: false,
+    );
+    await stellarProvider.loadWalletAssets();
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (context) =>
+          SendDialog(assetCode: 'XLM', balance: stellarProvider.balance),
+    ).then((success) {
+      if (success == true) {
+        stellarProvider.refreshBalance();
+      }
+    });
+  }
 
   void _showBuyAkofaDialog(BuildContext context) {
-                      showDialog(
-                        context: context,
-                        builder: (context) => EnhancedBuyAkofaDialog(),
+    showDialog(
+      context: context,
+      builder: (context) => EnhancedBuyAkofaDialog(),
     );
   }
-  
+
   void _showReceiveDialog(BuildContext context, String publicKey) async {
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    String? akofaTag;
-    if (authProvider.user != null) {
-      final doc = await FirebaseFirestore.instance.collection('USER').doc(authProvider.user!.uid).get();
-      akofaTag = doc.data()?['akofaTag'];
-    }
-    
     if (!mounted) return;
-    
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        final tagController = TextEditingController();
-        bool isSaving = false;
-        String? tagError;
-        return StatefulBuilder(
-          builder: (context, setState) => AlertDialog(
-            backgroundColor: AppTheme.black,
-            title: Text(
-              'Receive Funds',
-              style: AppTheme.headingSmall.copyWith(
-                color: AppTheme.primaryGold,
+        return AlertDialog(
+          backgroundColor: AppTheme.black,
+          title: Text(
+            'Receive Funds',
+            style: AppTheme.headingSmall.copyWith(color: AppTheme.primaryGold),
+            textAlign: TextAlign.center,
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Share your public key to receive funds',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppTheme.grey),
               ),
-              textAlign: TextAlign.center,
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Share your public key to receive funds',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: AppTheme.grey),
+              const SizedBox(height: 24),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppTheme.darkGrey.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                const SizedBox(height: 24),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppTheme.darkGrey.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        publicKey,
-                        style: AppTheme.bodySmall,
-                        textAlign: TextAlign.center,
+                child: Column(
+                  children: [
+                    Text(
+                      publicKey,
+                      style: AppTheme.bodySmall,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: publicKey));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Public key copied to clipboard'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.copy),
+                      label: const Text('Copy Address'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryGold,
+                        foregroundColor: AppTheme.black,
                       ),
-                      const SizedBox(height: 16),
-                      ElevatedButton.icon(
-                        onPressed: () {
-                          Clipboard.setData(ClipboardData(text: publicKey));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Public key copied to clipboard'),
-                              backgroundColor: Colors.green,
-                            ),
-                          );
-                        },
-                        icon: const Icon(Icons.copy),
-                        label: const Text('Copy Address'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primaryGold,
-                          foregroundColor: AppTheme.black,
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 24),
-                // Akofa Tag section
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppTheme.darkGrey.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: akofaTag != null && akofaTag.isNotEmpty
-                      ? Column(
-                          children: [
-                            Text(
-                              'Your Akofa Tag',
-                              style: AppTheme.bodyMedium.copyWith(color: AppTheme.primaryGold, fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 8),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Text('₳$akofaTag', style: AppTheme.bodyLarge.copyWith(color: AppTheme.white, fontWeight: FontWeight.bold)),
-                                const SizedBox(width: 8),
-                                IconButton(
-                                  icon: const Icon(Icons.copy, color: AppTheme.primaryGold),
-                                  tooltip: 'Copy Akofa Tag',
-                                  onPressed: () {
-                                    Clipboard.setData(ClipboardData(text: '₳$akofaTag'));
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('Akofa Tag copied!'), backgroundColor: Colors.green),
-                                    );
-                                  },
-                                ),
-                              ],
-                            ),
-                          ],
-                        )
-                      : Column(
-                          children: [
-                            Text('Create your Akofa Tag', style: AppTheme.bodyMedium.copyWith(color: AppTheme.primaryGold, fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                const Text('₳', style: TextStyle(fontSize: 20, color: AppTheme.primaryGold, fontWeight: FontWeight.bold)),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                  child: TextField(
-                                    controller: tagController,
-                                    decoration: InputDecoration(
-                                      hintText: 'yourtag',
-                                      errorText: tagError,
-                                      border: InputBorder.none,
-                                    ),
-                                    style: const TextStyle(color: AppTheme.white, fontSize: 18),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton(
-                                onPressed: isSaving
-                                    ? null
-                                    : () async {
-                                        String tag = tagController.text.trim().toLowerCase();
-                                        if (tag.isEmpty) {
-                                          setState(() => tagError = 'Required');
-                                          return;
-                                        }
-                                        if (tag.contains(' ')) {
-                                          setState(() => tagError = 'No spaces allowed in Akofa Tag');
-                                          return;
-                                        }
-                                        setState(() {
-                                          isSaving = true;
-                                          tagError = null;
-                                        });
-                                        
-                                        try {
-                                        // Check uniqueness
-                                        final query = await FirebaseFirestore.instance.collection('USER').where('akofaTag', isEqualTo: tag).limit(1).get();
-                                        if (query.docs.isNotEmpty) {
-                                          setState(() {
-                                              tagError = 'Tag is already taken';
-                                              isSaving = false;
-                                          });
-                                          return;
-                                        }
-                                        // Save to Firestore
-                                        await FirebaseFirestore.instance.collection('USER').doc(authProvider.user!.uid).update({'akofaTag': tag});
-                                        setState(() {
-                                            isSaving = false;
-                                        });
-                                        Navigator.of(context).pop();
-                                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Akofa Tag created!'), backgroundColor: Colors.green));
-                                        } catch (e) {
-                                          setState(() {
-                                            tagError = 'Error: $e';
-                                            isSaving = false;
-                                          });
-                                        }
-                                      },
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppTheme.primaryGold,
-                                  foregroundColor: AppTheme.black,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                  padding: const EdgeInsets.symmetric(vertical: 14),
-                                ),
-                                child: isSaving
-                                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                                    : const Text('Save Tag', style: TextStyle(fontWeight: FontWeight.bold)),
-                              ),
-                            ),
-                          ],
-                        ),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                },
-                child: const Text('Close'),
               ),
             ],
           ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: const Text('Close'),
+            ),
+          ],
         );
       },
+    );
+  }
+
+  void _createAkofaTrustline(
+    BuildContext context,
+    StellarProvider stellarProvider,
+  ) async {
+    // Show loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Dialog(
+        backgroundColor: Colors.transparent,
+        child: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryGold),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      final result = await stellarProvider.createAkofaTrustlineManually();
+
+      // Close the loading dialog
+      Navigator.of(context).pop();
+
+      if (result['success'] == true) {
+        // Show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              result['message'] ?? 'Akofa trustline created successfully!',
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        // Show error message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              result['message'] ?? 'Failed to create Akofa trustline',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      // Close the loading dialog
+      Navigator.of(context).pop();
+
+      // Show error message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  void _debugTransactions(
+    BuildContext context,
+    StellarProvider stellarProvider,
+  ) async {
+    // Show loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.black,
+        title: Text(
+          'Debugging Transactions',
+          style: AppTheme.headingSmall.copyWith(color: AppTheme.primaryGold),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryGold),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Analyzing transaction loading...',
+              style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      final debugInfo = await stellarProvider.debugTransactionLoading();
+
+      // Close loading dialog
+      Navigator.of(context).pop();
+
+      // Show debug results
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: AppTheme.black,
+          title: Text(
+            'Transaction Debug Results',
+            style: AppTheme.headingSmall.copyWith(color: AppTheme.primaryGold),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _debugRow('Has Wallet:', debugInfo['hasWallet'].toString()),
+                _debugRow('Public Key:', debugInfo['publicKey'] ?? 'None'),
+                _debugRow(
+                  'Current Transactions:',
+                  debugInfo['currentTransactionCount'].toString(),
+                ),
+                _debugRow(
+                  'Is Loading:',
+                  debugInfo['isTransactionLoading'].toString(),
+                ),
+                _debugRow(
+                  'Refresh Successful:',
+                  debugInfo['refreshSuccessful'].toString(),
+                ),
+                _debugRow(
+                  'After Refresh:',
+                  debugInfo['afterRefreshCount']?.toString() ?? 'N/A',
+                ),
+                if (debugInfo['refreshError'] != null)
+                  _debugRow('Refresh Error:', debugInfo['refreshError']),
+                if (debugInfo['sampleTransaction'] != null) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    'Sample Transaction:',
+                    style: AppTheme.bodyMedium.copyWith(
+                      color: AppTheme.primaryGold,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  _debugRow('ID:', debugInfo['sampleTransaction']['id']),
+                  _debugRow('Type:', debugInfo['sampleTransaction']['type']),
+                  _debugRow(
+                    'Amount:',
+                    debugInfo['sampleTransaction']['amount'].toString(),
+                  ),
+                  _debugRow(
+                    'Asset:',
+                    debugInfo['sampleTransaction']['assetCode'],
+                  ),
+                  _debugRow(
+                    'Status:',
+                    debugInfo['sampleTransaction']['status'],
+                  ),
+                  _debugRow(
+                    'Timestamp:',
+                    debugInfo['sampleTransaction']['timestamp'],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              child: const Text(
+                'Close',
+                style: TextStyle(color: AppTheme.primaryGold),
+              ),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      // Close loading dialog
+      Navigator.of(context).pop();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Debug failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Widget _debugRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$label ',
+            style: AppTheme.bodySmall.copyWith(
+              color: AppTheme.grey,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.white),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

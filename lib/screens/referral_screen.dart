@@ -64,7 +64,6 @@ class _ReferralScreenState extends State<ReferralScreen> with TickerProviderStat
         _recentReferrals = [];
       }
     } catch (e) {
-      print('Error loading referral data: $e');
     } finally {
       setState(() => _isLoading = false);
     }

@@ -20,6 +20,7 @@ class TransactionList extends StatelessWidget {
     final isLargeDesktop = ResponsiveLayout.isLargeDesktop(context);
     final isWebPlatform = kIsWeb;
     
+    
     if (transactions.isEmpty) {
       return Center(
         child: Padding(

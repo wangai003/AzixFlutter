@@ -6,7 +6,7 @@ import '../providers/stellar_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/stellar_wallet_prompt.dart';
-import 'stellar_wallet_screen.dart';
+import 'enhanced_wallet_screen.dart';
 import '../providers/admin_provider.dart';
 import 'admin/admin_dashboard_screen.dart';
 import '../services/auth_service.dart';
@@ -24,12 +24,13 @@ class ProfileScreen extends StatefulWidget {
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderStateMixin {
+class _ProfileScreenState extends State<ProfileScreen>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _bioController = TextEditingController();
   bool _isEditing = false;
-  
+
   // Sample data
   final List<Achievement> _achievements = [
     Achievement(
@@ -57,7 +58,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       date: DateTime.now().subtract(const Duration(days: 30)),
     ),
   ];
-  
+
   final List<Activity> _activities = [
     Activity(
       id: '1',
@@ -88,7 +89,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       date: DateTime.now().subtract(const Duration(days: 7)),
     ),
   ];
-  
+
   final List<SecuritySetting> _securitySettings = [
     SecuritySetting(
       id: '1',
@@ -118,18 +119,12 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   String? _profileError;
   File? _newProfileImage;
   final AuthService _authService = AuthService();
-  final _akofaTagController = TextEditingController();
-  String? _akofaTagError;
-  bool _isCheckingTag = false;
-  bool _isSavingTag = false;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     _fetchUserProfile();
-    // Load current akofaTag
-    _akofaTagController.text = _userModel?.akofaTag ?? '';
   }
 
   Future<void> _fetchUserProfile() async {
@@ -159,7 +154,10 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
 
   Future<void> _pickProfileImage() async {
     final picker = ImagePicker();
-    final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+    final picked = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+    );
     if (picked != null) {
       setState(() {
         _newProfileImage = File(picked.path);
@@ -176,16 +174,11 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       String? photoUrl = _userModel?.photoUrl;
       // TODO: Implement profile image upload functionality
       // For now, we'll use the existing photo URL
-      await _authService.updateUserFields(
-        uid,
-        {
-          'displayName': _nameController.text.trim(),
-          'profile': {
-            'bio': _bioController.text.trim(),
-          },
-          'photoURL': photoUrl,
-        },
-      );
+      await _authService.updateUserFields(uid, {
+        'displayName': _nameController.text.trim(),
+        'profile': {'bio': _bioController.text.trim()},
+        'photoURL': photoUrl,
+      });
       // Optionally update Firebase Auth displayName/photoURL
       if (authProvider.user != null) {
         await authProvider.user!.updateDisplayName(_nameController.text.trim());
@@ -205,82 +198,6 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     }
   }
 
-  Future<bool> _isTagUnique(String tag) async {
-    final query = await FirebaseFirestore.instance
-        .collection('USER')
-        .where('akofaTag', isEqualTo: tag)
-        .limit(1)
-        .get();
-    if (query.docs.isEmpty) return true;
-    // If the only doc is the current user, allow
-    return query.docs.first.id == _userModel?.id;
-  }
-
-  Widget _buildAkofaTagField() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Akofa Tag (unique username)', style: Theme.of(context).textTheme.labelMedium),
-        const SizedBox(height: 4),
-        Row(
-          children: [
-            const Text('₳', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-            Expanded(
-              child: TextField(
-                controller: _akofaTagController,
-                decoration: InputDecoration(
-                  hintText: 'yourtag',
-                  errorText: _akofaTagError,
-                ),
-                onChanged: (value) async {
-                  setState(() { _isCheckingTag = true; _akofaTagError = null; });
-                  if (value.isEmpty) {
-                    setState(() { _akofaTagError = 'Required'; _isCheckingTag = false; });
-                    return;
-                  }
-                  final isUnique = await _isTagUnique(value);
-                  setState(() {
-                    _akofaTagError = isUnique ? null : 'Tag is already taken';
-                    _isCheckingTag = false;
-                  });
-                },
-              ),
-            ),
-            if (_isCheckingTag) const Padding(
-              padding: EdgeInsets.only(left: 8),
-              child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        ElevatedButton(
-          onPressed: _isSavingTag ? null : () async {
-            String tag = _akofaTagController.text.trim().toLowerCase();
-            if (tag.isEmpty) {
-              setState(() { _akofaTagError = 'Required'; });
-              return;
-            }
-            if (tag.contains(' ')) {
-              setState(() { _akofaTagError = 'No spaces allowed in Akofa Tag'; });
-              return;
-            }
-            setState(() { _isSavingTag = true; });
-            final isUnique = await _isTagUnique(tag);
-            if (!isUnique) {
-              setState(() { _akofaTagError = 'Tag is already taken'; _isSavingTag = false; });
-              return;
-            }
-            // Save to Firestore
-            await FirebaseFirestore.instance.collection('USER').doc(_userModel?.id).update({'akofaTag': tag});
-            setState(() { _isSavingTag = false; });
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Akofa Tag updated!')));
-          },
-          child: _isSavingTag ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Save Tag'),
-        ),
-      ],
-    );
-  }
-
   @override
   void dispose() {
     _tabController.dispose();
@@ -294,96 +211,100 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     final authProvider = Provider.of<AuthProvider>(context);
     final stellarProvider = Provider.of<StellarProvider>(context);
     final user = authProvider.user;
-    
+
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [
-            AppTheme.black,
-            Color(0xFF212121),
-          ],
+          colors: [AppTheme.black, Color(0xFF212121)],
         ),
       ),
       child: SafeArea(
         child: _isProfileLoading
             ? const Center(child: CircularProgressIndicator())
             : _profileError != null
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      _profileError!,
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.login),
+                      label: const Text(
+                        'Sign in with Google to create your profile',
+                      ),
+                      onPressed: () async {
+                        try {
+                          await _authService.signInWithGoogle();
+                          await _fetchUserProfile();
+                        } catch (e) {
+                          setState(() {
+                            _profileError = 'Google sign-in failed: $e';
+                          });
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              )
+            : Column(
+                children: [
+                  _buildAppBar(),
+                  _buildProfileHeader(_userModel, stellarProvider),
+                  _buildTabBar(),
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
                       children: [
-                        Text(_profileError!, style: const TextStyle(color: Colors.red)),
-                        const SizedBox(height: 24),
-                        ElevatedButton.icon(
-                          icon: const Icon(Icons.login),
-                          label: const Text('Sign in with Google to create your profile'),
-                          onPressed: () async {
-                            try {
-                              await _authService.signInWithGoogle();
-                              await _fetchUserProfile();
-                            } catch (e) {
-                              setState(() { _profileError = 'Google sign-in failed: $e'; });
-                            }
-                          },
-                        ),
+                        _buildActivityTab(),
+                        _buildAchievementsTab(),
+                        _buildSettingsTab(),
                       ],
                     ),
-                  )
-                : Column(
-                    children: [
-                      _buildAppBar(),
-                      _buildProfileHeader(_userModel, stellarProvider),
-                      _buildTabBar(),
-                      Expanded(
-                        child: TabBarView(
-                          controller: _tabController,
-                          children: [
-                            _buildActivityTab(),
-                            _buildAchievementsTab(),
-                            _buildSettingsTab(),
-                          ],
-                        ),
-                      ),
-                    ],
                   ),
+                ],
+              ),
       ),
     );
   }
 
   Widget _buildAppBar() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
-      child: Row(
-        children: [
-          Text(
-            'Profile',
-            style: AppTheme.headingLarge.copyWith(
-              color: AppTheme.primaryGold,
-              fontWeight: FontWeight.bold,
-            ),
+          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+          child: Row(
+            children: [
+              Text(
+                'Profile',
+                style: AppTheme.headingLarge.copyWith(
+                  color: AppTheme.primaryGold,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const Spacer(),
+              IconButton(
+                icon: Icon(
+                  _isEditing ? Icons.check : Icons.edit,
+                  color: AppTheme.primaryGold,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _isEditing = !_isEditing;
+
+                    if (!_isEditing) {
+                      // Save profile changes
+                      // In a real app, this would update the user profile on the server
+                    }
+                  });
+                },
+              ),
+            ],
           ),
-          const Spacer(),
-          IconButton(
-            icon: Icon(
-              _isEditing ? Icons.check : Icons.edit,
-              color: AppTheme.primaryGold,
-            ),
-            onPressed: () {
-              setState(() {
-                _isEditing = !_isEditing;
-                
-                if (!_isEditing) {
-                  // Save profile changes
-                  // In a real app, this would update the user profile on the server
-                }
-              });
-            },
-          ),
-        ],
-      ),
-    )
+        )
         .animate()
         .fadeIn(duration: const Duration(milliseconds: 500))
         .slideY(begin: -0.2, end: 0, curve: Curves.easeOut);
@@ -395,71 +316,68 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       child: Column(
         children: [
           Stack(
-            alignment: Alignment.bottomRight,
-            children: [
-              Container(
-                width: 120,
-                height: 120,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: AppTheme.primaryGold,
-                    width: 3,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.primaryGold.withOpacity(0.3),
-                      blurRadius: 10,
-                      spreadRadius: 2,
+                alignment: Alignment.bottomRight,
+                children: [
+                  Container(
+                    width: 120,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppTheme.primaryGold, width: 3),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppTheme.primaryGold.withOpacity(0.3),
+                          blurRadius: 10,
+                          spreadRadius: 2,
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                child: CircleAvatar(
-                  backgroundColor: AppTheme.darkGrey,
-                  backgroundImage: _newProfileImage != null
-                      ? FileImage(_newProfileImage!)
-                      : (user?.photoUrl != null && user!.photoUrl!.isNotEmpty)
+                    child: CircleAvatar(
+                      backgroundColor: AppTheme.darkGrey,
+                      backgroundImage: _newProfileImage != null
+                          ? FileImage(_newProfileImage!)
+                          : (user?.photoUrl != null &&
+                                user!.photoUrl!.isNotEmpty)
                           ? NetworkImage(user.photoUrl!) as ImageProvider
                           : null,
-                  child: (user?.photoUrl == null || user!.photoUrl!.isEmpty) && _newProfileImage == null
-                      ? Text(
-                          user?.displayName?.isNotEmpty == true
-                              ? user!.displayName![0].toUpperCase()
-                              : 'A',
-                          style: AppTheme.headingLarge.copyWith(
-                            color: AppTheme.primaryGold,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 48,
-                          ),
-                        )
-                      : null,
-                ),
-              ),
-              if (_isEditing)
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryGold,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: AppTheme.black,
-                      width: 2,
+                      child:
+                          (user?.photoUrl == null || user!.photoUrl!.isEmpty) &&
+                              _newProfileImage == null
+                          ? Text(
+                              user?.displayName?.isNotEmpty == true
+                                  ? user!.displayName![0].toUpperCase()
+                                  : 'A',
+                              style: AppTheme.headingLarge.copyWith(
+                                color: AppTheme.primaryGold,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 48,
+                              ),
+                            )
+                          : null,
                     ),
                   ),
-                  child: IconButton(
-                    icon: const Icon(
-                      Icons.camera_alt,
-                      color: AppTheme.black,
-                      size: 20,
+                  if (_isEditing)
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryGold,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AppTheme.black, width: 2),
+                      ),
+                      child: IconButton(
+                        icon: const Icon(
+                          Icons.camera_alt,
+                          color: AppTheme.black,
+                          size: 20,
+                        ),
+                        onPressed: _pickProfileImage,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
                     ),
-                    onPressed: _pickProfileImage,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
-                ),
-            ],
-          )
+                ],
+              )
               .animate()
               .fadeIn(duration: const Duration(milliseconds: 800))
               .scale(
@@ -496,9 +414,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: AppTheme.primaryGold,
-                      ),
+                      borderSide: const BorderSide(color: AppTheme.primaryGold),
                     ),
                   ),
                 )
@@ -513,9 +429,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
           _isEditing
               ? TextField(
                   controller: _bioController,
-                  style: AppTheme.bodyMedium.copyWith(
-                    color: AppTheme.grey,
-                  ),
+                  style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
                   textAlign: TextAlign.center,
                   maxLines: 2,
                   decoration: InputDecoration(
@@ -537,17 +451,13 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: AppTheme.primaryGold,
-                      ),
+                      borderSide: const BorderSide(color: AppTheme.primaryGold),
                     ),
                   ),
                 )
               : Text(
                   user?.profile?['bio'] ?? '',
-                  style: AppTheme.bodyMedium.copyWith(
-                    color: AppTheme.grey,
-                  ),
+                  style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
                   textAlign: TextAlign.center,
                 ),
           const SizedBox(height: 24),
@@ -555,12 +465,18 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
               stellarProvider.hasWallet && stellarProvider.hasAkofaTrustline
-                ? _buildStatItem(stellarProvider.akofaBalance, 'AKOFA Balance')
-                : _buildStatItem('0', 'AKOFA Balance'),
+                  ? _buildStatItem(
+                      stellarProvider.akofaBalance,
+                      'AKOFA Balance',
+                    )
+                  : _buildStatItem('0', 'AKOFA Balance'),
               stellarProvider.hasWallet
-                ? _buildStatItem(stellarProvider.balance, 'XLM Balance')
-                : _buildStatItem('0', 'XLM Balance'),
-              _buildStatItem((_userModel?.profile?['communitiesJoined'] ?? 0).toString(), 'Communities'),
+                  ? _buildStatItem(stellarProvider.balance, 'XLM Balance')
+                  : _buildStatItem('0', 'XLM Balance'),
+              _buildStatItem(
+                (_userModel?.profile?['communitiesJoined'] ?? 0).toString(),
+                'Communities',
+              ),
             ],
           ),
           const SizedBox(height: 24),
@@ -571,23 +487,21 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
 
   Widget _buildStatItem(String value, String label) {
     return Column(
-      children: [
-        Text(
-          value,
-          style: AppTheme.headingMedium.copyWith(
-            color: AppTheme.primaryGold,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: AppTheme.bodySmall.copyWith(
-            color: AppTheme.grey,
-          ),
-        ),
-      ],
-    )
+          children: [
+            Text(
+              value,
+              style: AppTheme.headingMedium.copyWith(
+                color: AppTheme.primaryGold,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+            ),
+          ],
+        )
         .animate()
         .fadeIn(
           duration: const Duration(milliseconds: 800),
@@ -624,12 +538,10 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
           Tab(text: 'Settings'),
         ],
       ),
-    )
-        .animate()
-        .fadeIn(
-          duration: const Duration(milliseconds: 500),
-          delay: const Duration(milliseconds: 600),
-        );
+    ).animate().fadeIn(
+      duration: const Duration(milliseconds: 500),
+      delay: const Duration(milliseconds: 600),
+    );
   }
 
   Widget _buildActivityTab() {
@@ -638,62 +550,55 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       itemCount: _activities.length,
       itemBuilder: (context, index) {
         final activity = _activities[index];
-        
+
         return Container(
-          margin: const EdgeInsets.only(bottom: 16.0),
-          padding: const EdgeInsets.all(16.0),
-          decoration: BoxDecoration(
-            color: AppTheme.darkGrey.withOpacity(0.3),
-            borderRadius: BorderRadius.circular(16.0),
-            border: Border.all(
-              color: AppTheme.grey.withOpacity(0.3),
-            ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryGold.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(12.0),
-                ),
-                child: Icon(
-                  activity.icon,
-                  color: AppTheme.primaryGold,
-                ),
+              margin: const EdgeInsets.only(bottom: 16.0),
+              padding: const EdgeInsets.all(16.0),
+              decoration: BoxDecoration(
+                color: AppTheme.darkGrey.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(16.0),
+                border: Border.all(color: AppTheme.grey.withOpacity(0.3)),
               ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      activity.title,
-                      style: AppTheme.bodyMedium.copyWith(
-                        color: AppTheme.white,
-                        fontWeight: FontWeight.bold,
-                      ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryGold.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(12.0),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      activity.description,
-                      style: AppTheme.bodySmall.copyWith(
-                        color: AppTheme.grey,
-                      ),
+                    child: Icon(activity.icon, color: AppTheme.primaryGold),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          activity.title,
+                          style: AppTheme.bodyMedium.copyWith(
+                            color: AppTheme.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          activity.description,
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.grey,
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  Text(
+                    _formatDate(activity.date),
+                    style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+                  ),
+                ],
               ),
-              Text(
-                _formatDate(activity.date),
-                style: AppTheme.bodySmall.copyWith(
-                  color: AppTheme.grey,
-                ),
-              ),
-            ],
-          ),
-        )
+            )
             .animate()
             .fadeIn(
               duration: const Duration(milliseconds: 600),
@@ -715,68 +620,63 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       itemCount: _achievements.length,
       itemBuilder: (context, index) {
         final achievement = _achievements[index];
-        
+
         return Container(
-          margin: const EdgeInsets.only(bottom: 16.0),
-          padding: const EdgeInsets.all(16.0),
-          decoration: BoxDecoration(
-            color: AppTheme.darkGrey.withOpacity(0.3),
-            borderRadius: BorderRadius.circular(16.0),
-            border: Border.all(
-              color: achievement.color.withOpacity(0.3),
-            ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 60,
-                height: 60,
-                decoration: BoxDecoration(
-                  color: achievement.color.withOpacity(0.2),
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: achievement.color,
-                    width: 2,
+              margin: const EdgeInsets.only(bottom: 16.0),
+              padding: const EdgeInsets.all(16.0),
+              decoration: BoxDecoration(
+                color: AppTheme.darkGrey.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(16.0),
+                border: Border.all(color: achievement.color.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 60,
+                    height: 60,
+                    decoration: BoxDecoration(
+                      color: achievement.color.withOpacity(0.2),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: achievement.color, width: 2),
+                    ),
+                    child: Icon(
+                      achievement.icon,
+                      color: achievement.color,
+                      size: 30,
+                    ),
                   ),
-                ),
-                child: Icon(
-                  achievement.icon,
-                  color: achievement.color,
-                  size: 30,
-                ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          achievement.title,
+                          style: AppTheme.bodyLarge.copyWith(
+                            color: AppTheme.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          achievement.description,
+                          style: AppTheme.bodyMedium.copyWith(
+                            color: AppTheme.grey,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Earned on ${_formatFullDate(achievement.date)}',
+                          style: AppTheme.bodySmall.copyWith(
+                            color: achievement.color,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      achievement.title,
-                      style: AppTheme.bodyLarge.copyWith(
-                        color: AppTheme.white,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      achievement.description,
-                      style: AppTheme.bodyMedium.copyWith(
-                        color: AppTheme.grey,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Earned on ${_formatFullDate(achievement.date)}',
-                      style: AppTheme.bodySmall.copyWith(
-                        color: achievement.color,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        )
+            )
             .animate()
             .fadeIn(
               duration: const Duration(milliseconds: 600),
@@ -818,32 +718,57 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                 children: [
                   const Icon(Icons.card_giftcard, color: AppTheme.primaryGold),
                   const SizedBox(width: 8),
-                  Text('Referral Program', style: AppTheme.headingSmall.copyWith(color: AppTheme.primaryGold)),
+                  Text(
+                    'Referral Program',
+                    style: AppTheme.headingSmall.copyWith(
+                      color: AppTheme.primaryGold,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
               Row(
                 children: [
-                  Text('Your Referral Code: ', style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey)),
-                  SelectableText(referralCode, style: AppTheme.bodyMedium.copyWith(color: AppTheme.white, fontWeight: FontWeight.bold)),
+                  Text(
+                    'Your Referral Code: ',
+                    style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
+                  ),
+                  SelectableText(
+                    referralCode,
+                    style: AppTheme.bodyMedium.copyWith(
+                      color: AppTheme.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                   IconButton(
-                    icon: const Icon(Icons.copy, color: AppTheme.primaryGold, size: 18),
+                    icon: const Icon(
+                      Icons.copy,
+                      color: AppTheme.primaryGold,
+                      size: 18,
+                    ),
                     tooltip: 'Copy',
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: referralCode));
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Referral code copied!')));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Referral code copied!')),
+                      );
                     },
                   ),
                 ],
               ),
               const SizedBox(height: 8),
-              Text('Successful Referrals: $referralCount', style: AppTheme.bodyMedium.copyWith(color: AppTheme.white)),
+              Text(
+                'Successful Referrals: $referralCount',
+                style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
+              ),
               const SizedBox(height: 8),
               Text(
                 miningRateBoosted
-                  ? 'Mining Rate Boosted! 🎉'
-                  : 'Refer 6+ users to boost your mining rate.',
-                style: AppTheme.bodySmall.copyWith(color: miningRateBoosted ? Colors.green : AppTheme.grey),
+                    ? 'Mining Rate Boosted! 🎉'
+                    : 'Refer 6+ users to boost your mining rate.',
+                style: AppTheme.bodySmall.copyWith(
+                  color: miningRateBoosted ? Colors.green : AppTheme.grey,
+                ),
               ),
             ],
           ),
@@ -869,67 +794,67 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
         ..._securitySettings.asMap().entries.map((entry) {
           final index = entry.key;
           final setting = entry.value;
-          
+
           return Container(
-            margin: const EdgeInsets.only(bottom: 16.0),
-            padding: const EdgeInsets.all(16.0),
-            decoration: BoxDecoration(
-              color: AppTheme.darkGrey.withOpacity(0.3),
-              borderRadius: BorderRadius.circular(16.0),
-              border: Border.all(
-                color: AppTheme.grey.withOpacity(0.3),
-              ),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: setting.isEnabled
-                        ? AppTheme.primaryGold.withOpacity(0.2)
-                        : AppTheme.grey.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(12.0),
-                  ),
-                  child: Icon(
-                    setting.icon,
-                    color: setting.isEnabled ? AppTheme.primaryGold : AppTheme.grey,
-                  ),
+                margin: const EdgeInsets.only(bottom: 16.0),
+                padding: const EdgeInsets.all(16.0),
+                decoration: BoxDecoration(
+                  color: AppTheme.darkGrey.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(16.0),
+                  border: Border.all(color: AppTheme.grey.withOpacity(0.3)),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        setting.title,
-                        style: AppTheme.bodyMedium.copyWith(
-                          color: AppTheme.white,
-                          fontWeight: FontWeight.bold,
-                        ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: setting.isEnabled
+                            ? AppTheme.primaryGold.withOpacity(0.2)
+                            : AppTheme.grey.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(12.0),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        setting.description,
-                        style: AppTheme.bodySmall.copyWith(
-                          color: AppTheme.grey,
-                        ),
+                      child: Icon(
+                        setting.icon,
+                        color: setting.isEnabled
+                            ? AppTheme.primaryGold
+                            : AppTheme.grey,
                       ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            setting.title,
+                            style: AppTheme.bodyMedium.copyWith(
+                              color: AppTheme.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            setting.description,
+                            style: AppTheme.bodySmall.copyWith(
+                              color: AppTheme.grey,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Switch(
+                      value: setting.isEnabled,
+                      onChanged: (value) {
+                        setState(() {
+                          setting.isEnabled = value;
+                        });
+                      },
+                      activeColor: AppTheme.primaryGold,
+                    ),
+                  ],
                 ),
-                Switch(
-                  value: setting.isEnabled,
-                  onChanged: (value) {
-                    setState(() {
-                      setting.isEnabled = value;
-                    });
-                  },
-                  activeColor: AppTheme.primaryGold,
-                ),
-              ],
-            ),
-          )
+              )
               .animate()
               .fadeIn(
                 duration: const Duration(milliseconds: 600),
@@ -942,9 +867,9 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                 duration: const Duration(milliseconds: 600),
               );
         }).toList(),
-        
+
         const SizedBox(height: 24),
-        
+
         // Account settings
         Text(
           'Account',
@@ -963,7 +888,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
         _buildSettingItem(
           icon: Icons.account_balance_wallet,
           title: 'Stellar Wallet',
-          subtitle: stellarProvider.hasWallet 
+          subtitle: stellarProvider.hasWallet
               ? 'Manage your Stellar wallet'
               : 'Create a Stellar wallet',
           onTap: () {
@@ -971,7 +896,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => const StellarWalletScreen(),
+                  builder: (context) => const EnhancedWalletScreen(),
                 ),
               );
             } else {
@@ -982,10 +907,13 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                 builder: (context) => Dialog(
                   backgroundColor: Colors.transparent,
                   elevation: 0,
-                  insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                  insetPadding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 24,
+                  ),
                   child: SizedBox(
-                    width: MediaQuery.of(context).size.width > 600 
-                        ? 400 
+                    width: MediaQuery.of(context).size.width > 600
+                        ? 400
                         : MediaQuery.of(context).size.width * 0.85,
                     child: const StellarWalletPrompt(),
                   ),
@@ -1009,7 +937,10 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
         // Admin Dashboard button (only for admins)
         Builder(
           builder: (context) {
-            final isAdmin = Provider.of<AdminProvider>(context, listen: false).isAdmin;
+            final isAdmin = Provider.of<AdminProvider>(
+              context,
+              listen: false,
+            ).isAdmin;
             if (!isAdmin) {
               return Column(
                 children: [
@@ -1018,7 +949,10 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                     title: 'Refresh Admin Status',
                     subtitle: 'Click if you recently changed your role',
                     onTap: () async {
-                      final adminProvider = Provider.of<AdminProvider>(context, listen: false);
+                      final adminProvider = Provider.of<AdminProvider>(
+                        context,
+                        listen: false,
+                      );
                       await adminProvider.refreshAdminStatus();
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
@@ -1060,7 +994,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
           },
         ),
         const SizedBox(height: 24),
-        
+
         // Sign out button
         CustomButton(
           text: 'Sign Out',
@@ -1069,13 +1003,11 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
           },
           isOutlined: true,
           width: double.infinity,
-        )
-            .animate()
-            .fadeIn(
-              duration: const Duration(milliseconds: 800),
-              delay: const Duration(milliseconds: 700),
-            ),
-        
+        ).animate().fadeIn(
+          duration: const Duration(milliseconds: 800),
+          delay: const Duration(milliseconds: 700),
+        ),
+
         const SizedBox(height: 40),
       ],
     );
@@ -1088,59 +1020,52 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     required VoidCallback onTap,
   }) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 16.0),
-      padding: const EdgeInsets.all(16.0),
-      decoration: BoxDecoration(
-        color: AppTheme.darkGrey.withOpacity(0.3),
-        borderRadius: BorderRadius.circular(16.0),
-        border: Border.all(
-          color: AppTheme.grey.withOpacity(0.3),
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: AppTheme.primaryGold.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(12.0),
-            ),
-            child: Icon(
-              icon,
-              color: AppTheme.primaryGold,
-            ),
+          margin: const EdgeInsets.only(bottom: 16.0),
+          padding: const EdgeInsets.all(16.0),
+          decoration: BoxDecoration(
+            color: AppTheme.darkGrey.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(16.0),
+            border: Border.all(color: AppTheme.grey.withOpacity(0.3)),
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: AppTheme.bodyMedium.copyWith(
-                    color: AppTheme.white,
-                    fontWeight: FontWeight.bold,
-                  ),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryGold.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12.0),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: AppTheme.bodySmall.copyWith(
-                    color: AppTheme.grey,
-                  ),
+                child: Icon(icon, color: AppTheme.primaryGold),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              const Icon(
+                Icons.arrow_forward_ios,
+                color: AppTheme.grey,
+                size: 16,
+              ),
+            ],
           ),
-          const Icon(
-            Icons.arrow_forward_ios,
-            color: AppTheme.grey,
-            size: 16,
-          ),
-        ],
-      ),
-    )
+        )
         .animate()
         .fadeIn(
           duration: const Duration(milliseconds: 600),
@@ -1157,7 +1082,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   String _formatDate(DateTime date) {
     final now = DateTime.now();
     final difference = now.difference(date);
-    
+
     if (difference.inDays == 0) {
       if (difference.inHours == 0) {
         return '${difference.inMinutes} min ago';
@@ -1174,10 +1099,20 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
 
   String _formatFullDate(DateTime date) {
     final months = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
     ];
-    
+
     return '${months[date.month - 1]} ${date.day}, ${date.year}';
   }
 }
