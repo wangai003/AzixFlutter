@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart' hide Transaction;
 import '../models/transaction.dart' as app_transaction;
 import 'stellar_service.dart';
+import 'akofa_tag_service.dart';
 
 class BlockchainTransactionService {
   static final StellarSDK _sdk = StellarSDK.TESTNET;
@@ -12,18 +13,19 @@ class BlockchainTransactionService {
   static final FirebaseAuth _auth = FirebaseAuth.instance;
 
   // Cache for performance (in-memory)
-  static final Map<String, List<app_transaction.Transaction>> _transactionCache = {};
+  static final Map<String, List<app_transaction.Transaction>>
+  _transactionCache = {};
   static final Map<String, DateTime> _cacheTimestamps = {};
   static const Duration _cacheExpiry = Duration(minutes: 5);
 
   // Get user's transactions directly from Stellar blockchain
-  static Future<List<app_transaction.Transaction>> getUserTransactionsFromBlockchain() async {
+  static Future<List<app_transaction.Transaction>>
+  getUserTransactionsFromBlockchain() async {
     try {
       final user = _auth.currentUser;
       if (user == null) {
         return [];
       }
-
 
       // Test Stellar SDK connection first
       final connectionTest = await testStellarConnection();
@@ -34,15 +36,17 @@ class BlockchainTransactionService {
       // Get user's Stellar public key from wallets collection first
       String? stellarPublicKey;
       String? akofaTag;
-      
+
       // Try wallets collection first
-      final walletDoc = await _firestore.collection('wallets').doc(user.uid).get();
+      final walletDoc = await _firestore
+          .collection('wallets')
+          .doc(user.uid)
+          .get();
       if (walletDoc.exists) {
         final walletData = walletDoc.data()!;
         stellarPublicKey = walletData['publicKey'] as String?;
-      } else {
-      }
-      
+      } else {}
+
       // Fallback to USER collection
       if (stellarPublicKey == null || stellarPublicKey.isEmpty) {
         final userDoc = await _firestore.collection('USER').doc(user.uid).get();
@@ -50,22 +54,18 @@ class BlockchainTransactionService {
           final userData = userDoc.data()!;
           stellarPublicKey = userData['stellarPublicKey'] as String?;
           akofaTag = userData['akofaTag'] as String?;
-        } else {
-        }
+        } else {}
       }
 
       if (stellarPublicKey == null || stellarPublicKey.isEmpty) {
-
         // Debug: Check what data exists in USER collection
         final userDoc = await _firestore.collection('USER').doc(user.uid).get();
         if (userDoc.exists) {
           final userData = userDoc.data()!;
-        } else {
-        }
+        } else {}
 
         return [];
       }
-
 
       // Validate the public key format
       if (!stellarPublicKey.startsWith('G') || stellarPublicKey.length != 56) {
@@ -78,8 +78,12 @@ class BlockchainTransactionService {
       }
 
       // Fetch real transactions from Stellar blockchain
-      final transactions = await _fetchTransactionsFromBlockchain(stellarPublicKey, user.uid, akofaTag);
-      
+      final transactions = await _fetchTransactionsFromBlockchain(
+        stellarPublicKey,
+        user.uid,
+        akofaTag,
+      );
+
       // Update cache
       _updateCache(stellarPublicKey, transactions);
 
@@ -93,11 +97,14 @@ class BlockchainTransactionService {
   static bool _isCacheValid(String publicKey) {
     final timestamp = _cacheTimestamps[publicKey];
     if (timestamp == null) return false;
-    
+
     return DateTime.now().difference(timestamp) < _cacheExpiry;
   }
 
-  static void _updateCache(String publicKey, List<app_transaction.Transaction> transactions) {
+  static void _updateCache(
+    String publicKey,
+    List<app_transaction.Transaction> transactions,
+  ) {
     _transactionCache[publicKey] = transactions;
     _cacheTimestamps[publicKey] = DateTime.now();
   }
@@ -109,25 +116,27 @@ class BlockchainTransactionService {
   }
 
   // Force refresh from blockchain (bypass cache)
-  static Future<List<app_transaction.Transaction>> forceRefreshTransactions() async {
+  static Future<List<app_transaction.Transaction>>
+  forceRefreshTransactions() async {
     try {
-      
       final user = _auth.currentUser;
       if (user == null) {
         return [];
       }
 
-
       // Try wallets collection first
       String? stellarPublicKey;
       String? akofaTag;
-      
-      final walletDoc = await _firestore.collection('wallets').doc(user.uid).get();
+
+      final walletDoc = await _firestore
+          .collection('wallets')
+          .doc(user.uid)
+          .get();
       if (walletDoc.exists) {
         final walletData = walletDoc.data()!;
         stellarPublicKey = walletData['publicKey'] as String?;
       }
-      
+
       // Fallback to USER collection
       if (stellarPublicKey == null || stellarPublicKey.isEmpty) {
         final userDoc = await _firestore.collection('USER').doc(user.uid).get();
@@ -155,7 +164,9 @@ class BlockchainTransactionService {
   }
 
   // Get account balance directly from blockchain
-  static Future<Map<String, String>> getAccountBalancesFromBlockchain(String publicKey) async {
+  static Future<Map<String, String>> getAccountBalancesFromBlockchain(
+    String publicKey,
+  ) async {
     try {
       final account = await _sdk.accounts.account(publicKey);
       final balances = <String, String>{};
@@ -175,7 +186,9 @@ class BlockchainTransactionService {
   }
 
   // Verify transaction exists on blockchain
-  static Future<bool> verifyTransactionOnBlockchain(String transactionHash) async {
+  static Future<bool> verifyTransactionOnBlockchain(
+    String transactionHash,
+  ) async {
     try {
       final transaction = await _sdk.transactions.transaction(transactionHash);
       return transaction != null;
@@ -185,7 +198,9 @@ class BlockchainTransactionService {
   }
 
   // Get transaction details from blockchain
-  static Future<Map<String, dynamic>?> getTransactionDetails(String transactionHash) async {
+  static Future<Map<String, dynamic>?> getTransactionDetails(
+    String transactionHash,
+  ) async {
     try {
       final transaction = await _sdk.transactions.transaction(transactionHash);
       if (transaction != null) {
@@ -202,72 +217,77 @@ class BlockchainTransactionService {
     }
   }
 
-
-
   // Get Akofa tag for a wallet address
   static Future<String?> _getAkofaTagForWallet(String? walletAddress) async {
     if (walletAddress == null || walletAddress.isEmpty) {
       return null;
     }
-    
+
     try {
       // Step 1: Check if this is the Akofa issuing account (SYSTEM)
       if (_isAkofaIssuingAccount(walletAddress)) {
         return 'SYSTEM';
       }
-      
-      // Step 2: Look up in wallets collection by publicKey
+
+      // Step 2: Use AkofaTagService to resolve tag by address (most efficient)
+      final tagResult = await AkofaTagService.resolveTagByAddress(
+        walletAddress,
+      );
+      if (tagResult['success'] == true) {
+        return tagResult['tag'] as String?;
+      }
+
+      // Step 3: Fallback - Look up in wallets collection by publicKey
       final walletQuery = await _firestore
           .collection('wallets')
           .where('publicKey', isEqualTo: walletAddress)
           .limit(1)
           .get();
-      
+
       if (walletQuery.docs.isNotEmpty) {
         final walletData = walletQuery.docs.first.data();
         final userId = walletData['userId'] as String?;
-        
+
         if (userId != null && userId.isNotEmpty) {
-          // Step 3: Get user's Akofa tag from USER collection
+          // Step 4: Get user's Akofa tag from USER collection
           final userDoc = await _firestore.collection('USER').doc(userId).get();
           if (userDoc.exists) {
             final userData = userDoc.data()!;
             final akofaTag = userData['akofaTag'] as String?;
-            
+
             if (akofaTag != null && akofaTag.toString().isNotEmpty) {
               return akofaTag.toString();
             }
           }
         }
       }
-      
+
       return null;
-      
     } catch (e) {
       return null;
     }
   }
-  
+
   // Check if wallet is the Akofa issuing account
   static bool _isAkofaIssuingAccount(String walletAddress) {
     // The actual Akofa issuing account address
     const akofaIssuingAccounts = [
       'GDOMDAYWWHIDDETBRW4V36UBJULCCRO3H3FYZODRHUO376KS7SDHLOPU',
     ];
-    
+
     return akofaIssuingAccounts.contains(walletAddress);
   }
 
   // Test Stellar SDK connection
   static Future<bool> testStellarConnection() async {
     try {
-
       // Try to get a simple account to test connection
-      final testAccount = await _sdk.accounts.account('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF');
+      final testAccount = await _sdk.accounts.account(
+        'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      );
 
       return true;
     } catch (e) {
-
       // For 404 errors, the connection is working but the account doesn't exist
       if (e.toString().contains('404') || e.toString().contains('NOT_FOUND')) {
         return true;
@@ -287,78 +307,73 @@ class BlockchainTransactionService {
   // Debug method to inspect operation properties
   static void _debugOperationProperties(dynamic operation) {
     try {
-      
       // Try to get all possible timestamp-related properties
       final properties = [
         'ledgerCloseTime',
-        'timestamp', 
+        'timestamp',
         'createdAt',
         'created_at',
         'time',
         'date',
         'ledgerTime',
         'closeTime',
-        'close_time'
+        'close_time',
       ];
-      
+
       for (final prop in properties) {
         try {
           final value = operation.$prop;
-          if (value != null) {
-          }
+          if (value != null) {}
         } catch (e) {
           // Property doesn't exist or can't be accessed
         }
       }
-      
+
       // Also check for transaction hash
       try {
         final txHash = operation.transactionHash;
-        if (txHash != null) {
-        }
+        if (txHash != null) {}
       } catch (e) {}
-      
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   // Extract real blockchain timestamp from Stellar operation
   static Future<DateTime> _extractBlockchainTimestamp(dynamic operation) async {
     try {
-      
       // Debug: Inspect all available properties
       _debugOperationProperties(operation);
-      
+
       // Method 1: PRIMARY METHOD - Get exact timestamp from transaction hash using TransactionResponse.createdAt
       if (operation.transactionHash != null) {
         try {
           // Use the direct approach as shown in your sample code
-          final transaction = await _sdk.transactions.transaction(operation.transactionHash);
+          final transaction = await _sdk.transactions.transaction(
+            operation.transactionHash,
+          );
           if (transaction != null && transaction.createdAt != null) {
             DateTime exactTimestamp;
             if (transaction.createdAt is int) {
-              exactTimestamp = DateTime.fromMillisecondsSinceEpoch((transaction.createdAt as int) * 1000);
+              exactTimestamp = DateTime.fromMillisecondsSinceEpoch(
+                (transaction.createdAt as int) * 1000,
+              );
             } else if (transaction.createdAt is String) {
               exactTimestamp = DateTime.parse(transaction.createdAt as String);
             } else {
               throw Exception('Unexpected createdAt type');
             }
             return exactTimestamp;
-          } else {
-          }
-        } catch (e) {
-        }
+          } else {}
+        } catch (e) {}
       }
-      
+
       // Method 2: Fallback - Try to get the ledger close time from the operation
       try {
         if (operation.ledgerCloseTime != null) {
           final ledgerTime = operation.ledgerCloseTime;
           return DateTime.fromMillisecondsSinceEpoch(ledgerTime * 1000);
         }
-      } catch (e) {
-      }
-      
+      } catch (e) {}
+
       // Method 3: Fallback - Try to get from operation timestamp if available
       try {
         if (operation.timestamp != null) {
@@ -369,9 +384,8 @@ class BlockchainTransactionService {
             return DateTime.parse(opTimestamp);
           }
         }
-      } catch (e) {
-      }
-      
+      } catch (e) {}
+
       // Method 4: Fallback - Try to get from operation created_at if available
       try {
         if (operation.createdAt != null) {
@@ -382,21 +396,20 @@ class BlockchainTransactionService {
             return DateTime.parse(createdAt);
           }
         }
-      } catch (e) {
-      }
-      
+      } catch (e) {}
+
       // Method 5: Last resort - Try to get from operation ID (rough approximation)
       if (operation.id != null) {
         // Stellar operations are roughly 3-5 seconds apart
         // This is a rough approximation based on operation ID
         final now = DateTime.now();
         final operationId = operation.id as int;
-        final estimatedTime = now.subtract(Duration(seconds: (operationId % 1000) * 5));
+        final estimatedTime = now.subtract(
+          Duration(seconds: (operationId % 1000) * 5),
+        );
         return estimatedTime;
       }
-      
 
-      
       // Use a fallback that's clearly not the current time
       return DateTime.now().subtract(const Duration(hours: 1));
     } catch (e) {
@@ -405,13 +418,13 @@ class BlockchainTransactionService {
   }
 
   // Fetch real transactions from Stellar blockchain using enhanced logic from test template
-  static Future<List<app_transaction.Transaction>> _fetchTransactionsFromBlockchain(
+  static Future<List<app_transaction.Transaction>>
+  _fetchTransactionsFromBlockchain(
     String publicKey,
     String userId,
     String? akofaTag,
   ) async {
     try {
-
       // Test Stellar SDK connection first
       final connectionTest = await testStellarConnection();
       if (!connectionTest) {
@@ -424,9 +437,9 @@ class BlockchainTransactionService {
       if (!accountExists) {
         return [];
       }
-      
+
       // Use the enhanced transaction retrieval logic from test template
-      
+
       try {
         // Step 1: Retrieve recent transactions (last 10) - same as test template
         final txPage = await _sdk.transactions
@@ -439,7 +452,6 @@ class BlockchainTransactionService {
           return [];
         }
 
-
         final transactions = <app_transaction.Transaction>[];
 
         for (int i = 0; i < txPage.records.length; i++) {
@@ -447,51 +459,45 @@ class BlockchainTransactionService {
             final tx = txPage.records[i];
 
             // Step 2: Retrieve operations for this transaction - same as test template
-            final opsPage = await _sdk.operations.forTransaction(tx.hash).execute();
+            final opsPage = await _sdk.operations
+                .forTransaction(tx.hash)
+                .execute();
 
             for (final op in opsPage.records) {
-              if (op is PaymentOperationResponse) {
+              // Process ALL operation types - no filtering
+              final transaction = await _convertOperationToTransaction(
+                op,
+                userId,
+                akofaTag,
+                publicKey,
+              );
 
-                // Convert to app transaction format
-                final transaction = await _convertPaymentOperationToTransaction(
-                  op, 
-                  tx, 
-                  userId, 
-                  akofaTag, 
-                  publicKey
-                );
-                
-                if (transaction != null) {
-                  transactions.add(transaction);
-                }
+              if (transaction != null) {
+                transactions.add(transaction);
               }
-              // Handle other operation types if needed
             }
-
           } catch (e) {
             // Continue with next transaction
           }
         }
 
-        
         // Debug: Show transaction details
         for (int i = 0; i < transactions.length; i++) {
           final tx = transactions[i];
         }
-        
+
         return transactions;
-        
       } catch (sdkError) {
         return [];
       }
-      
     } catch (e) {
       return [];
     }
   }
 
-  // Convert PaymentOperationResponse to app transaction using enhanced logic
-  static Future<app_transaction.Transaction?> _convertPaymentOperationToTransaction(
+  // Convert PaymentOperationResponse to app transaction using enhanced logic (LEGACY - kept for compatibility)
+  static Future<app_transaction.Transaction?>
+  _convertPaymentOperationToTransaction(
     PaymentOperationResponse op,
     TransactionResponse tx,
     String userId,
@@ -499,20 +505,17 @@ class BlockchainTransactionService {
     String publicKey,
   ) async {
     try {
-      
       // Extract payment details
       final amount = double.tryParse(op.amount?.toString() ?? '0') ?? 0.0;
       final assetCode = op.assetCode?.toString() ?? 'XLM';
       final fromAddress = op.from ?? '';
       final toAddress = op.to ?? '';
       final memo = tx.memo?.toString();
-      
-      
+
       // Get Akofa tags for sender and recipient
       final senderAkofaTag = await _getAkofaTagForWallet(fromAddress);
       final recipientAkofaTag = await _getAkofaTagForWallet(toAddress);
-      
-      
+
       // Determine transaction type based on direction
       String type = 'payment';
       if (fromAddress == publicKey) {
@@ -520,17 +523,19 @@ class BlockchainTransactionService {
       } else if (toAddress == publicKey) {
         type = 'received';
       }
-      
+
       // Parse timestamp from transaction
       DateTime timestamp;
       if (tx.createdAt is int) {
-        timestamp = DateTime.fromMillisecondsSinceEpoch((tx.createdAt as int) * 1000);
+        timestamp = DateTime.fromMillisecondsSinceEpoch(
+          (tx.createdAt as int) * 1000,
+        );
       } else if (tx.createdAt is String) {
         timestamp = DateTime.parse(tx.createdAt as String);
       } else {
         timestamp = DateTime.now();
       }
-      
+
       // Create transaction object
       final transaction = app_transaction.Transaction(
         id: 'stellar_payment_${tx.hash}_${op.id}',
@@ -555,15 +560,14 @@ class BlockchainTransactionService {
           'operationType': 'PaymentOperationResponse',
         },
       );
-      
+
       return transaction;
-      
     } catch (e) {
       return null;
     }
   }
 
-    // Convert Stellar operation to app transaction - NO FILTERING
+  // Convert Stellar operation to app transaction - NO FILTERING
   static Future<app_transaction.Transaction?> _convertOperationToTransaction(
     dynamic operation,
     String userId,
@@ -572,10 +576,11 @@ class BlockchainTransactionService {
   ) async {
     try {
       final operationType = operation.runtimeType.toString();
-      
+
       // Generate a unique ID for the transaction
-      final transactionId = 'stellar_${operation.id ?? DateTime.now().millisecondsSinceEpoch}';
-      
+      final transactionId =
+          'stellar_${operation.id ?? DateTime.now().millisecondsSinceEpoch}';
+
       // Extract basic transaction info - NO TYPE FILTERING
       String type = 'blockchain_operation';
       double amount = 0.0;
@@ -584,54 +589,134 @@ class BlockchainTransactionService {
       String? transactionHash;
       String? sourceAccount;
       String? destinationAccount;
-      
+
       try {
         // Get common properties - use the correct Stellar SDK properties
         sourceAccount = operation.sourceAccount ?? operation.accountId;
         transactionHash = operation.transactionHash;
-        
-        
+
         // For ALL operation types, just extract what we can
         if (operationType.contains('PaymentOperationResponse')) {
           amount = double.tryParse(operation.amount?.toString() ?? '0') ?? 0.0;
-          
+
           // Determine asset code
           if (operation.assetType == 'native') {
             assetCode = 'XLM';
           } else {
             assetCode = operation.assetCode?.toString() ?? 'UNKNOWN';
           }
-          
+
           // Use the correct property for destination account
           destinationAccount = operation.to ?? operation.destinationAccount;
-          
+
           // Try to get memo safely
           try {
             memo = operation.memo?.toString();
           } catch (memoError) {
             memo = null;
           }
-          
         } else if (operationType.contains('ChangeTrustOperationResponse')) {
           assetCode = operation.assetCode?.toString() ?? 'UNKNOWN';
-          
+          type = 'trustline_change';
         } else if (operationType.contains('CreateAccountOperationResponse')) {
-          amount = double.tryParse(operation.startingBalance?.toString() ?? '0') ?? 0.0;
+          amount =
+              double.tryParse(operation.startingBalance?.toString() ?? '0') ??
+              0.0;
           assetCode = 'XLM';
+          type = 'account_creation';
+          destinationAccount =
+              operation.account; // The new account being created
+        } else if (operationType.contains('ManageBuyOfferOperationResponse') ||
+            operationType.contains('ManageSellOfferOperationResponse')) {
+          // DEX operations
+          type = 'dex_operation';
+          assetCode = operation.selling?.assetCode?.toString() ?? 'UNKNOWN';
+          amount = double.tryParse(operation.amount?.toString() ?? '0') ?? 0.0;
+        } else if (operationType.contains(
+              'PathPaymentStrictSendOperationResponse',
+            ) ||
+            operationType.contains(
+              'PathPaymentStrictReceiveOperationResponse',
+            )) {
+          // Path payment operations
+          type = 'path_payment';
+          assetCode = operation.sendAsset?.assetCode?.toString() ?? 'UNKNOWN';
+          amount =
+              double.tryParse(operation.sendAmount?.toString() ?? '0') ?? 0.0;
+          destinationAccount = operation.to ?? operation.destination;
+        } else if (operationType.contains('AllowTrustOperationResponse')) {
+          type = 'trustline_authorization';
+          assetCode = operation.assetCode?.toString() ?? 'UNKNOWN';
+        } else if (operationType.contains('SetOptionsOperationResponse')) {
+          type = 'account_options';
+        } else if (operationType.contains('AccountMergeOperationResponse')) {
+          type = 'account_merge';
+          destinationAccount = operation.into ?? operation.destination;
+        } else if (operationType.contains('InflationOperationResponse')) {
+          type = 'inflation';
+        } else if (operationType.contains('ManageDataOperationResponse')) {
+          type = 'data_management';
+        } else if (operationType.contains('BumpSequenceOperationResponse')) {
+          type = 'sequence_bump';
+        } else if (operationType.contains(
+          'CreateClaimableBalanceOperationResponse',
+        )) {
+          type = 'claimable_balance_creation';
+          assetCode = operation.asset?.assetCode?.toString() ?? 'UNKNOWN';
+          amount = double.tryParse(operation.amount?.toString() ?? '0') ?? 0.0;
+        } else if (operationType.contains(
+          'ClaimClaimableBalanceOperationResponse',
+        )) {
+          type = 'claimable_balance_claim';
+        } else if (operationType.contains(
+          'BeginSponsoringFutureReservesOperationResponse',
+        )) {
+          type = 'sponsorship_begin';
+          destinationAccount = operation.sponsoredId;
+        } else if (operationType.contains(
+          'EndSponsoringFutureReservesOperationResponse',
+        )) {
+          type = 'sponsorship_end';
+        } else if (operationType.contains(
+          'RevokeSponsorshipOperationResponse',
+        )) {
+          type = 'sponsorship_revoke';
+        } else if (operationType.contains('ClawbackOperationResponse')) {
+          type = 'clawback';
+          assetCode = operation.asset?.assetCode?.toString() ?? 'UNKNOWN';
+          amount = double.tryParse(operation.amount?.toString() ?? '0') ?? 0.0;
+        } else if (operationType.contains(
+          'ClawbackClaimableBalanceOperationResponse',
+        )) {
+          type = 'clawback_claimable_balance';
+        } else if (operationType.contains(
+          'SetTrustLineFlagsOperationResponse',
+        )) {
+          type = 'trustline_flags';
+          assetCode = operation.asset?.assetCode?.toString() ?? 'UNKNOWN';
+        } else if (operationType.contains(
+          'LiquidityPoolDepositOperationResponse',
+        )) {
+          type = 'liquidity_pool_deposit';
+          amount =
+              double.tryParse(operation.maxAmountA?.toString() ?? '0') ?? 0.0;
+        } else if (operationType.contains(
+          'LiquidityPoolWithdrawOperationResponse',
+        )) {
+          type = 'liquidity_pool_withdraw';
+          amount = double.tryParse(operation.amount?.toString() ?? '0') ?? 0.0;
         }
-        
-        
       } catch (extractError) {
         // Use fallback values
         amount = 0.0;
         assetCode = 'XLM';
       }
-      
+
       // Now trace sender and recipient Akofa tags
-      
+
       // Get sender Akofa tag
       String? senderAkofaTag = await _getAkofaTagForWallet(sourceAccount);
-      
+
       // Get recipient Akofa tag (if different from sender)
       String? recipientAkofaTag;
       if (destinationAccount != null && destinationAccount != sourceAccount) {
@@ -639,7 +724,7 @@ class BlockchainTransactionService {
       } else {
         recipientAkofaTag = senderAkofaTag; // Same account
       }
-      
+
       // Create transaction object - NO TYPE FILTERING
       final timestamp = await _extractBlockchainTimestamp(operation);
       final transaction = app_transaction.Transaction(
@@ -664,12 +749,10 @@ class BlockchainTransactionService {
           'pagingToken': operation.pagingToken?.toString(),
         },
       );
-      
+
       return transaction;
-      
     } catch (e) {
       return null;
     }
   }
 }
-

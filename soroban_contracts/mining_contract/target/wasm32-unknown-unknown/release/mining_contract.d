@@ -1,0 +1,1 @@
+/Users/apple/projects/AzixFlutter/soroban_contracts/mining_contract/target/wasm32-unknown-unknown/release/mining_contract.wasm: /Users/apple/projects/AzixFlutter/soroban_contracts/mining_contract/src/lib.rs

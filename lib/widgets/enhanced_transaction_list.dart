@@ -177,12 +177,14 @@ class EnhancedTransactionList extends StatelessWidget {
         return Icons.arrow_upward;
       case 'receive':
         return Icons.arrow_downward;
-      case 'mining':
-        return Icons.work;
       case 'buyAkofa':
         return Icons.shopping_cart;
       case 'swap':
         return Icons.swap_horiz;
+      case 'funding':
+        return Icons.account_balance_wallet;
+      case 'withdrawal':
+        return Icons.call_made;
       default:
         return Icons.swap_horiz;
     }
@@ -194,12 +196,14 @@ class EnhancedTransactionList extends StatelessWidget {
         return Colors.red.withOpacity(0.2);
       case 'receive':
         return Colors.green.withOpacity(0.2);
-      case 'mining':
-        return AppTheme.primaryGold.withOpacity(0.2);
       case 'buyAkofa':
         return Colors.blue.withOpacity(0.2);
       case 'swap':
         return Colors.purple.withOpacity(0.2);
+      case 'funding':
+        return Colors.teal.withOpacity(0.2);
+      case 'withdrawal':
+        return Colors.orange.withOpacity(0.2);
       default:
         return AppTheme.darkGrey.withOpacity(0.3);
     }
@@ -228,12 +232,14 @@ class EnhancedTransactionList extends StatelessWidget {
         return 'Sent ${transaction.assetCode}';
       case 'receive':
         return 'Received ${transaction.assetCode}';
-      case 'mining':
-        return 'Mining Reward';
       case 'buyAkofa':
         return 'Bought AKOFA';
       case 'swap':
         return 'Asset Swap';
+      case 'funding':
+        return 'Wallet Funded';
+      case 'withdrawal':
+        return 'Withdrawal';
       default:
         return transaction.typeLabel;
     }
@@ -267,6 +273,7 @@ class EnhancedTransactionList extends StatelessWidget {
       final senderTag = transaction.senderAkofaTag;
       final senderAddress = transaction.senderAddress;
 
+      // Always try to show tag first, fall back to address only if no tag
       if (senderTag != null && senderTag.isNotEmpty) {
         return Row(
           children: [
@@ -287,20 +294,10 @@ class EnhancedTransactionList extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            if (senderAddress != null && senderAddress.isNotEmpty) ...[
-              const SizedBox(width: 4),
-              Text(
-                '(${_formatAddress(senderAddress)})',
-                style: AppTheme.bodyTiny.copyWith(
-                  color: AppTheme.grey.withOpacity(0.6),
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
           ],
         );
       } else if (senderAddress != null && senderAddress.isNotEmpty) {
+        // Only show address if no tag is available
         return Text(
           'From: ${_formatAddress(senderAddress)}',
           style: AppTheme.bodySmall.copyWith(
@@ -315,6 +312,7 @@ class EnhancedTransactionList extends StatelessWidget {
       final recipientTag = transaction.recipientAkofaTag;
       final recipientAddress = transaction.recipientAddress;
 
+      // Always try to show tag first, fall back to address only if no tag
       if (recipientTag != null && recipientTag.isNotEmpty) {
         return Row(
           children: [
@@ -335,20 +333,10 @@ class EnhancedTransactionList extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            if (recipientAddress != null && recipientAddress.isNotEmpty) ...[
-              const SizedBox(width: 4),
-              Text(
-                '(${_formatAddress(recipientAddress)})',
-                style: AppTheme.bodyTiny.copyWith(
-                  color: AppTheme.grey.withOpacity(0.6),
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
           ],
         );
       } else if (recipientAddress != null && recipientAddress.isNotEmpty) {
+        // Only show address if no tag is available
         return Text(
           'To: ${_formatAddress(recipientAddress)}',
           style: AppTheme.bodySmall.copyWith(
@@ -568,23 +556,25 @@ class EnhancedTransactionList extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Always show tag first if available
                 if (tag != null && tag.isNotEmpty) ...[
                   Row(
                     children: [
                       Icon(Icons.tag, size: 14, color: AppTheme.primaryGold),
                       const SizedBox(width: 4),
-                      Text(
-                        'Tag: $tag',
-                        style: AppTheme.bodySmall.copyWith(
-                          color: AppTheme.primaryGold,
-                          fontWeight: FontWeight.w600,
+                      Expanded(
+                        child: Text(
+                          tag,
+                          style: AppTheme.bodyMedium.copyWith(
+                            color: AppTheme.primaryGold,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 4),
-                ],
-                if (address != null && address.isNotEmpty) ...[
+                ] else if (address != null && address.isNotEmpty) ...[
+                  // Only show address if no tag is available
                   Row(
                     children: [
                       Icon(
@@ -595,9 +585,35 @@ class EnhancedTransactionList extends StatelessWidget {
                       const SizedBox(width: 4),
                       Expanded(
                         child: Text(
-                          'Address: $address',
-                          style: AppTheme.bodyTiny.copyWith(
+                          address,
+                          style: AppTheme.bodySmall.copyWith(
                             color: AppTheme.white,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                // Show address as secondary info if both tag and address exist
+                if (tag != null &&
+                    tag.isNotEmpty &&
+                    address != null &&
+                    address.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.account_balance_wallet,
+                        size: 12,
+                        color: AppTheme.grey.withOpacity(0.6),
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          address,
+                          style: AppTheme.bodyTiny.copyWith(
+                            color: AppTheme.grey.withOpacity(0.8),
                             fontFamily: 'monospace',
                           ),
                         ),

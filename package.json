@@ -1,0 +1,19 @@
+{
+  "name": "azix-flutter-soroban-deployment",
+  "version": "1.0.0",
+  "description": "Deployment scripts for Azix Flutter Soroban contracts",
+  "main": "deploy_contract.js",
+  "scripts": {
+    "deploy": "node deploy_contract.js",
+    "build-contract": "cd soroban_contracts/mining_contract && cargo build --target wasm32-unknown-unknown --release",
+    "test-contract": "cd soroban_contracts/mining_contract && cargo test"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "author": "Azix Team",
+  "license": "MIT",
+  "dependencies": {
+    "@stellar/stellar-sdk": "^14.3.0"
+  }
+}

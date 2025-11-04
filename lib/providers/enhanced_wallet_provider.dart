@@ -1,14 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/enhanced_stellar_service.dart';
 import '../services/enhanced_mpesa_service.dart';
 import '../services/secure_wallet_service.dart';
+import '../services/payment_webhook_service.dart';
+import '../services/payment_security_service.dart';
+import '../services/moonpay_service.dart';
+import '../services/moonpay_callback_service.dart';
 import '../models/transaction.dart' as app_transaction;
 import '../models/asset_config.dart';
 
 class EnhancedWalletProvider extends ChangeNotifier {
   final EnhancedStellarService _stellarService = EnhancedStellarService();
   final EnhancedMpesaService _mpesaService = EnhancedMpesaService();
+  final PaymentWebhookService _webhookService = PaymentWebhookService();
+  final PaymentSecurityService _securityService = PaymentSecurityService();
+  final MoonPayService _moonPayService = MoonPayService();
+  final MoonPayCallbackService _moonPayCallbackService =
+      MoonPayCallbackService();
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   // State variables
@@ -25,6 +35,12 @@ class EnhancedWalletProvider extends ChangeNotifier {
   bool _isProcessingPayment = false;
   Map<String, dynamic>? _currentPaymentStatus;
 
+  // MoonPay related state
+  bool _isProcessingMoonPayPurchase = false;
+  Map<String, dynamic>? _currentMoonPayTransaction;
+  List<Map<String, dynamic>> _moonPayTransactionHistory = [];
+  bool _isMonitoringMoonPayTransactions = false;
+
   // Secure wallet state
   bool _hasSecureWallet = false;
   bool _isBiometricAuthenticating = false;
@@ -40,6 +56,14 @@ class EnhancedWalletProvider extends ChangeNotifier {
   bool get isMonitoringActive => _isMonitoringActive;
   bool get isProcessingPayment => _isProcessingPayment;
   Map<String, dynamic>? get currentPaymentStatus => _currentPaymentStatus;
+
+  // MoonPay getters
+  bool get isProcessingMoonPayPurchase => _isProcessingMoonPayPurchase;
+  Map<String, dynamic>? get currentMoonPayTransaction =>
+      _currentMoonPayTransaction;
+  List<Map<String, dynamic>> get moonPayTransactionHistory =>
+      _moonPayTransactionHistory;
+  bool get isMonitoringMoonPayTransactions => _isMonitoringMoonPayTransactions;
 
   // Secure wallet getters
   bool get hasSecureWallet => _hasSecureWallet;
@@ -121,6 +145,11 @@ class EnhancedWalletProvider extends ChangeNotifier {
           _stellarService.startRealTimeMonitoring();
           _isMonitoringActive = true;
         }
+
+        // Start MoonPay transaction monitoring
+        if (!_isMonitoringMoonPayTransactions) {
+          await startMoonPayTransactionMonitoring();
+        }
       }
     } catch (e) {
       _setError('Failed to check wallet status: $e');
@@ -189,6 +218,14 @@ class EnhancedWalletProvider extends ChangeNotifier {
           _stellarService.startRealTimeMonitoring();
           _isMonitoringActive = true;
         }
+
+        // Start MoonPay transaction monitoring
+        if (!_isMonitoringMoonPayTransactions) {
+          await startMoonPayTransactionMonitoring();
+        }
+
+        // Integrate MoonPay transactions with existing monitoring
+        await _syncMoonPayTransactionsWithStellar();
       }
 
       _setLoading(false);
@@ -382,11 +419,12 @@ class EnhancedWalletProvider extends ChangeNotifier {
     }
   }
 
-  /// Send AKOFA tokens with biometric authentication (secure wallet)
-  Future<Map<String, dynamic>> sendAkofaWithBiometrics({
+  /// Send AKOFA tokens with authentication (secure wallet)
+  Future<Map<String, dynamic>> sendAkofaWithAuthentication({
     required String recipientAddress,
     required double amount,
-    String? memo,
+    required String memo,
+    required String password,
   }) async {
     if (!_hasSecureWallet) {
       return await sendAkofaTokens(
@@ -407,13 +445,13 @@ class EnhancedWalletProvider extends ChangeNotifier {
         throw Exception('User not authenticated');
       }
 
-      final result = await SecureWalletService.signTransactionWithBiometrics(
+      final result = await SecureWalletService.signTransactionWithPassword(
         userId: user.uid,
+        password: password,
         recipientAddress: recipientAddress,
         amount: amount,
         assetCode: 'AKOFA',
         memo: memo,
-        password: '', // This will be handled by the UI to prompt for password
       );
 
       if (result['success'] == true) {
@@ -430,7 +468,7 @@ class EnhancedWalletProvider extends ChangeNotifier {
       return result;
     } catch (e) {
       _isBiometricAuthenticating = false;
-      _setError('Biometric transaction failed: $e');
+      _setError('Authentication failed: $e');
       _setLoading(false);
       notifyListeners();
       return {'success': false, 'error': e.toString()};
@@ -441,7 +479,7 @@ class EnhancedWalletProvider extends ChangeNotifier {
   Future<Map<String, dynamic>> sendXLMWithBiometrics({
     required String recipientAddress,
     required double amount,
-    String? memo,
+    required String memo,
   }) async {
     if (!_hasSecureWallet) {
       return await sendXLM(
@@ -571,7 +609,7 @@ class EnhancedWalletProvider extends ChangeNotifier {
     required String recipientAddress,
     required AssetConfig stablecoin,
     required double amount,
-    String? memo,
+    required String memo,
   }) async {
     if (!stablecoin.isStablecoin) {
       return {'success': false, 'error': 'Asset is not a stablecoin'};
@@ -715,6 +753,49 @@ class EnhancedWalletProvider extends ChangeNotifier {
     }
   }
 
+  /// Sell AKOFA tokens for M-Pesa
+  Future<Map<String, dynamic>> sellAkofaWithMpesa({
+    required String phoneNumber,
+    required double akofaAmount,
+    String? accountReference,
+  }) async {
+    _isProcessingPayment = true;
+    _setError(null);
+    notifyListeners();
+
+    try {
+      final result = await _mpesaService.sellAkofaTokens(
+        phoneNumber: phoneNumber,
+        akofaAmount: akofaAmount,
+        accountReference: accountReference,
+      );
+
+      if (result['success'] == true) {
+        _currentPaymentStatus = {
+          'status': 'pending',
+          'checkoutRequestId': result['checkoutRequestId'],
+          'akofaAmount': akofaAmount,
+          'amountKES': result['amountKES'],
+        };
+
+        // Refresh balances after successful sell initiation
+        await Future.wait([
+          loadBalances(),
+          loadTransactions(forceRefresh: true),
+        ]);
+      }
+
+      _isProcessingPayment = false;
+      notifyListeners();
+      return result;
+    } catch (e) {
+      _setError('Failed to initiate AKOFA sell: $e');
+      _isProcessingPayment = false;
+      notifyListeners();
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
   /// Check M-Pesa payment status
   Future<Map<String, dynamic>> checkPaymentStatus(
     String checkoutRequestId,
@@ -759,10 +840,126 @@ class EnhancedWalletProvider extends ChangeNotifier {
     }
   }
 
-  /// Get purchase statistics
+  /// Purchase AKOFA tokens using Flutterwave MTN (multi-country) - REMOVED
+  Future<Map<String, dynamic>> purchaseAkofaWithFlutterwaveMtn({
+    required String phoneNumber,
+    required double amount,
+    required String countryCode,
+    required String provider,
+  }) async {
+    return {
+      'success': false,
+      'error': 'Flutterwave MTN payment processing is no longer available',
+    };
+  }
+
+  /// Start polling for payment status updates
+  void _startPaymentStatusPolling(String txRef) {
+    // Poll for status updates (this would be implemented with a timer or stream)
+    // For now, we'll just mark it as a background task
+    Future.delayed(const Duration(seconds: 30), () async {
+      try {
+        final statusResult = await _webhookService.pollPaymentStatus(txRef);
+        if (statusResult['success'] == true &&
+            statusResult['status'] == 'completed') {
+          // Payment completed, refresh wallet data
+          await Future.wait([
+            loadBalances(),
+            loadTransactions(forceRefresh: true),
+          ]);
+
+          _currentPaymentStatus = {
+            'status': 'completed',
+            'akofaAmount': _currentPaymentStatus?['akofaAmount'],
+            'localAmount': _currentPaymentStatus?['localAmount'],
+            'currency': _currentPaymentStatus?['currency'],
+          };
+
+          notifyListeners();
+        }
+      } catch (e) {
+        // Polling failed, user can manually check status
+        print('Payment status polling failed: $e');
+      }
+    });
+  }
+
+  /// Check Flutterwave MTN payment status - REMOVED
+  Future<Map<String, dynamic>> checkFlutterwavePaymentStatus(
+    String txRef,
+  ) async {
+    return {
+      'success': false,
+      'error': 'Flutterwave payment status checking is no longer available',
+    };
+  }
+
+  /// Get Flutterwave MTN transaction history - REMOVED
+  Future<List<Map<String, dynamic>>> getFlutterwaveMtnHistory() async {
+    return [];
+  }
+
+  /// Get combined transaction history (M-Pesa + MTN + Sell)
+  Future<List<Map<String, dynamic>>> getCombinedTransactionHistory() async {
+    try {
+      final mpesaHistory = await getMpesaHistory();
+      final mtnHistory =
+          await getFlutterwaveMtnHistory(); // Will return empty list
+      final sellHistory = await getMpesaSellHistory();
+
+      // Combine and sort by timestamp
+      final combined = [...mpesaHistory, ...mtnHistory, ...sellHistory];
+      combined.sort((a, b) {
+        final aTime = a['createdAt'] ?? a['timestamp'];
+        final bTime = b['createdAt'] ?? b['timestamp'];
+
+        if (aTime is Timestamp && bTime is Timestamp) {
+          return bTime.compareTo(aTime);
+        }
+        return 0;
+      });
+
+      return combined;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// Get M-Pesa sell transaction history
+  Future<List<Map<String, dynamic>>> getMpesaSellHistory() async {
+    try {
+      return await _mpesaService.getMpesaSellTransactionHistory();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// Get purchase statistics (combined)
   Future<Map<String, dynamic>> getPurchaseStats() async {
     try {
-      return await _mpesaService.getPurchaseStats();
+      final mpesaStats = await _mpesaService.getPurchaseStats();
+      final sellStats = await _mpesaService.getSellStats();
+      // Flutterwave stats removed - integration no longer available
+
+      // Return combined statistics
+      return {
+        'mpesa': mpesaStats,
+        'sell': sellStats,
+        'flutterwaveMtn': {
+          'totalTransactions': 0,
+          'totalAmount': 0.0,
+          'totalAkofa': 0.0,
+        },
+        'totalTransactions':
+            (mpesaStats['totalTransactions'] ?? 0) +
+            (sellStats['totalSells'] ?? 0),
+        'totalAmount':
+            (mpesaStats['totalAmount'] ?? 0.0) +
+            (sellStats['totalKESReceived'] ?? 0.0),
+        'totalAkofa':
+            (mpesaStats['totalAkofa'] ?? 0.0) +
+            (sellStats['totalAkofaSold'] ?? 0.0),
+      };
     } catch (e) {
       return {};
     }
@@ -855,6 +1052,498 @@ class EnhancedWalletProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ==================== MOONPAY INTEGRATION ====================
+
+  /// Purchase XLM using MoonPay
+  Future<Map<String, dynamic>> purchaseXLMWithMoonPay({
+    required double amountUSD,
+    String? email,
+    String? externalCustomerId,
+  }) async {
+    if (_publicKey == null) {
+      return {'success': false, 'error': 'No wallet found'};
+    }
+
+    _isProcessingMoonPayPurchase = true;
+    _setError(null);
+    notifyListeners();
+
+    try {
+      // Validate wallet address
+      if (!MoonPayService.isValidStellarAddress(_publicKey!)) {
+        throw Exception('Invalid Stellar wallet address');
+      }
+
+      // Generate MoonPay widget URL
+      final widgetUrl = MoonPayService.generateEnhancedWidgetUrl(
+        walletAddress: _publicKey!,
+        currencyCode: 'xlm',
+        baseCurrencyAmount: amountUSD,
+        baseCurrencyCode: 'USD',
+        email: email,
+        externalCustomerId: externalCustomerId,
+        theme: 'dark',
+        language: 'en',
+      );
+
+      // Store transaction details for monitoring
+      _currentMoonPayTransaction = {
+        'widgetUrl': widgetUrl,
+        'amountUSD': amountUSD,
+        'walletAddress': _publicKey,
+        'currencyCode': 'xlm',
+        'status': 'initiated',
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+
+      _isProcessingMoonPayPurchase = false;
+      notifyListeners();
+
+      return {
+        'success': true,
+        'widgetUrl': widgetUrl,
+        'transaction': _currentMoonPayTransaction,
+      };
+    } catch (e) {
+      _setError('Failed to initiate MoonPay purchase: $e');
+      _isProcessingMoonPayPurchase = false;
+      notifyListeners();
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// Check MoonPay transaction status
+  Future<Map<String, dynamic>> checkMoonPayTransactionStatus(
+    String transactionId,
+  ) async {
+    _setLoading(true);
+    _setError(null);
+
+    try {
+      final result = await MoonPayService.getTransactionStatusWithRetry(
+        transactionId,
+      );
+
+      if (result != null) {
+        final status = result['status'];
+
+        if (status == 'completed') {
+          // Transaction completed, refresh wallet data
+          await Future.wait([
+            loadBalances(),
+            loadTransactions(forceRefresh: true),
+          ]);
+
+          _currentMoonPayTransaction = {
+            ...?_currentMoonPayTransaction,
+            'status': 'completed',
+            'completedAt': DateTime.now().toIso8601String(),
+          };
+
+          // Record transaction in history
+          await _recordMoonPayTransactionCompletion(result);
+        } else if (MoonPayService.isTransactionFinal(status)) {
+          // Transaction is in final state, update local state
+          _currentMoonPayTransaction = {
+            ...?_currentMoonPayTransaction,
+            'status': status,
+            'finalizedAt': DateTime.now().toIso8601String(),
+          };
+        }
+      }
+
+      _setLoading(false);
+      return result ?? {'success': false, 'error': 'Transaction not found'};
+    } catch (e) {
+      _setError('Failed to check MoonPay transaction status: $e');
+      _setLoading(false);
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// Start monitoring MoonPay transactions
+  Future<void> startMoonPayTransactionMonitoring() async {
+    if (_isMonitoringMoonPayTransactions || _auth.currentUser == null) return;
+
+    _isMonitoringMoonPayTransactions = true;
+
+    try {
+      // Load existing MoonPay transactions
+      await loadMoonPayTransactionHistory();
+
+      // Start polling for pending transactions
+      _startMoonPayPolling();
+    } catch (e) {
+      debugPrint('Error starting MoonPay monitoring: $e');
+      _isMonitoringMoonPayTransactions = false;
+    }
+
+    notifyListeners();
+  }
+
+  /// Stop monitoring MoonPay transactions
+  void stopMoonPayTransactionMonitoring() {
+    _isMonitoringMoonPayTransactions = false;
+    notifyListeners();
+  }
+
+  /// Load MoonPay transaction history
+  Future<void> loadMoonPayTransactionHistory() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return;
+
+      _moonPayTransactionHistory = await _moonPayCallbackService
+          .getUserMoonPayTransactions(user.uid);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error loading MoonPay transaction history: $e');
+    }
+  }
+
+  /// Get pending MoonPay transactions
+  Future<List<Map<String, dynamic>>> getPendingMoonPayTransactions() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return [];
+
+      return await _moonPayCallbackService.getPendingMoonPayTransactions(
+        user.uid,
+      );
+    } catch (e) {
+      debugPrint('Error getting pending MoonPay transactions: $e');
+      return [];
+    }
+  }
+
+  /// Process MoonPay webhook (called from external webhook endpoint)
+  Future<Map<String, dynamic>> processMoonPayWebhook(
+    Map<String, dynamic> payload,
+    String signature,
+  ) async {
+    try {
+      final result = await _moonPayCallbackService.processWebhookPayload(
+        payload,
+        signature,
+      );
+
+      if (result['success'] == true) {
+        // Refresh wallet data if transaction was completed
+        final data = payload['data'];
+        if (data != null && data['status'] == 'completed') {
+          await Future.wait([
+            loadBalances(),
+            loadTransactions(forceRefresh: true),
+            loadMoonPayTransactionHistory(),
+          ]);
+        }
+      }
+
+      return result;
+    } catch (e) {
+      debugPrint('Error processing MoonPay webhook: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// Record MoonPay transaction completion
+  Future<void> _recordMoonPayTransactionCompletion(
+    Map<String, dynamic> transactionData,
+  ) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return;
+
+      // The transaction recording is handled by the webhook service
+      // Just refresh the transaction history
+      await loadMoonPayTransactionHistory();
+    } catch (e) {
+      debugPrint('Error recording MoonPay transaction completion: $e');
+    }
+  }
+
+  /// Start polling for MoonPay transaction updates
+  void _startMoonPayPolling() {
+    if (!_isMonitoringMoonPayTransactions) return;
+
+    Future.delayed(const Duration(seconds: 30), () async {
+      if (!_isMonitoringMoonPayTransactions) return;
+
+      try {
+        final pendingTransactions = await getPendingMoonPayTransactions();
+
+        for (final transaction in pendingTransactions) {
+          final transactionId = transaction['id'];
+          if (transactionId != null) {
+            await checkMoonPayTransactionStatus(transactionId);
+          }
+        }
+
+        // Check for stuck transactions and retry
+        await _moonPayCallbackService.checkAndRetryStuckTransactions();
+
+        // Clean up old transactions
+        await _moonPayCallbackService.cleanupOldTransactions();
+      } catch (e) {
+        debugPrint('Error in MoonPay polling: $e');
+      }
+
+      // Continue polling if still monitoring
+      if (_isMonitoringMoonPayTransactions) {
+        _startMoonPayPolling();
+      }
+    });
+  }
+
+  /// Handle timeout for stuck MoonPay transactions
+  Future<void> handleMoonPayTransactionTimeout(String transactionId) async {
+    try {
+      // Mark transaction as potentially stuck
+      _setError(
+        'Transaction $transactionId may be stuck. Please check status manually.',
+      );
+
+      // Attempt to poll the transaction status one more time
+      final status = await MoonPayService.pollTransactionStatus(
+        transactionId,
+        timeout: const Duration(minutes: 5),
+        pollInterval: const Duration(seconds: 5),
+      );
+
+      if (status != null) {
+        // Process the final status
+        await _handleMoonPayTransactionStatusUpdate(transactionId, status);
+      } else {
+        // Transaction is truly stuck
+        _setError(
+          'Transaction $transactionId is stuck. Please contact support.',
+        );
+      }
+    } catch (e) {
+      debugPrint('Error handling MoonPay transaction timeout: $e');
+      _setError('Failed to handle transaction timeout: $e');
+    }
+  }
+
+  /// Handle MoonPay transaction status update
+  Future<void> _handleMoonPayTransactionStatusUpdate(
+    String transactionId,
+    Map<String, dynamic> statusData,
+  ) async {
+    try {
+      final status = statusData['status'];
+
+      if (status == 'completed') {
+        // Transaction completed successfully
+        await Future.wait([
+          loadBalances(),
+          loadTransactions(forceRefresh: true),
+          loadMoonPayTransactionHistory(),
+        ]);
+
+        _currentMoonPayTransaction = {
+          ...?_currentMoonPayTransaction,
+          'status': 'completed',
+          'completedAt': DateTime.now().toIso8601String(),
+        };
+
+        // Clear any error messages
+        _setError(null);
+      } else if (status == 'failed' || status == 'cancelled') {
+        // Transaction failed or cancelled
+        _currentMoonPayTransaction = {
+          ...?_currentMoonPayTransaction,
+          'status': status,
+          'failedAt': DateTime.now().toIso8601String(),
+        };
+
+        _setError(
+          'MoonPay transaction $status. Please try again or contact support.',
+        );
+      }
+
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error handling MoonPay status update: $e');
+    }
+  }
+
+  /// Manually check and recover from MoonPay transaction failures
+  Future<void> recoverMoonPayTransaction(String transactionId) async {
+    _setLoading(true);
+    _setError(null);
+
+    try {
+      // First try to get the latest status
+      final status = await MoonPayService.getTransactionStatusWithRetry(
+        transactionId,
+      );
+
+      if (status != null) {
+        await _handleMoonPayTransactionStatusUpdate(transactionId, status);
+      } else {
+        // If we can't get status, try webhook polling as fallback
+        final polledStatus = await _moonPayCallbackService
+            .pollTransactionStatus(transactionId);
+        if (polledStatus != null) {
+          await _handleMoonPayTransactionStatusUpdate(
+            transactionId,
+            polledStatus,
+          );
+        } else {
+          throw Exception('Unable to recover transaction status');
+        }
+      }
+    } catch (e) {
+      _setError('Failed to recover transaction: $e');
+    }
+
+    _setLoading(false);
+  }
+
+  /// Sync MoonPay transactions with Stellar transaction monitoring
+  Future<void> _syncMoonPayTransactionsWithStellar() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return;
+
+      // Get recent MoonPay transactions
+      final moonPayTransactions = await _moonPayCallbackService
+          .getUserMoonPayTransactions(user.uid);
+
+      // Filter completed transactions that might not be in Stellar yet
+      final completedMoonPayTxs = moonPayTransactions
+          .where((tx) => tx['status'] == 'completed' && tx['processed'] != true)
+          .toList();
+
+      for (final moonPayTx in completedMoonPayTxs) {
+        final transactionId = moonPayTx['id'];
+        final walletAddress = moonPayTx['walletAddress'];
+
+        // Check if this transaction is already recorded in Stellar transactions
+        final stellarTxs = _transactions
+            .where(
+              (tx) =>
+                  tx.transactionHash == transactionId ||
+                  tx.metadata['externalTransactionId'] == transactionId,
+            )
+            .toList();
+
+        if (stellarTxs.isEmpty && walletAddress == _publicKey) {
+          // Transaction not found in Stellar, but MoonPay shows completed
+          // This might indicate the transaction is still being processed on Stellar
+          // We'll let the regular monitoring handle it, but log for awareness
+          debugPrint(
+            'MoonPay transaction $transactionId completed but not yet in Stellar transactions',
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Error syncing MoonPay transactions with Stellar: $e');
+    }
+  }
+
+  /// Get combined transaction history (Stellar + MoonPay)
+  Future<List<app_transaction.Transaction>>
+  getCombinedTransactionHistory() async {
+    try {
+      // Get Stellar transactions
+      final stellarTxs = await loadTransactions();
+
+      // Get MoonPay transactions and convert to Transaction objects
+      final user = _auth.currentUser;
+      if (user != null) {
+        final moonPayTxs = await _moonPayCallbackService
+            .getUserMoonPayTransactions(user.uid);
+
+        // Convert MoonPay transactions to Transaction format
+        final moonPayTransactions = moonPayTxs.map((mpTx) {
+          final currencyCode = mpTx['currency']?['code'] ?? 'XLM';
+          final amount = mpTx['quoteCurrencyAmount']?.toDouble() ?? 0.0;
+
+          return app_transaction.Transaction(
+            id: 'moonpay_${mpTx['id']}',
+            userId: user.uid,
+            type: 'receive',
+            status: mpTx['status'] == 'completed' ? 'completed' : 'pending',
+            amount: amount,
+            assetCode: currencyCode,
+            timestamp: mpTx['createdAt'] is DateTime
+                ? mpTx['createdAt']
+                : DateTime.tryParse(mpTx['createdAt']?.toString() ?? '') ??
+                      DateTime.now(),
+            description: 'MoonPay Purchase',
+            memo: 'MoonPay transaction ${mpTx['id']}',
+            transactionHash: mpTx['id'],
+            senderAddress: 'MoonPay',
+            recipientAddress: mpTx['walletAddress'],
+            metadata: {
+              'externalTransactionId': mpTx['id'],
+              'provider': 'moonpay',
+              'baseCurrencyAmount': mpTx['baseCurrencyAmount'],
+              'baseCurrencyCode':
+                  mpTx['baseCurrencyCode'] ?? mpTx['baseCurrency']?['code'],
+              'moonpayStatus': mpTx['status'],
+            },
+          );
+        }).toList();
+
+        // Combine and sort by timestamp
+        final allTransactions = <app_transaction.Transaction>[
+          ...stellarTxs,
+          ...moonPayTransactions,
+        ];
+        allTransactions.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
+        return allTransactions;
+      }
+
+      return stellarTxs;
+    } catch (e) {
+      debugPrint('Error getting combined transaction history: $e');
+      return _transactions; // Fallback to Stellar transactions
+    }
+  }
+
+  /// Get MoonPay supported currencies
+  Future<List<Map<String, dynamic>>> getMoonPaySupportedCurrencies() async {
+    try {
+      return await MoonPayService.getSupportedCurrencies();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// Get MoonPay exchange rates
+  Future<Map<String, dynamic>?> getMoonPayExchangeRate({
+    String baseCurrency = 'USD',
+    String quoteCurrency = 'XLM',
+  }) async {
+    try {
+      return await MoonPayService.getExchangeRate(
+        baseCurrency: baseCurrency,
+        quoteCurrency: quoteCurrency,
+      );
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Clear current MoonPay transaction
+  void clearMoonPayTransaction() {
+    _currentMoonPayTransaction = null;
+    notifyListeners();
+  }
+
+  /// Check if MoonPay is available in user's country
+  Future<bool> isMoonPayAvailableInCountry(String countryCode) async {
+    try {
+      return await MoonPayService.isAvailableInCountry(countryCode);
+    } catch (e) {
+      return false;
+    }
+  }
+
   /// Manually setup wallet (public method for user-triggered setup)
   Future<Map<String, dynamic>> setupWalletManually() async {
     if (_publicKey == null) {
@@ -896,6 +1585,9 @@ class EnhancedWalletProvider extends ChangeNotifier {
     _transactions = [];
     _isMonitoringActive = false;
     _currentPaymentStatus = null;
+    _currentMoonPayTransaction = null;
+    _moonPayTransactionHistory = [];
+    _isMonitoringMoonPayTransactions = false;
     _hasAkofaTrustline = false;
     _error = null;
     notifyListeners();

@@ -1,29 +1,24 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:crypto/crypto.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../models/secure_mining_session.dart';
-import '../services/secure_mining_service.dart';
+
 import '../services/stellar_service.dart';
 import '../services/blockchain_transaction_service.dart';
-import '../services/real_time_mining_service.dart';
 import '../services/secure_wallet_service.dart';
+import '../services/transaction_service.dart';
 
-/// Enhanced Stellar provider with secure mining capabilities
+/// Enhanced Stellar provider with wallet functionality
 class SecureStellarProvider extends ChangeNotifier {
   final StellarService _stellarService;
-  final SecureMiningService _securityService;
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
-  final RealTimeMiningService _realTimeMiningService;
 
   // State management
   bool _hasWallet = false;
   bool _isLoading = false;
   String? _error;
+  String? _successMessage;
   String? _publicKey;
   String _balance = '0';
   bool _hasAkofaTrustline = false;
@@ -32,30 +27,13 @@ class SecureStellarProvider extends ChangeNotifier {
   List<Map<String, dynamic>> _walletAssets = [];
   bool _isLoadingWalletAssets = false;
 
-  // Mining state
-  SecureMiningSession? _currentMiningSession;
-  Timer? _miningUpdateTimer;
-  bool _isLoadingMiningSessions = false;
-
-  // Security monitoring
-  Map<String, dynamic> _securityMetrics = {};
-  List<String> _securityAlerts = [];
-  DateTime? _lastSecurityCheck;
-  String? _deviceId;
-
   SecureStellarProvider({
     StellarService? stellarService,
-    SecureMiningService? securityService,
     FirebaseFirestore? firestore,
     FirebaseAuth? auth,
-    RealTimeMiningService? realTimeMiningService,
   }) : _stellarService = stellarService ?? StellarService(),
-       _securityService = securityService ?? SecureMiningService(),
        _firestore = firestore ?? FirebaseFirestore.instance,
-       _auth = auth ?? FirebaseAuth.instance,
-       _realTimeMiningService =
-           realTimeMiningService ??
-           RealTimeMiningService(stellarService ?? StellarService()) {
+       _auth = auth ?? FirebaseAuth.instance {
     _initialize();
   }
 
@@ -63,6 +41,7 @@ class SecureStellarProvider extends ChangeNotifier {
   bool get hasWallet => _hasWallet;
   bool get isLoading => _isLoading;
   String? get error => _error;
+  String? get successMessage => _successMessage;
   String? get publicKey => _publicKey;
   String get balance => _balance;
   bool get hasAkofaTrustline => _hasAkofaTrustline;
@@ -70,47 +49,10 @@ class SecureStellarProvider extends ChangeNotifier {
   bool get isTransactionLoading => _isTransactionLoading;
   List<Map<String, dynamic>> get walletAssets => _walletAssets;
   bool get isLoadingWalletAssets => _isLoadingWalletAssets;
-  SecureMiningSession? get currentMiningSession => _currentMiningSession;
-  bool get isLoadingMiningSessions => _isLoadingMiningSessions;
-  Map<String, dynamic> get securityMetrics => _securityMetrics;
-  List<String> get securityAlerts => _securityAlerts;
-  DateTime? get lastSecurityCheck => _lastSecurityCheck;
 
   /// Initialize the provider
   Future<void> _initialize() async {
-    await _securityService.initialize();
-    await _realTimeMiningService.initialize();
     await _loadWalletState();
-    await _loadMiningSession();
-    _startSecurityMonitoring();
-    _subscribeToRealTimeUpdates();
-  }
-
-  /// Subscribe to real-time mining updates
-  void _subscribeToRealTimeUpdates() {
-    _realTimeMiningService.sessionStream
-        .listen((session) {
-          _currentMiningSession = session;
-          notifyListeners(); // This is crucial for UI updates!
-        })
-        .onError((error) {
-          // Log stream errors but don't crash
-        });
-  }
-
-  /// Force refresh mining session data
-  Future<void> refreshMiningSession() async {
-    try {
-      await _loadMiningSession();
-      // Also refresh from real-time service
-      final currentSession = _realTimeMiningService.getCurrentSession();
-      if (currentSession != null) {
-        _currentMiningSession = currentSession;
-        notifyListeners();
-      }
-    } catch (e) {
-      // Log error but don't crash
-    }
   }
 
   /// Load wallet state
@@ -141,7 +83,6 @@ class SecureStellarProvider extends ChangeNotifier {
         _hasWallet = true;
         _publicKey = credentials['publicKey'];
         await refreshBalance();
-        // Trustline is now handled automatically
       }
     } catch (e) {
       _setError('Failed to load wallet: $e');
@@ -149,445 +90,7 @@ class SecureStellarProvider extends ChangeNotifier {
     _setLoading(false);
   }
 
-  /// Load mining session
-  Future<void> _loadMiningSession() async {
-    _isLoadingMiningSessions = true;
-    notifyListeners();
-
-    try {
-      // First try to restore from real-time service (most reliable)
-      _currentMiningSession = _realTimeMiningService.getCurrentSession();
-
-      // If no session from real-time service, try security service
-      if (_currentMiningSession == null) {
-        _currentMiningSession = await _securityService.restoreSession();
-      }
-
-      // If still no session, try to load from storage
-      if (_currentMiningSession == null) {
-        _currentMiningSession = await _securityService.loadSession();
-      }
-
-      if (_currentMiningSession != null) {
-        _startMiningUpdateTimer();
-      } else {}
-    } catch (e) {
-      _setError('Failed to load mining session: $e');
-    }
-
-    _isLoadingMiningSessions = false;
-    notifyListeners();
-  }
-
-  /// Start security monitoring
-  void _startSecurityMonitoring() {
-    Timer.periodic(const Duration(minutes: 10), (_) => _performSecurityCheck());
-  }
-
-  /// Perform periodic security check
-  Future<void> _performSecurityCheck() async {
-    try {
-      final userId = _auth.currentUser?.uid;
-      if (userId == null) return;
-
-      // Get mining statistics and security metrics
-      _securityMetrics = await _securityService.getMiningStatistics(userId);
-
-      // Check for security alerts
-      _checkSecurityAlerts();
-
-      // Validate current session integrity
-      if (_currentMiningSession != null && !_currentMiningSession!.isValid) {
-        _addSecurityAlert('Session integrity compromised');
-        await _terminateMiningSession('integrity_violation');
-      }
-
-      _lastSecurityCheck = DateTime.now();
-      notifyListeners();
-    } catch (e) {}
-  }
-
-  /// Check for security alerts based on metrics
-  void _checkSecurityAlerts() {
-    _securityAlerts.clear();
-
-    final trustLevel = _securityMetrics['trustLevel'] ?? 'new';
-    final flaggedSessions = _securityMetrics['flaggedSessions'] ?? 0;
-    final integrityScore = _securityMetrics['integrityScore'] ?? 1.0;
-
-    if (trustLevel == 'low') {
-      _addSecurityAlert('Low trust level detected');
-    }
-
-    if (flaggedSessions > 0) {
-      _addSecurityAlert('$flaggedSessions flagged sessions found');
-    }
-
-    if (integrityScore < 0.8) {
-      _addSecurityAlert(
-        'Low integrity score: ${(integrityScore * 100).toStringAsFixed(1)}%',
-      );
-    }
-  }
-
-  /// Add security alert
-  void _addSecurityAlert(String alert) {
-    if (!_securityAlerts.contains(alert)) {
-      _securityAlerts.add(alert);
-    }
-  }
-
-  /// Start secure mining
-  Future<bool> startSecureMining() async {
-    try {
-      _setLoading(true);
-
-      // Get user ID first
-      final user = _auth.currentUser;
-      if (user == null) {
-        _setError('User not authenticated');
-        return false;
-      }
-
-      // Check for wallet dynamically (don't rely only on cached state)
-      String? walletPublicKey;
-      String walletType = 'unknown';
-
-      // First check for secure wallet
-      final hasSecureWallet = await SecureWalletService.hasSecureWallet(
-        user.uid,
-      );
-      if (hasSecureWallet) {
-        walletPublicKey = await SecureWalletService.getWalletPublicKey(
-          user.uid,
-        );
-        walletType = 'secure';
-      }
-
-      // Fallback to regular wallet
-      if (walletPublicKey == null) {
-        final credentials = await _stellarService.getWalletCredentials();
-        if (credentials != null) {
-          walletPublicKey = credentials['publicKey'];
-          walletType = 'regular';
-        }
-      }
-
-      // If still no wallet found, error out
-      if (walletPublicKey == null) {
-        _setError(
-          'Wallet required for mining. Please create or import a Stellar wallet.',
-        );
-        return false;
-      }
-
-      // Update our cached wallet state
-      _hasWallet = true;
-      _publicKey = walletPublicKey;
-
-      // Check if user can start mining
-      if (!await _securityService.canStartMining()) {
-        _setError(
-          'Cannot start mining: Daily limit reached or session in progress',
-        );
-        return false;
-      }
-
-      final deviceId = await _getDeviceId();
-
-      // Start real-time mining session
-      _currentMiningSession = await _realTimeMiningService.startSession(
-        user.uid,
-        deviceId,
-      );
-
-      // Also register with security service for monitoring
-      await _securityService.startMining(await _getUserMiningRate());
-
-      if (_currentMiningSession != null) {
-        _startMiningUpdateTimer();
-        notifyListeners();
-        return true;
-      }
-
-      return false;
-    } catch (e) {
-      _setError('Failed to start mining: $e');
-      return false;
-    } finally {
-      _setLoading(false);
-    }
-  }
-
-  /// Get user's mining rate based on referrals and boosts
-  Future<double> _getUserMiningRate() async {
-    try {
-      final userId = _auth.currentUser?.uid;
-      if (userId == null) return 0.25; // EXACT: 0.25 AKOFA per hour
-
-      final userDoc = await _firestore.collection('USER').doc(userId).get();
-      if (!userDoc.exists) return 0.25;
-
-      final userData = userDoc.data()!;
-      final isRateBoosted = userData['miningRateBoosted'] ?? false;
-      final referralCount = userData['referralCount'] ?? 0;
-
-      // Apply boost if eligible
-      if (isRateBoosted && referralCount >= 5) {
-        return 0.50; // 2x boost
-      }
-
-      return 0.25; // EXACT base rate: 0.25 AKOFA per hour
-      // This means 6 AKOFA after 24 hours
-    } catch (e) {
-      return 0.25;
-    }
-  }
-
-  /// Start mining update timer
-  void _startMiningUpdateTimer() {
-    _miningUpdateTimer?.cancel();
-    _miningUpdateTimer = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) => _updateMiningProgress(),
-    );
-  }
-
-  /// Update mining progress
-  void _updateMiningProgress() {
-    final session = _currentMiningSession;
-    if (session == null || !session.isActive) {
-      _miningUpdateTimer?.cancel();
-      return;
-    }
-
-    // Check if session has expired
-    if (session.isExpired) {
-      _endMiningSession();
-      return;
-    }
-
-    // Update UI
-    notifyListeners();
-  }
-
-  /// Pause mining
-  Future<void> pauseMining() async {
-    if (_currentMiningSession == null) return;
-
-    try {
-      await _realTimeMiningService.pauseSession();
-      // Don't need to call notifyListeners() as stream will handle it
-    } catch (e) {
-      _setError('Failed to pause mining: $e');
-    }
-  }
-
-  /// Resume mining
-  Future<void> resumeMining() async {
-    if (_currentMiningSession == null) return;
-
-    try {
-      await _realTimeMiningService.resumeSession();
-      // Don't need to call notifyListeners() as stream will handle it
-    } catch (e) {
-      _setError('Failed to resume mining: $e');
-    }
-  }
-
-  /// End mining session and process rewards
-  Future<void> _endMiningSession() async {
-    try {
-      _miningUpdateTimer?.cancel();
-
-      if (_currentMiningSession == null) return;
-
-      // End the secure mining session
-      final history = await _securityService.endMining();
-
-      // Only process rewards if session is valid
-      if (history.status == 'completed' && history.earnedAkofa > 0) {
-        await _processSecureMiningReward(history);
-      } else {}
-
-      _currentMiningSession = null;
-      notifyListeners();
-    } catch (e) {
-      _setError('Failed to end mining session: $e');
-    }
-  }
-
-  /// Process mining reward with enhanced security
-  Future<void> _processSecureMiningReward(
-    SecureMiningSessionHistory history,
-  ) async {
-    try {
-      // Validate reward amount - should be exactly 6 AKOFA for completed 24-hour session
-      if (history.earnedAkofa <= 0) {
-        throw Exception('Invalid reward amount');
-      }
-
-      // Check for double-spending
-      if (await _checkDuplicateReward(history.sessionId)) {
-        throw Exception('Duplicate reward detected');
-      }
-
-      // Generate secure transaction hash
-      final transactionHash = _generateSecureTransactionHash(history);
-
-      // Record mining reward through Stellar service
-      final result = await _stellarService.recordMiningReward(
-        history.earnedAkofa,
-      );
-
-      if (result['success'] == true) {
-        // Update history with transaction details
-        await _updateHistoryWithTransaction(
-          history,
-          result['hash'],
-          transactionHash,
-        );
-
-        // Refresh wallet balance
-        await refreshBalance();
-        await loadTransactions();
-      } else {
-        throw Exception('Failed to record reward: ${result['message']}');
-      }
-    } catch (e) {
-      await _markRewardAsFailed(history, e.toString());
-    }
-  }
-
-  /// Check for duplicate reward to prevent double-spending
-  Future<bool> _checkDuplicateReward(String sessionId) async {
-    try {
-      final userId = _auth.currentUser?.uid;
-      if (userId == null) return false;
-
-      final existingRewards = await _firestore
-          .collection('secure_mining_history')
-          .doc(userId)
-          .collection('sessions')
-          .where('sessionId', isEqualTo: sessionId)
-          .where('status', isEqualTo: 'completed')
-          .get();
-
-      return existingRewards.docs.isNotEmpty;
-    } catch (e) {
-      return true; // Err on the side of caution
-    }
-  }
-
-  /// Generate secure transaction hash
-  String _generateSecureTransactionHash(SecureMiningSessionHistory history) {
-    final input =
-        '${history.sessionId}:${history.userId}:${history.earnedAkofa}:${DateTime.now().millisecondsSinceEpoch}';
-    final bytes = utf8.encode(input);
-    return sha256.convert(bytes).toString();
-  }
-
-  /// Update history with transaction details
-  Future<void> _updateHistoryWithTransaction(
-    SecureMiningSessionHistory history,
-    String stellarHash,
-    String transactionHash,
-  ) async {
-    try {
-      final userId = _auth.currentUser?.uid;
-      if (userId == null) return;
-
-      await _firestore
-          .collection('secure_mining_history')
-          .doc(userId)
-          .collection('sessions')
-          .where('sessionId', isEqualTo: history.sessionId)
-          .get()
-          .then((query) {
-            if (query.docs.isNotEmpty) {
-              query.docs.first.reference.update({
-                'stellarHash': stellarHash,
-                'transactionHash': transactionHash,
-                'processedAt': FieldValue.serverTimestamp(),
-              });
-            }
-          });
-    } catch (e) {}
-  }
-
-  /// Mark reward as failed
-  Future<void> _markRewardAsFailed(
-    SecureMiningSessionHistory history,
-    String error,
-  ) async {
-    try {
-      final userId = _auth.currentUser?.uid;
-      if (userId == null) return;
-
-      await _firestore
-          .collection('secure_mining_history')
-          .doc(userId)
-          .collection('sessions')
-          .where('sessionId', isEqualTo: history.sessionId)
-          .get()
-          .then((query) {
-            if (query.docs.isNotEmpty) {
-              query.docs.first.reference.update({
-                'status': 'failed',
-                'errorReason': error,
-                'failedAt': FieldValue.serverTimestamp(),
-              });
-            }
-          });
-    } catch (e) {}
-  }
-
-  /// Terminate mining session due to security violation
-  Future<void> _terminateMiningSession(String reason) async {
-    try {
-      _miningUpdateTimer?.cancel();
-      _currentMiningSession = null;
-
-      // Log security violation
-      await _firestore.collection('security_violations').add({
-        'userId': _auth.currentUser?.uid,
-        'reason': reason,
-        'timestamp': FieldValue.serverTimestamp(),
-        'deviceId': _deviceId,
-      });
-
-      _addSecurityAlert('Mining session terminated: $reason');
-      notifyListeners();
-    } catch (e) {}
-  }
-
-  /// Check if can start mining
-  Future<bool> get canStartMining async {
-    // If we already have a wallet loaded, use that info
-    if (_hasWallet && _currentMiningSession?.isActive != true) {
-      return await _securityService.canStartMining();
-    }
-
-    // Otherwise, check for any wallet type
-    final user = _auth.currentUser;
-    if (user == null) return false;
-
-    // Check for secure wallet
-    final hasSecureWallet = await SecureWalletService.hasSecureWallet(user.uid);
-    if (hasSecureWallet) {
-      return await _securityService.canStartMining();
-    }
-
-    // Check for regular wallet
-    final credentials = await _stellarService.getWalletCredentials();
-    if (credentials != null && _currentMiningSession?.isActive != true) {
-      return await _securityService.canStartMining();
-    }
-
-    return false;
-  }
-
-  // Wallet operations (unchanged from original)
+  /// Create wallet
   Future<bool> createWallet() async {
     _setLoading(true);
     _setError(null);
@@ -612,6 +115,7 @@ class SecureStellarProvider extends ChangeNotifier {
     }
   }
 
+  /// Refresh balance
   Future<void> refreshBalance() async {
     if (!_hasWallet || _publicKey == null) return;
 
@@ -629,8 +133,7 @@ class SecureStellarProvider extends ChangeNotifier {
     }
   }
 
-  // REMOVED - Trustline is now handled automatically
-
+  /// Load transactions
   Future<void> loadTransactions() async {
     if (!_hasWallet) return;
 
@@ -650,6 +153,109 @@ class SecureStellarProvider extends ChangeNotifier {
     }
   }
 
+  /// Check if user can receive rewards
+  Future<Map<String, dynamic>> checkRewardEligibility() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        return {
+          'canReceive': false,
+          'reason': 'User not authenticated',
+          'details': 'Please log in to receive rewards',
+        };
+      }
+
+      String? publicKey;
+      String? walletType = 'unknown';
+
+      // First check for secure/enhanced wallet
+      final hasSecureWallet = await SecureWalletService.hasSecureWallet(
+        user.uid,
+      );
+      if (hasSecureWallet) {
+        publicKey = await SecureWalletService.getWalletPublicKey(user.uid);
+        walletType = 'secure';
+      }
+
+      // If no secure wallet, check for regular wallet
+      if (publicKey == null) {
+        final credentials = await _stellarService.getWalletCredentials();
+        if (credentials != null) {
+          publicKey = credentials['publicKey'];
+          walletType = 'regular';
+        } else {
+          return {
+            'canReceive': false,
+            'reason': 'No wallet found',
+            'details':
+                'Please create or import a Stellar wallet to receive rewards. Both regular and secure wallets are supported.',
+          };
+        }
+      }
+
+      // Check if account exists
+      final accountExists = await _stellarService.checkAccountExists(
+        publicKey!,
+      );
+      if (!accountExists) {
+        return {
+          'canReceive': false,
+          'reason': 'Account not funded',
+          'details':
+              'Your Stellar account needs to be funded with at least 1 XLM.',
+        };
+      }
+
+      // Check AKOFA trustline
+      final hasTrustline = await _stellarService.hasAkofaTrustline(publicKey!);
+      if (!hasTrustline) {
+        return {
+          'canReceive': false,
+          'reason': 'Missing AKOFA trustline',
+          'details':
+              'Your account needs an AKOFA trustline to receive rewards.',
+        };
+      }
+
+      // Check AKOFA tag
+      final userDoc = await _firestore.collection('USER').doc(user.uid).get();
+      if (!userDoc.exists) {
+        return {
+          'canReceive': false,
+          'reason': 'User profile incomplete',
+          'details':
+              'User profile not found. Please complete your profile setup.',
+        };
+      }
+
+      final userData = userDoc.data()!;
+      final akofaTag = userData['akofaTag'] as String?;
+      if (akofaTag == null || akofaTag.isEmpty) {
+        return {
+          'canReceive': false,
+          'reason': 'Missing AKOFA tag',
+          'details':
+              'Please set your AKOFA tag in your profile to receive rewards.',
+        };
+      }
+
+      return {
+        'canReceive': true,
+        'reason': 'Eligible for rewards',
+        'details': 'Your ${walletType} wallet is ready to receive rewards',
+        'walletType': walletType,
+        'publicKey': publicKey,
+        'akofaTag': akofaTag,
+      };
+    } catch (e) {
+      return {
+        'canReceive': false,
+        'reason': 'Error checking eligibility',
+        'details': 'Error: $e',
+      };
+    }
+  }
+
   // Helper methods
   void _setLoading(bool loading) {
     _isLoading = loading;
@@ -663,25 +269,6 @@ class SecureStellarProvider extends ChangeNotifier {
 
   @override
   void dispose() {
-    _miningUpdateTimer?.cancel();
-    _securityService.dispose();
-    _realTimeMiningService.dispose();
     super.dispose();
-  }
-
-  /// Get device ID for mining sessions
-  Future<String> _getDeviceId() async {
-    if (_deviceId != null) return _deviceId!;
-
-    // Generate a persistent device ID
-    final prefs = await SharedPreferences.getInstance();
-    _deviceId = prefs.getString('device_id');
-
-    if (_deviceId == null) {
-      _deviceId = 'web_${DateTime.now().millisecondsSinceEpoch}';
-      await prefs.setString('device_id', _deviceId!);
-    }
-
-    return _deviceId!;
   }
 }

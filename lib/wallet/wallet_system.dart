@@ -17,9 +17,7 @@ class WalletHomeScreen extends StatelessWidget {
       appBar: AppBar(
         title: Text(
           'Enhanced Wallet',
-          style: AppTheme.headingMedium.copyWith(
-            color: AppTheme.primaryGold,
-          ),
+          style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
         ),
         backgroundColor: AppTheme.black,
         elevation: 0,
@@ -29,10 +27,7 @@ class WalletHomeScreen extends StatelessWidget {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [
-              AppTheme.black,
-              AppTheme.darkGrey.withOpacity(0.3),
-            ],
+            colors: [AppTheme.black, AppTheme.darkGrey.withOpacity(0.3)],
           ),
         ),
         child: SingleChildScrollView(
@@ -107,7 +102,10 @@ class WalletHomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildNoWalletSection(BuildContext context, StellarProvider stellarProvider) {
+  Widget _buildNoWalletSection(
+    BuildContext context,
+    StellarProvider stellarProvider,
+  ) {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -121,31 +119,23 @@ class WalletHomeScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(
-            Icons.wallet_outlined,
-            size: 64,
-            color: AppTheme.grey,
-          ),
+          Icon(Icons.wallet_outlined, size: 64, color: AppTheme.grey),
           const SizedBox(height: 16),
           Text(
             'No Wallet Found',
-            style: AppTheme.headingMedium.copyWith(
-              color: AppTheme.white,
-            ),
+            style: AppTheme.headingMedium.copyWith(color: AppTheme.white),
           ),
           const SizedBox(height: 8),
           Text(
             'Create your secure wallet to start managing your crypto assets',
-            style: AppTheme.bodyMedium.copyWith(
-              color: AppTheme.grey,
-            ),
+            style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-                  onPressed: stellarProvider.isLoading
+              onPressed: stellarProvider.isLoading
                   ? null
                   : () => _createWallet(context, stellarProvider),
               style: ElevatedButton.styleFrom(
@@ -171,9 +161,7 @@ class WalletHomeScreen extends StatelessWidget {
             const SizedBox(height: 16),
             Text(
               stellarProvider.error!,
-              style: AppTheme.bodySmall.copyWith(
-                color: Colors.red,
-              ),
+              style: AppTheme.bodySmall.copyWith(color: Colors.red),
               textAlign: TextAlign.center,
             ),
           ],
@@ -182,15 +170,16 @@ class WalletHomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildWalletOverview(BuildContext context, StellarProvider stellarProvider) {
+  Widget _buildWalletOverview(
+    BuildContext context,
+    StellarProvider stellarProvider,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           'Wallet Overview',
-          style: AppTheme.headingMedium.copyWith(
-            color: AppTheme.primaryGold,
-          ),
+          style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
         ),
         const SizedBox(height: 16),
         Container(
@@ -234,17 +223,11 @@ class WalletHomeScreen extends StatelessWidget {
               if (stellarProvider.hasAkofaTrustline) ...[
                 Row(
                   children: [
-                    Icon(
-                      Icons.token,
-                      color: AppTheme.primaryGold,
-                      size: 20,
-                    ),
+                    Icon(Icons.token, color: AppTheme.primaryGold, size: 20),
                     const SizedBox(width: 8),
                     Text(
                       'AKOFA Balance',
-                      style: AppTheme.bodyMedium.copyWith(
-                        color: AppTheme.grey,
-                      ),
+                      style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
                     ),
                   ],
                 ),
@@ -258,7 +241,10 @@ class WalletHomeScreen extends StatelessWidget {
               ],
               const SizedBox(height: 16),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: stellarProvider.hasAkofaTrustline
                       ? Colors.green.withOpacity(0.2)
@@ -290,9 +276,7 @@ class WalletHomeScreen extends StatelessWidget {
       children: [
         Text(
           'Quick Actions',
-          style: AppTheme.headingMedium.copyWith(
-            color: AppTheme.primaryGold,
-          ),
+          style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
         ),
         const SizedBox(height: 16),
         Row(
@@ -329,7 +313,12 @@ class WalletHomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildActionButton(BuildContext context, String label, IconData icon, VoidCallback onTap) {
+  Widget _buildActionButton(
+    BuildContext context,
+    String label,
+    IconData icon,
+    VoidCallback onTap,
+  ) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -344,11 +333,7 @@ class WalletHomeScreen extends StatelessWidget {
         ),
         child: Column(
           children: [
-            Icon(
-              icon,
-              color: AppTheme.primaryGold,
-              size: 24,
-            ),
+            Icon(icon, color: AppTheme.primaryGold, size: 24),
             const SizedBox(height: 8),
             Text(
               label,
@@ -369,9 +354,7 @@ class WalletHomeScreen extends StatelessWidget {
       children: [
         Text(
           'Advanced Features',
-          style: AppTheme.headingMedium.copyWith(
-            color: AppTheme.primaryGold,
-          ),
+          style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
         ),
         const SizedBox(height: 16),
         _buildFeatureItem(
@@ -384,12 +367,6 @@ class WalletHomeScreen extends StatelessWidget {
           'Secure Transactions',
           'Encrypted wallet with biometric authentication',
           Icons.security,
-        ),
-        const SizedBox(height: 12),
-        _buildFeatureItem(
-          'Real-time Mining',
-          'Earn AKOFA tokens through mining rewards',
-            Icons.work,
         ),
         const SizedBox(height: 12),
         _buildFeatureItem(
@@ -414,11 +391,7 @@ class WalletHomeScreen extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(
-            icon,
-            color: AppTheme.primaryGold,
-            size: 24,
-          ),
+          Icon(icon, color: AppTheme.primaryGold, size: 24),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
@@ -434,24 +407,21 @@ class WalletHomeScreen extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   description,
-                  style: AppTheme.bodySmall.copyWith(
-                    color: AppTheme.grey,
-                  ),
+                  style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
                 ),
               ],
             ),
           ),
-          Icon(
-            Icons.arrow_forward_ios,
-            color: AppTheme.grey,
-            size: 16,
-          ),
+          Icon(Icons.arrow_forward_ios, color: AppTheme.grey, size: 16),
         ],
       ),
     );
   }
 
-  Future<void> _createWallet(BuildContext context, StellarProvider stellarProvider) async {
+  Future<void> _createWallet(
+    BuildContext context,
+    StellarProvider stellarProvider,
+  ) async {
     final success = await stellarProvider.createWallet(context);
     if (success) {
       ScaffoldMessenger.of(context).showSnackBar(

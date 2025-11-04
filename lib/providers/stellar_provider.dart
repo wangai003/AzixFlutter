@@ -12,7 +12,6 @@ import '../providers/auth_provider.dart' as local_auth;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 import 'dart:convert';
-import '../models/mining_session.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 
@@ -59,30 +58,26 @@ class StellarProvider extends ChangeNotifier {
   bool _hasAkofaTrustline = false;
   List<app_transaction.Transaction> _transactions = [];
   bool _isTransactionLoading = false;
-  
+
   // Swap-related state
   List<Map<String, String>> _supportedAssets = [];
   Map<String, String> _assetBalances = {};
   bool _isSwapLoading = false;
   List<Map<String, dynamic>> _swapHistory = [];
-  
+
   // Wallet assets state
   List<Map<String, dynamic>> _walletAssets = [];
   bool _isLoadingWalletAssets = false;
-  
+
   // M-Pesa related state
   bool _isMpesaLoading = false;
   List<Map<String, dynamic>> _mpesaTransactions = [];
 
-  // Mining session state
-  List<MiningSession> _miningSessions = [];
-  bool _isLoadingMiningSessions = false;
-  Timer? _miningTimer;
-  int _currentMiningSessionId = 0;
-  
   // Auto-refresh timer for transactions
   Timer? _transactionRefreshTimer;
-  static const Duration _transactionRefreshInterval = Duration(minutes: 2); // Check every 2 minutes
+  static const Duration _transactionRefreshInterval = Duration(
+    minutes: 2,
+  ); // Check every 2 minutes
 
   bool get hasWallet => _hasWallet;
   bool get isLoading => _isLoading;
@@ -93,24 +88,20 @@ class StellarProvider extends ChangeNotifier {
   bool get hasAkofaTrustline => _hasAkofaTrustline;
   List<app_transaction.Transaction> get transactions => _transactions;
   bool get isTransactionLoading => _isTransactionLoading;
-  
+
   // Swap-related getters
   List<Map<String, String>> get supportedAssets => _supportedAssets;
   Map<String, String> get assetBalances => _assetBalances;
   bool get isSwapLoading => _isSwapLoading;
   List<Map<String, dynamic>> get swapHistory => _swapHistory;
-  
+
   // Wallet assets getters
   List<Map<String, dynamic>> get walletAssets => _walletAssets;
   bool get isLoadingWalletAssets => _isLoadingWalletAssets;
-  
+
   // M-Pesa related getters
   bool get isMpesaLoading => _isMpesaLoading;
   List<Map<String, dynamic>> get mpesaTransactions => _mpesaTransactions;
-
-  // Mining session getters
-  List<MiningSession> get miningSessions => _miningSessions;
-  bool get isLoadingMiningSessions => _isLoadingMiningSessions;
 
   StellarProvider() {
     _init();
@@ -122,13 +113,8 @@ class StellarProvider extends ChangeNotifier {
     if (_hasWallet) {
       await loadTransactions();
       await loadWalletAssets();
-      await loadMiningSessions();
-      // Check for any uncredited mining sessions
-      await _checkUncreditedMiningSessions();
       // AUTOMATICALLY ensure Akofa trustline exists
       await _ensureAkofaTrustline();
-      // Remove automatic mining timer start - mining will only start when user manually initiates
-      // await startMiningTimer();
     }
   }
 
@@ -162,12 +148,14 @@ class StellarProvider extends ChangeNotifier {
         _setError('Could not retrieve wallet credentials');
         return {
           'success': false,
-          'message': 'Could not retrieve wallet credentials'
+          'message': 'Could not retrieve wallet credentials',
         };
       }
 
-      final result = await _stellarService.createUserAkofaTrustline(credentials['secretKey']!);
-      
+      final result = await _stellarService.createUserAkofaTrustline(
+        credentials['secretKey']!,
+      );
+
       if (result) {
         _hasAkofaTrustline = true;
         await refreshBalance();
@@ -175,104 +163,18 @@ class StellarProvider extends ChangeNotifier {
         _setLoading(false);
         return {
           'success': true,
-          'message': 'Akofa trustline created successfully!'
+          'message': 'Akofa trustline created successfully!',
         };
       } else {
         _setLoading(false);
         _setError('Failed to create trustline');
-        return {
-          'success': false,
-          'message': 'Failed to create trustline'
-        };
+        return {'success': false, 'message': 'Failed to create trustline'};
       }
     } catch (e) {
       _setLoading(false);
       _setError('Failed to create Akofa trustline: $e');
-      return {
-        'success': false,
-        'message': 'Error: $e'
-      };
+      return {'success': false, 'message': 'Error: $e'};
     }
-  }
-
-  // Check for any uncredited mining sessions
-  Future<void> _checkUncreditedMiningSessions() async {
-    try {
-      final auth = firebase_auth.FirebaseAuth.instance;
-      final user = auth.currentUser;
-      if (user == null) return;
-
-      // Check if there are any completed mining sessions that haven't been credited
-      for (final session in _miningSessions) {
-        if (session.isExpired && session.earnedAkofa > 0) {
-          // Try to credit the reward
-          await _recordMiningRewardAsync(session.earnedAkofa, session);
-        }
-      }
-    } catch (e) {
-    }
-  }
-
-  // Public method to manually check and process uncredited mining sessions
-  Future<void> checkAndProcessUncreditedSessions() async {
-    await _checkUncreditedMiningSessions();
-  }
-
-  // Method to manually force complete a mining session (for testing)
-  Future<void> forceCompleteMiningSession() async {
-    if (_miningSessions.isEmpty) return;
-    
-    final currentSession = _miningSessions.last;
-    if (currentSession.isActive && !currentSession.isExpired) {
-      
-      // Calculate final accumulated time
-      final now = DateTime.now();
-      final timeSinceResume = now.difference(currentSession.lastResume).inSeconds;
-      currentSession.accumulatedSeconds = currentSession.accumulatedSeconds + timeSinceResume;
-      currentSession.lastResume = now;
-      
-      // Mark as expired
-      currentSession.isPaused = true;
-      
-      // Process the reward
-      final earned = currentSession.earnedAkofa;
-      if (earned > 0) {
-        await _recordMiningRewardAsync(earned, currentSession);
-      }
-      
-      // Save the session
-      await saveMiningSession(currentSession);
-      notifyListeners();
-    }
-  }
-
-  // Get detailed information about all mining sessions (for debugging)
-  Map<String, dynamic> getMiningSessionsDebugInfo() {
-    final debugInfo = <String, dynamic>{};
-    
-    for (int i = 0; i < _miningSessions.length; i++) {
-      final session = _miningSessions[i];
-      debugInfo['session_$i'] = {
-        'sessionId': session.sessionId,
-        'sessionStart': session.sessionStart.toIso8601String(),
-        'sessionEnd': session.sessionEnd.toIso8601String(),
-        'isActive': session.isActive,
-        'isExpired': session.isExpired,
-        'isPaused': session.isPaused,
-        'accumulatedSeconds': session.accumulatedSeconds,
-        'lastResume': session.lastResume.toIso8601String(),
-        'miningRate': session.miningRate,
-        'earnedAkofa': session.earnedAkofa,
-        'timeRemaining': session.sessionEnd.difference(DateTime.now()).inSeconds,
-      };
-    }
-    
-    debugInfo['totalSessions'] = _miningSessions.length;
-    debugInfo['hasActiveSession'] = _miningSessions.any((s) => s.isActive);
-    debugInfo['hasExpiredSession'] = _miningSessions.any((s) => s.isExpired);
-    debugInfo['miningTimerActive'] = _miningTimer != null;
-    
-    return debugInfo;
   }
 
   // Get account funding information
@@ -281,10 +183,10 @@ class StellarProvider extends ChangeNotifier {
       return {
         'exists': false,
         'status': 'no_wallet',
-        'message': 'No wallet found'
+        'message': 'No wallet found',
       };
     }
-    
+
     try {
       return await _stellarService.getAccountFundingInfo(_publicKey!);
     } catch (e) {
@@ -292,7 +194,7 @@ class StellarProvider extends ChangeNotifier {
         'exists': false,
         'status': 'error',
         'message': 'Error checking account status: $e',
-        'publicKey': _publicKey
+        'publicKey': _publicKey,
       };
     }
   }
@@ -355,16 +257,20 @@ class StellarProvider extends ChangeNotifier {
       if (_hasWallet) {
         // First, just get the public key (no authentication needed)
         final publicKey = await _stellarService.getPublicKey();
-        
+
         if (publicKey != null) {
           _publicKey = publicKey;
           await refreshBalance();
-          
+
           // Check if wallet has Akofa trustline
           try {
-            _hasAkofaTrustline = await _stellarService.hasAkofaTrustline(_publicKey!);
+            _hasAkofaTrustline = await _stellarService.hasAkofaTrustline(
+              _publicKey!,
+            );
             if (_hasAkofaTrustline) {
-              _akofaBalance = await _stellarService.getAkofaBalance(_publicKey!);
+              _akofaBalance = await _stellarService.getAkofaBalance(
+                _publicKey!,
+              );
             }
           } catch (trustlineError) {
             // Log the error but don't fail the wallet status check
@@ -372,8 +278,7 @@ class StellarProvider extends ChangeNotifier {
         } else {
           _hasWallet = false;
         }
-      } else {
-      }
+      } else {}
 
       _setLoading(false);
       return _hasWallet;
@@ -383,16 +288,16 @@ class StellarProvider extends ChangeNotifier {
       return false;
     }
   }
-  
+
   // Get full wallet credentials (requires authentication)
   Future<Map<String, String>?> getFullWalletCredentials() async {
     _setLoading(true);
     _setError(null);
-    
+
     try {
       final credentials = await _stellarService.getWalletCredentials();
       _setLoading(false);
-      
+
       if (credentials != null) {
         // Update the public key if it's different
         if (_publicKey != credentials['publicKey']) {
@@ -400,7 +305,7 @@ class StellarProvider extends ChangeNotifier {
           notifyListeners();
         }
       }
-      
+
       return credentials;
     } catch (e) {
       _setLoading(false);
@@ -425,7 +330,10 @@ class StellarProvider extends ChangeNotifier {
       bool useBiometrics = false;
       if (authMethod == 'google') {
         // Use Google UID
-        final authProvider = Provider.of<local_auth.AuthProvider>(context, listen: false);
+        final authProvider = Provider.of<local_auth.AuthProvider>(
+          context,
+          listen: false,
+        );
         final success = await authProvider.signInWithGoogle();
         if (!success) {
           _setLoading(false);
@@ -449,7 +357,8 @@ class StellarProvider extends ChangeNotifier {
       } else if (authMethod == 'biometrics') {
         useBiometrics = true;
       }
-      final credentials = await _stellarService.createWalletAndStoreInFirestore();
+      final credentials = await _stellarService
+          .createWalletAndStoreInFirestore();
       _publicKey = credentials['publicKey'];
       _hasWallet = true;
 
@@ -458,11 +367,10 @@ class StellarProvider extends ChangeNotifier {
         // Show a message to the user that we're setting up their wallet
         _setError('Setting up your wallet automatically...');
 
-
         // Use the new automatic setup method
         final setupResult = await _stellarService.setupNewWalletAutomatically(
           _publicKey!,
-          credentials['secretKey']
+          credentials['secretKey'],
         );
 
         if (setupResult['success'] == true) {
@@ -474,7 +382,36 @@ class StellarProvider extends ChangeNotifier {
           }
 
           if (setupResult['trustlineAdded'] == true) {
-            successMessage += ' Akofa trustline added.';
+            final trustlineResult =
+                setupResult['trustlineResult'] as Map<String, dynamic>?;
+            if (trustlineResult != null && trustlineResult['success'] == true) {
+              // Count successful trustlines
+              final successfulTrustlines = <String>[];
+              final failedTrustlines = <String>[];
+
+              // Check each asset
+              final assets = ['akofa', 'usdc', 'btc', 'eth'];
+              for (final asset in assets) {
+                if (trustlineResult[asset] == true) {
+                  successfulTrustlines.add(asset.toUpperCase());
+                } else if (trustlineResult.containsKey(asset)) {
+                  failedTrustlines.add(asset.toUpperCase());
+                }
+              }
+
+              if (successfulTrustlines.isNotEmpty) {
+                successMessage +=
+                    ' ${successfulTrustlines.join(', ')} trustlines added.';
+                if (failedTrustlines.isNotEmpty) {
+                  successMessage +=
+                      ' ${failedTrustlines.join(', ')} trustlines can be added manually.';
+                }
+              } else {
+                successMessage += ' Some trustlines added.';
+              }
+            } else {
+              successMessage += ' Trustlines added.';
+            }
           }
 
           // Refresh balance to show the new funds
@@ -485,31 +422,33 @@ class StellarProvider extends ChangeNotifier {
 
           // Use _setError to display a success message
           _setError(successMessage);
-
-
         } else {
           // Setup failed - provide specific error messages
           String errorMessage = 'Wallet created but setup incomplete.';
 
-          if (setupResult['fundingResult'] != null && setupResult['fundingResult']['success'] == false) {
-            errorMessage = 'Wallet created but funding failed. You can fund it manually later.';
-          } else if (setupResult['trustlineResult'] != null && setupResult['trustlineResult']['success'] == false) {
-            errorMessage = 'Wallet funded but Akofa trustline setup failed. You can add it manually later.';
+          if (setupResult['fundingResult'] != null &&
+              setupResult['fundingResult']['success'] == false) {
+            errorMessage =
+                'Wallet created but funding failed. You can fund it manually later.';
+          } else if (setupResult['trustlineResult'] != null &&
+              setupResult['trustlineResult']['success'] == false) {
+            errorMessage =
+                'Wallet funded but Akofa trustline setup failed. You can add it manually later.';
           }
 
           _setError(errorMessage);
         }
-
       } catch (error) {
-        _setError('Wallet created but automatic setup failed. You can set it up manually.');
+        _setError(
+          'Wallet created but automatic setup failed. You can set it up manually.',
+        );
 
         // Still refresh balance in case partial setup worked
         try {
           await refreshBalance();
-        } catch (balanceError) {
-        }
+        } catch (balanceError) {}
       }
-      
+
       _setLoading(false);
       return true;
     } catch (e) {
@@ -576,22 +515,24 @@ class StellarProvider extends ChangeNotifier {
 
     try {
       _balance = await _stellarService.getBalance(this._publicKey!);
-      
+
       // Also check Akofa trustline and balance
-      _hasAkofaTrustline = await _stellarService.hasAkofaTrustline(this._publicKey!);
+      _hasAkofaTrustline = await _stellarService.hasAkofaTrustline(
+        this._publicKey!,
+      );
       if (_hasAkofaTrustline) {
         _akofaBalance = await _stellarService.getAkofaBalance(this._publicKey!);
       }
-      
+
       // Also refresh all wallet assets
       await loadWalletAssets();
-      
+
       notifyListeners();
     } catch (e) {
       _setError('Failed to refresh balance: $e');
     }
   }
-  
+
   // Check if account has enough XLM for transactions
   Future<Map<String, dynamic>> checkAccountXlmBalance() async {
     if (this._publicKey == null) {
@@ -599,17 +540,21 @@ class StellarProvider extends ChangeNotifier {
         'hasEnough': false,
         'message': 'No public key available',
         'balance': '0',
-        'status': 'no_public_key'
+        'status': 'no_public_key',
       };
     }
-    
+
     try {
-      final hasEnough = await _stellarService.hasEnoughXlmForTransaction(this._publicKey!);
+      final hasEnough = await _stellarService.hasEnoughXlmForTransaction(
+        this._publicKey!,
+      );
       return {
         'hasEnough': hasEnough,
-        'message': hasEnough ? 'Sufficient XLM balance' : 'Insufficient XLM balance',
+        'message': hasEnough
+            ? 'Sufficient XLM balance'
+            : 'Insufficient XLM balance',
         'balance': '0', // This would need to be fetched separately
-        'status': hasEnough ? 'sufficient' : 'insufficient'
+        'status': hasEnough ? 'sufficient' : 'insufficient',
       };
     } catch (e) {
       _setError('Failed to check XLM balance: $e');
@@ -617,29 +562,29 @@ class StellarProvider extends ChangeNotifier {
         'hasEnough': false,
         'message': 'Error checking balance: $e',
         'balance': '0',
-        'status': 'error'
+        'status': 'error',
       };
     }
   }
-  
+
   // Friendly Bot: Check if account is funded and fund it if necessary
   Future<Map<String, dynamic>> ensureAccountFunded() async {
     _setLoading(true);
     _setError(null);
-    
+
     if (this._publicKey == null) {
       _setLoading(false);
       return {
         'success': false,
         'message': 'No public key available',
-        'status': 'no_public_key'
+        'status': 'no_public_key',
       };
     }
-    
+
     try {
       // First check if the account has enough XLM
       final xlmCheck = await checkAccountXlmBalance();
-      
+
       // If account already has enough XLM, return success
       if (xlmCheck['hasEnough'] == true) {
         _setLoading(false);
@@ -647,25 +592,26 @@ class StellarProvider extends ChangeNotifier {
           'success': true,
           'message': 'Account already has sufficient funds',
           'balance': xlmCheck['balance'],
-          'status': 'already_funded'
+          'status': 'already_funded',
         };
       }
-      
+
       // No need to get wallet credentials for funding
       // The public key is already available
-      
+
       // Try to fund the account using Friendbot
-      final friendBotUrl = 'https://friendbot.stellar.org/?addr=${this._publicKey}';
+      final friendBotUrl =
+          'https://friendbot.stellar.org/?addr=${this._publicKey}';
       try {
         final response = await http.get(Uri.parse(friendBotUrl));
-        
+
         if (response.statusCode == 200) {
           // Wait for the account to be created on the network
           await Future.delayed(const Duration(seconds: 5));
-          
+
           // Refresh balance
           await refreshBalance();
-          
+
           // Check balance again
           final newXlmCheck = await checkAccountXlmBalance();
           if (newXlmCheck['hasEnough'] == true) {
@@ -674,7 +620,7 @@ class StellarProvider extends ChangeNotifier {
               'success': true,
               'message': 'Account successfully funded by Friendly Bot',
               'balance': newXlmCheck['balance'],
-              'status': 'funding_success'
+              'status': 'funding_success',
             };
           } else {
             _setLoading(false);
@@ -682,7 +628,7 @@ class StellarProvider extends ChangeNotifier {
               'success': false,
               'message': 'Account was funded but still has insufficient XLM',
               'balance': newXlmCheck['balance'],
-              'status': 'insufficient_xlm_after_funding'
+              'status': 'insufficient_xlm_after_funding',
             };
           }
         } else {
@@ -691,7 +637,7 @@ class StellarProvider extends ChangeNotifier {
             'success': false,
             'message': 'Failed to fund account with Friendly Bot',
             'error': 'Response: ${response.statusCode} - ${response.body}',
-            'status': 'funding_error'
+            'status': 'funding_error',
           };
         }
       } catch (fundingError) {
@@ -701,7 +647,7 @@ class StellarProvider extends ChangeNotifier {
           'success': false,
           'message': 'Failed to fund account',
           'error': fundingError.toString(),
-          'status': 'funding_request_error'
+          'status': 'funding_request_error',
         };
       }
     } catch (e) {
@@ -711,31 +657,30 @@ class StellarProvider extends ChangeNotifier {
         'success': false,
         'message': 'Error ensuring account funding',
         'error': e.toString(),
-        'status': 'error'
+        'status': 'error',
       };
     }
   }
-  
-  // REMOVED - Now handled automatically in _ensureAkofaTrustline()
-  
+
   // REMOVED - Now handled automatically in _ensureAkofaTrustline()
 
+  // REMOVED - Now handled automatically in _ensureAkofaTrustline()
 
   // This method is kept for backward compatibility
   // It now uses the new getFullWalletCredentials method
   Future<Map<String, dynamic>?> getWalletCredentials() async {
     return await getFullWalletCredentials();
   }
-  
+
   // Recover wallet using provided secret key
   Future<bool> recoverWalletWithSecretKey(String secretKey) async {
     _setLoading(true);
     _setError(null);
-    
+
     try {
       // TODO: Implement recoverWalletWithSecretKey method
       final success = false; // Method not implemented yet
-      
+
       if (success) {
         // Update local state
         final credentials = await _stellarService.getWalletCredentials();
@@ -745,7 +690,7 @@ class StellarProvider extends ChangeNotifier {
           // Trustline is now handled automatically
         }
       }
-      
+
       _setLoading(false);
       return success;
     } catch (e) {
@@ -773,20 +718,20 @@ class StellarProvider extends ChangeNotifier {
       return false;
     }
   }
-  
+
   // Load transaction history
   Future<void> loadTransactions() async {
-    
     if (!_hasWallet) {
       return;
     }
-    
+
     _isTransactionLoading = true;
     notifyListeners();
-    
+
     try {
       // Use blockchain service instead of non-existent method
-      final blockchainTransactions = await BlockchainTransactionService.getUserTransactionsFromBlockchain();
+      final blockchainTransactions =
+          await BlockchainTransactionService.getUserTransactionsFromBlockchain();
       _transactions = blockchainTransactions;
       _isTransactionLoading = false;
       notifyListeners();
@@ -796,38 +741,36 @@ class StellarProvider extends ChangeNotifier {
       notifyListeners();
     }
   }
-  
+
   // Load transactions from blockchain
   Future<void> loadTransactionsFromBlockchain() async {
-    
     if (!_hasWallet) {
       return;
     }
-    
+
     _isTransactionLoading = true;
     notifyListeners();
-    
+
     try {
-      
       // Use blockchain service directly
-      final transactions = await BlockchainTransactionService.getUserTransactionsFromBlockchain();
-      
+      final transactions =
+          await BlockchainTransactionService.getUserTransactionsFromBlockchain();
+
       for (int i = 0; i < transactions.length; i++) {
         final tx = transactions[i];
       }
-      
+
       // Sort transactions by most recent first (blockchain timestamp)
       _transactions = transactions;
       _transactions.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      
+
       _isTransactionLoading = false;
-      
-      
+
       // Debug: Print final transaction list
       for (int i = 0; i < _transactions.length; i++) {
         final tx = _transactions[i];
       }
-      
+
       notifyListeners();
     } catch (e) {
       _isTransactionLoading = false;
@@ -838,30 +781,28 @@ class StellarProvider extends ChangeNotifier {
 
   // Refresh transactions after new operations (for real-time updates)
   Future<void> refreshTransactionsAfterOperation() async {
-    
     // Clear cache to force fresh blockchain fetch
     BlockchainTransactionService.clearCache();
-    
+
     // Reload transactions from blockchain
     await loadTransactionsFromBlockchain();
-    
   }
 
   // Force immediate refresh (for debugging and manual refresh)
   Future<void> forceRefreshTransactions() async {
-    
     // Clear cache
     BlockchainTransactionService.clearCache();
-    
+
     // Reload transactions from blockchain
     await loadTransactionsFromBlockchain();
-    
   }
 
   // Start automatic transaction refresh timer
   void _startTransactionAutoRefresh() {
     _transactionRefreshTimer?.cancel();
-    _transactionRefreshTimer = Timer.periodic(_transactionRefreshInterval, (timer) async {
+    _transactionRefreshTimer = Timer.periodic(_transactionRefreshInterval, (
+      timer,
+    ) async {
       if (_hasWallet && !_isTransactionLoading) {
         await loadTransactionsFromBlockchain();
       }
@@ -873,14 +814,14 @@ class StellarProvider extends ChangeNotifier {
     _transactionRefreshTimer?.cancel();
     _transactionRefreshTimer = null;
   }
-  
+
   // Load all assets in the wallet
   Future<void> loadWalletAssets() async {
     if (_publicKey == null) return;
-    
+
     _isLoadingWalletAssets = true;
     notifyListeners();
-    
+
     try {
       _walletAssets = await _stellarService.getAllWalletAssets(_publicKey!);
       _isLoadingWalletAssets = false;
@@ -891,20 +832,30 @@ class StellarProvider extends ChangeNotifier {
       notifyListeners();
     }
   }
-  
+
   // Send any asset
-  Future<Map<String, dynamic>> sendAsset(String assetCode, String destinationAddress, String amount, {String? memo}) async {
+  Future<Map<String, dynamic>> sendAsset(
+    String assetCode,
+    String destinationAddress,
+    String amount, {
+    String? memo,
+  }) async {
     _setLoading(true);
     _setError(null);
-    
+
     try {
-      final result = await _stellarService.sendAsset(assetCode, destinationAddress, amount, memo: memo);
-      
+      final result = await _stellarService.sendAsset(
+        assetCode,
+        destinationAddress,
+        amount,
+        memo: memo,
+      );
+
       // Refresh balances and transactions after sending
       await refreshBalance();
       await loadTransactions();
       await loadWalletAssets();
-      
+
       _setLoading(false);
       return result;
     } catch (e) {
@@ -913,62 +864,36 @@ class StellarProvider extends ChangeNotifier {
       return {'success': false, 'error': e.toString()};
     }
   }
-  
+
   // Send Akofa coins (for backward compatibility)
-  Future<Map<String, dynamic>> sendAkofa(String destinationAddress, String amount, {String? memo}) async {
+  Future<Map<String, dynamic>> sendAkofa(
+    String destinationAddress,
+    String amount, {
+    String? memo,
+  }) async {
     return sendAsset('AKOFA', destinationAddress, amount, memo: memo);
   }
-  
-  // Send XLM (for backward compatibility)
-  Future<Map<String, dynamic>> sendXlm(String destinationAddress, String amount, {String? memo}) async {
-    return sendAsset('XLM', destinationAddress, amount, memo: memo);
-  }
-  
-  // Record mining reward
-  Future<bool> recordMiningReward(double amount) async {
-    try {
-      final result = await _stellarService.recordMiningReward(amount);
-      return result['success'] == true;
-    } catch (e) {
-      return false;
-    }
-  }
 
-  // Reconcile uncredited mining sessions for the current user
-  Future<void> reconcileUncreditedMiningSessions(String userId) async {
-    try {
-      final firestore = FirebaseFirestore.instance;
-      final sessionsRef = firestore.collection('mining_history').doc(userId).collection('sessions');
-      final sessions = await sessionsRef.get();
-      for (final doc in sessions.docs) {
-        final data = doc.data();
-        final status = data['status'] ?? '';
-        final amount = (data['earned'] ?? 0).toDouble();
-        if (status != 'completed' && amount > 0) {
-          // Try to credit the reward again
-          final result = await recordMiningReward(amount);
-          if (result) {
-            await doc.reference.update({'status': 'completed'});
-          } else {
-            await doc.reference.update({'status': 'failed'});
-          }
-        }
-      }
-    } catch (e) {
-    }
+  // Send XLM (for backward compatibility)
+  Future<Map<String, dynamic>> sendXlm(
+    String destinationAddress,
+    String amount, {
+    String? memo,
+  }) async {
+    return sendAsset('XLM', destinationAddress, amount, memo: memo);
   }
 
   // Create a test transaction for debugging
   Future<bool> createTestTransaction() async {
     _setLoading(true);
     _setError(null);
-    
+
     try {
       // TODO: Implement createTestTransaction method
-      
+
       // Refresh transactions after creating test transaction
       await loadTransactions();
-      
+
       _setLoading(false);
       return true;
     } catch (e) {
@@ -977,14 +902,14 @@ class StellarProvider extends ChangeNotifier {
       return false;
     }
   }
-  
+
   // ==================== SWAP FUNCTIONALITY ====================
-  
+
   // Load supported assets for swapping
   Future<void> loadSupportedAssets() async {
     _isSwapLoading = true;
     notifyListeners();
-    
+
     try {
       _supportedAssets = _swapService.getSupportedAssets();
       _isSwapLoading = false;
@@ -994,35 +919,46 @@ class StellarProvider extends ChangeNotifier {
       _setError('Failed to load supported assets: $e');
     }
   }
-  
+
   // Check if asset has a trustline
   Future<bool> hasAssetTrustline(String assetCode, String assetIssuer) async {
     if (this._publicKey == null) return false;
-    
+
     try {
-      return await _swapService.hasAssetTrustline(this._publicKey!, assetCode, assetIssuer);
+      return await _swapService.hasAssetTrustline(
+        this._publicKey!,
+        assetCode,
+        assetIssuer,
+      );
     } catch (e) {
       _setError('Failed to check asset trustline: $e');
       return false;
     }
   }
-  
+
   // Add trustline for an asset
-  Future<Map<String, dynamic>> addAssetTrustline(String assetCode, String assetIssuer) async {
+  Future<Map<String, dynamic>> addAssetTrustline(
+    String assetCode,
+    String assetIssuer,
+  ) async {
     if (this._publicKey == null) {
       return {
         'success': false,
         'message': 'No public key available',
-        'status': 'no_public_key'
+        'status': 'no_public_key',
       };
     }
-    
+
     _isSwapLoading = true;
     _setError(null);
     notifyListeners();
-    
+
     try {
-      final result = await _swapService.addAssetTrustline(this._publicKey!, assetCode, assetIssuer);
+      final result = await _swapService.addAssetTrustline(
+        this._publicKey!,
+        assetCode,
+        assetIssuer,
+      );
       _isSwapLoading = false;
       notifyListeners();
       return result;
@@ -1034,18 +970,22 @@ class StellarProvider extends ChangeNotifier {
         'success': false,
         'message': 'Failed to add asset trustline',
         'error': e.toString(),
-        'status': 'error'
+        'status': 'error',
       };
     }
   }
-  
+
   // Get asset balance
   Future<String> getAssetBalance(String assetCode, String assetIssuer) async {
     // Access the class variable with 'this' to ensure proper scope
     if (this._publicKey == null) return "0";
-    
+
     try {
-      final balance = await _swapService.getAssetBalance(this._publicKey!, assetCode, assetIssuer);
+      final balance = await _swapService.getAssetBalance(
+        this._publicKey!,
+        assetCode,
+        assetIssuer,
+      );
       _assetBalances[assetCode] = balance;
       notifyListeners();
       return balance;
@@ -1054,23 +994,27 @@ class StellarProvider extends ChangeNotifier {
       return "0";
     }
   }
-  
+
   // Load all asset balances
   Future<void> loadAllAssetBalances() async {
     if (_publicKey == null) return;
-    
+
     _isSwapLoading = true;
     notifyListeners();
-    
+
     try {
       for (var asset in _supportedAssets) {
         final assetCode = asset['code']!;
         final assetIssuer = asset['issuer'] == 'native' ? '' : asset['issuer']!;
-        
-        final balance = await _swapService.getAssetBalance(_publicKey!, assetCode, assetIssuer);
+
+        final balance = await _swapService.getAssetBalance(
+          _publicKey!,
+          assetCode,
+          assetIssuer,
+        );
         _assetBalances[assetCode] = balance;
       }
-      
+
       _isSwapLoading = false;
       notifyListeners();
     } catch (e) {
@@ -1079,9 +1023,12 @@ class StellarProvider extends ChangeNotifier {
       notifyListeners();
     }
   }
-  
+
   // Get exchange rate between two assets
-  Future<double> getExchangeRate(String fromAssetCode, String toAssetCode) async {
+  Future<double> getExchangeRate(
+    String fromAssetCode,
+    String toAssetCode,
+  ) async {
     try {
       return await _swapService.getExchangeRate(fromAssetCode, toAssetCode);
     } catch (e) {
@@ -1089,27 +1036,31 @@ class StellarProvider extends ChangeNotifier {
       return 1.0; // Default to 1:1 exchange rate on error
     }
   }
-  
+
   // Execute a swap between two assets
   Future<Map<String, dynamic>> executeSwap(
     String fromAssetCode,
     String toAssetCode,
-    double amount
+    double amount,
   ) async {
     _isSwapLoading = true;
     _setError(null);
     notifyListeners();
-    
+
     try {
-      final result = await _swapService.executeSwap(fromAssetCode, toAssetCode, amount);
-      
+      final result = await _swapService.executeSwap(
+        fromAssetCode,
+        toAssetCode,
+        amount,
+      );
+
       if (result['success'] == true) {
         // Refresh balances and transaction history
         await loadAllAssetBalances();
         await loadSwapHistory();
         await loadTransactions();
       }
-      
+
       _isSwapLoading = false;
       notifyListeners();
       return result;
@@ -1121,16 +1072,16 @@ class StellarProvider extends ChangeNotifier {
         'success': false,
         'message': 'Failed to execute swap',
         'error': e.toString(),
-        'status': 'error'
+        'status': 'error',
       };
     }
   }
-  
+
   // Load swap history
   Future<void> loadSwapHistory() async {
     _isSwapLoading = true;
     notifyListeners();
-    
+
     try {
       _swapHistory = await _swapService.getSwapHistory();
       _isSwapLoading = false;
@@ -1141,21 +1092,28 @@ class StellarProvider extends ChangeNotifier {
       notifyListeners();
     }
   }
-  
+
   // ==================== M-PESA FUNCTIONALITY ====================
-  
+
   // Initiate M-Pesa STK Push
-  Future<Map<String, dynamic>> initiateMpesaPayment(String phoneNumber, double amount) async {
+  Future<Map<String, dynamic>> initiateMpesaPayment(
+    String phoneNumber,
+    double amount,
+  ) async {
     _isMpesaLoading = true;
     _setError(null);
     notifyListeners();
-    
+
     try {
       // Generate a unique reference for this transaction
       final accountReference = 'AZIX${DateTime.now().millisecondsSinceEpoch}';
-      
-      final result = await _mpesaService.initiateSTKPush(phoneNumber, amount, accountReference);
-      
+
+      final result = await _mpesaService.initiateSTKPush(
+        phoneNumber,
+        amount,
+        accountReference,
+      );
+
       _isMpesaLoading = false;
       notifyListeners();
       return result;
@@ -1166,25 +1124,27 @@ class StellarProvider extends ChangeNotifier {
       return {
         'success': false,
         'message': 'Failed to initiate M-Pesa payment',
-        'error': e.toString()
+        'error': e.toString(),
       };
     }
   }
-  
+
   // Check M-Pesa payment status
-  Future<Map<String, dynamic>> checkMpesaPaymentStatus(String checkoutRequestId) async {
+  Future<Map<String, dynamic>> checkMpesaPaymentStatus(
+    String checkoutRequestId,
+  ) async {
     _isMpesaLoading = true;
     notifyListeners();
-    
+
     try {
       final result = await _mpesaService.querySTKStatus(checkoutRequestId);
-      
+
       if (result['success'] == true && result['resultCode'] == '0') {
         // Payment was successful, refresh balances
         await refreshBalance();
         await loadMpesaTransactions();
       }
-      
+
       _isMpesaLoading = false;
       notifyListeners();
       return result;
@@ -1195,16 +1155,16 @@ class StellarProvider extends ChangeNotifier {
       return {
         'success': false,
         'message': 'Failed to check payment status',
-        'error': e.toString()
+        'error': e.toString(),
       };
     }
   }
-  
+
   // Load M-Pesa transaction history
   Future<void> loadMpesaTransactions() async {
     _isMpesaLoading = true;
     notifyListeners();
-    
+
     try {
       _mpesaTransactions = await _mpesaService.getMpesaTransactionHistory();
       _isMpesaLoading = false;
@@ -1217,14 +1177,22 @@ class StellarProvider extends ChangeNotifier {
   }
 
   // Buy tokens with M-Pesa and credit selected asset
-  Future<Map<String, dynamic>> buyWithMpesa({required String phoneNumber, required double amount, required String assetCode}) async {
+  Future<Map<String, dynamic>> buyWithMpesa({
+    required String phoneNumber,
+    required double amount,
+    required String assetCode,
+  }) async {
     _isMpesaLoading = true;
     _setError(null);
     notifyListeners();
     try {
       // Generate a unique reference for this transaction
       final accountReference = 'AZIX${DateTime.now().millisecondsSinceEpoch}';
-      final result = await _mpesaService.initiateSTKPush(phoneNumber, amount, accountReference);
+      final result = await _mpesaService.initiateSTKPush(
+        phoneNumber,
+        amount,
+        accountReference,
+      );
       if (result['success'] == true) {
         // Wait for payment confirmation (simulate or poll in real app)
         // For now, assume success and credit asset
@@ -1247,39 +1215,44 @@ class StellarProvider extends ChangeNotifier {
   }
 
   // Credit the user's account with the selected asset (stub for now)
-  Future<Map<String, dynamic>> creditUserAsset(String assetCode, double amount) async {
+  Future<Map<String, dynamic>> creditUserAsset(
+    String assetCode,
+    double amount,
+  ) async {
     try {
       final publicKey = _publicKey;
       if (publicKey == null) throw Exception('No wallet public key');
-      
-      
+
       // Use the sendAssetFromIssuer method for issuer-to-user transfers
-      final result = await _stellarService.sendAssetFromIssuer(assetCode, publicKey, amount.toString(), memo: 'Buy Akofa via Flutterwave');
-      
+      final result = await _stellarService.sendAssetFromIssuer(
+        assetCode,
+        publicKey,
+        amount.toString(),
+        memo: 'Buy Akofa via Payment Provider',
+      );
+
       if (result['success'] == true) {
-        
         // Refresh balances and transactions after successful credit
         await refreshBalance();
         await loadTransactions();
         await loadWalletAssets();
-        
+
         return {
           'success': true,
           'hash': result['hash'],
-          'message': 'Successfully credited $amount $assetCode'
+          'message': 'Successfully credited $amount $assetCode',
         };
       } else {
         throw Exception('Stellar transaction failed: ${result['message']}');
       }
-      
     } catch (e) {
       _setError('Failed to credit asset: $e');
-      
+
       // Re-throw the error so the caller knows the transaction failed
       return {
         'success': false,
         'error': e.toString(),
-        'message': 'Failed to credit $amount $assetCode: $e'
+        'message': 'Failed to credit $amount $assetCode: $e',
       };
     }
   }
@@ -1290,382 +1263,15 @@ class StellarProvider extends ChangeNotifier {
       final hasWallet = await _stellarService.hasWallet();
       if (!hasWallet) return false;
       final credentials = await _stellarService.getWalletCredentials();
-      if (credentials == null || credentials['secretKey'] == null || credentials['secretKey']!.isEmpty) {
+      if (credentials == null ||
+          credentials['secretKey'] == null ||
+          credentials['secretKey']!.isEmpty) {
         return false;
       }
       return true;
     } catch (e) {
       return false;
     }
-  }
-
-  // ==================== MINING FUNCTIONALITY ====================
-
-  // Manual method to start mining - only works when no active session exists
-  Future<bool> startMining() async {
-    if (_publicKey == null) return false;
-    
-    // Check if there's already an active session
-    final currentSession = this.currentMiningSession;
-    if (currentSession != null && currentSession.isActive && !currentSession.isExpired) {
-      // Can't start mining if there's already an active session
-      return false;
-    }
-    
-    // Create new mining session
-    final newSession = MiningSession.newSession(miningRate: 0.25);
-    _miningSessions = [newSession];
-    
-    // Start the mining timer
-    await startMiningTimer();
-    
-    // Save the new session
-    await saveMiningSession(newSession);
-    
-    notifyListeners();
-    return true;
-  }
-
-  Future<void> startMiningTimer() async {
-    if (_publicKey == null) return;
-    
-    // Cancel existing timer if any
-    _miningTimer?.cancel();
-    
-    // Start the mining timer that runs every second
-    _miningTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      _updateMiningProgress();
-    });
-    
-  }
-
-  void stopMiningTimer() {
-    _miningTimer?.cancel();
-    _miningTimer = null;
-  }
-
-  void _updateMiningProgress() {
-    if (_miningSessions.isEmpty) return;
-    
-    // Find the current active session
-    final activeSession = _miningSessions.lastWhere(
-      (session) => session.isActive && !session.isExpired,
-      orElse: () => _miningSessions.isNotEmpty ? _miningSessions.last : MiningSession.newSession(miningRate: 0.25),
-    );
-    
-    if (activeSession.isActive && !activeSession.isPaused && !activeSession.isExpired) {
-      // Update session progress in real-time
-      final now = DateTime.now();
-      final timeSinceResume = now.difference(activeSession.lastResume).inSeconds;
-      
-      // Check if session should end (24 hours)
-      if (now.isAfter(activeSession.sessionEnd)) {
-        _endMiningSession(activeSession);
-      } else {
-        // Update accumulated time and notify listeners every second
-        activeSession.accumulatedSeconds = activeSession.accumulatedSeconds + timeSinceResume;
-        activeSession.lastResume = now;
-        
-        // Save state every 10 seconds to ensure persistence
-        if (activeSession.accumulatedSeconds % 10 == 0) {
-          saveMiningSession(activeSession);
-        }
-        
-        notifyListeners();
-      }
-    } else if (activeSession.isExpired && !activeSession.isPaused) {
-      // Session has expired but hasn't been processed yet
-      _endMiningSession(activeSession);
-    }
-  }
-
-  void _endMiningSession(MiningSession session) {
-    session.isPaused = true;
-    
-    // Calculate and record mining reward
-    final earned = session.earnedAkofa;
-    
-    if (earned > 0) {
-      // Record mining reward asynchronously
-      _recordMiningRewardAsync(earned, session);
-    }
-    
-    // Save session to storage
-    saveMiningSession(session);
-    
-    // Don't automatically start new session - user must manually start
-    // _startNewMiningSession();
-    
-    notifyListeners();
-  }
-
-  // Helper method to handle async mining reward recording
-  Future<void> _recordMiningRewardAsync(double earned, MiningSession session) async {
-    try {
-      final success = await recordMiningReward(earned);
-      
-      if (success) {
-        // Update session status to completed
-        session.isPaused = true;
-        await saveMiningSession(session);
-        
-        // Save to mining history
-        await _saveMiningSessionToHistory(session, 'completed', earned);
-      } else {
-        // Save to mining history as failed
-        await _saveMiningSessionToHistory(session, 'failed', earned);
-      }
-    } catch (e) {
-      // Save to mining history as failed
-      await _saveMiningSessionToHistory(session, 'failed', earned);
-    }
-  }
-
-  // Save mining session to history
-  Future<void> _saveMiningSessionToHistory(MiningSession session, String status, double earned) async {
-    try {
-      final auth = firebase_auth.FirebaseAuth.instance;
-      final user = auth.currentUser;
-      if (user == null) return;
-
-      final firestore = FirebaseFirestore.instance;
-      await firestore
-          .collection('mining_history')
-          .doc(user.uid)
-          .collection('sessions')
-          .add({
-        'sessionId': session.sessionId,
-        'sessionStart': session.sessionStart.toIso8601String(),
-        'sessionEnd': session.sessionEnd.toIso8601String(),
-        'duration': session.sessionEnd.difference(session.sessionStart).inSeconds,
-        'accumulatedSeconds': session.accumulatedSeconds,
-        'miningRate': session.miningRate,
-        'earned': earned,
-        'status': status,
-        'completedAt': FieldValue.serverTimestamp(),
-      });
-    } catch (e) {
-    }
-  }
-
-  void _startNewMiningSession() {
-    final newSession = MiningSession.newSession(miningRate: 0.25);
-    
-    _miningSessions.add(newSession);
-    saveMiningSession(newSession);
-    notifyListeners();
-  }
-
-  Future<void> saveMiningSession(MiningSession session) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final sessionData = {
-        'sessionId': session.sessionId,
-        'sessionStart': session.sessionStart.millisecondsSinceEpoch,
-        'sessionEnd': session.sessionEnd.millisecondsSinceEpoch,
-        'isPaused': session.isPaused,
-        'pausedAt': session.pausedAt?.millisecondsSinceEpoch,
-        'accumulatedSeconds': session.accumulatedSeconds,
-        'lastResume': session.lastResume.millisecondsSinceEpoch,
-        'miningRate': session.miningRate,
-      };
-      
-      // Save as JSON string for proper parsing
-      await prefs.setString('current_mining_session', json.encode(sessionData));
-      
-      // Also save to Firestore for cloud backup (optional)
-      await _saveMiningSessionToFirestore(session);
-    } catch (e) {
-    }
-  }
-
-  Future<void> _saveMiningSessionToFirestore(MiningSession session) async {
-    try {
-      // For now, we'll skip Firestore save to avoid context issues
-      // This can be implemented later with proper context management
-      // The local storage is sufficient for persistence
-    } catch (e) {
-      // Don't fail the local save if Firestore fails
-    }
-  }
-
-  Future<void> loadMiningSessions() async {
-    if (_publicKey == null) return;
-    
-    _isLoadingMiningSessions = true;
-    notifyListeners();
-    
-    try {
-      // Load from local storage
-      final prefs = await SharedPreferences.getInstance();
-      final sessionData = prefs.getString('current_mining_session');
-      
-      if (sessionData != null) {
-        try {
-          final sessionMap = Map<String, dynamic>.from(
-            json.decode(sessionData) as Map<String, dynamic>
-          );
-          
-          // Convert stored timestamps back to DateTime objects
-          final session = MiningSession(
-            sessionId: sessionMap['sessionId'] ?? '',
-            sessionStart: DateTime.fromMillisecondsSinceEpoch(sessionMap['sessionStart'] ?? 0),
-            sessionEnd: DateTime.fromMillisecondsSinceEpoch(sessionMap['sessionEnd'] ?? 0),
-            isPaused: sessionMap['isPaused'] ?? false,
-            pausedAt: sessionMap['pausedAt'] != null 
-                ? DateTime.fromMillisecondsSinceEpoch(sessionMap['pausedAt'])
-                : null,
-            accumulatedSeconds: sessionMap['accumulatedSeconds'] ?? 0,
-            lastResume: DateTime.fromMillisecondsSinceEpoch(sessionMap['lastResume'] ?? 0),
-            miningRate: (sessionMap['miningRate'] as num?)?.toDouble() ?? 0.25,
-          );
-          
-          _miningSessions = [session];
-          
-          // Check if session is still valid and restore state
-          await _restoreMiningState(session);
-        } catch (parseError) {
-          // Don't automatically create new session - user must manually start
-          _miningSessions = [];
-        }
-      } else {
-        // No session exists - don't create one automatically
-        // User must manually start mining
-        _miningSessions = [];
-      }
-      
-      _isLoadingMiningSessions = false;
-      notifyListeners();
-    } catch (e) {
-      _isLoadingMiningSessions = false;
-      _setError('Failed to load mining sessions: $e');
-      notifyListeners();
-    }
-  }
-
-  Future<void> _restoreMiningState(MiningSession session) async {
-    final now = DateTime.now();
-    
-    // Check if session has expired
-    if (now.isAfter(session.sessionEnd)) {
-      // Session expired, process the mining reward before marking as expired
-      
-      // Calculate final accumulated time
-      if (!session.isPaused && session.pausedAt == null) {
-        final timeSinceResume = session.sessionEnd.difference(session.lastResume).inSeconds;
-        session.accumulatedSeconds += timeSinceResume;
-      }
-      
-      // Mark as expired
-      session.isPaused = true;
-      session.pausedAt = now;
-      
-      // Process the mining reward if there are earnings
-      final earned = session.earnedAkofa;
-      if (earned > 0) {
-        await _recordMiningRewardAsync(earned, session);
-      }
-      
-      await saveMiningSession(session);
-      return;
-    }
-    
-    // If session was paused, keep it paused
-    if (session.isPaused) {
-      // Update accumulated time from when it was paused
-      if (session.pausedAt != null) {
-        final timeSincePause = session.pausedAt!.difference(session.lastResume).inSeconds;
-        session.accumulatedSeconds += timeSincePause;
-      }
-    } else {
-      // Session was active, calculate accumulated time since last resume
-      final timeSinceResume = now.difference(session.lastResume).inSeconds;
-      session.accumulatedSeconds += timeSinceResume;
-      session.lastResume = now;
-    }
-    
-    // Save the restored state
-    await saveMiningSession(session);
-    
-    // Don't automatically start timer - user must manually resume mining
-    // if (session.isActive && !session.isPaused) {
-    //   await startMiningTimer();
-    // }
-  }
-
-  Future<void> stopMiningSession(String sessionId) async {
-    final sessionToStop = _miningSessions.firstWhere(
-      (session) => session.sessionId == sessionId,
-      orElse: () => MiningSession.newSession(miningRate: 0.25),
-    );
-    
-    if (sessionToStop.isActive) {
-      sessionToStop.pauseMining();
-      await saveMiningSession(sessionToStop);
-      notifyListeners();
-    }
-  }
-
-  Future<void> deleteMiningSession(String sessionId) async {
-    _miningSessions.removeWhere((session) => session.sessionId == sessionId);
-    notifyListeners();
-  }
-
-  // Get current active mining session
-  MiningSession? get currentMiningSession {
-    if (_miningSessions.isEmpty) return null;
-    return _miningSessions.lastWhere(
-      (session) => session.isActive,
-      orElse: () => _miningSessions.last,
-    );
-  }
-
-  // Get mining progress (0.0 to 1.0)
-  double get miningProgress {
-    final session = currentMiningSession;
-    if (session == null || !session.isActive) return 0.0;
-    
-    final now = DateTime.now();
-    final elapsed = now.difference(session.sessionStart).inSeconds;
-    final total = session.sessionEnd.difference(session.sessionStart).inSeconds;
-    
-    return (elapsed / total).clamp(0.0, 1.0);
-  }
-
-  // Get current mining earnings
-  double get currentMiningEarnings {
-    final session = currentMiningSession;
-    if (session == null || !session.isActive) return 0.0;
-    
-    return session.earnedAkofa;
-  }
-
-  // Get time remaining in current session
-  Duration get timeRemaining {
-    final session = currentMiningSession;
-    if (session == null || session.isExpired) return Duration.zero;
-    
-    final now = DateTime.now();
-    final remaining = session.sessionEnd.difference(now);
-    return remaining.isNegative ? Duration.zero : remaining;
-  }
-
-  // Get formatted time remaining string
-  String get formattedTimeRemaining {
-    final remaining = timeRemaining;
-    if (remaining.inSeconds <= 0) return 'Session Ended';
-    
-    final hours = remaining.inHours;
-    final minutes = remaining.inMinutes % 60;
-    final seconds = remaining.inSeconds % 60;
-    
-    return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-  }
-
-  // Check if mining can be started (no active session exists)
-  bool get canStartMining {
-    final session = currentMiningSession;
-    return session == null || session.isExpired;
   }
 
   /// Check account status without fixing (for diagnostics)
@@ -1695,7 +1301,6 @@ class StellarProvider extends ChangeNotifier {
   /// ```
   Future<Map<String, dynamic>> checkAccountStatus(String publicKey) async {
     try {
-
       final result = <String, dynamic>{
         'publicKey': publicKey,
         'accountExists': false,
@@ -1705,7 +1310,7 @@ class StellarProvider extends ChangeNotifier {
         'akofaBalance': '0',
         'needsFunding': false,
         'needsTrustline': false,
-        'status': 'unknown'
+        'status': 'unknown',
       };
 
       // Check if account exists
@@ -1721,7 +1326,8 @@ class StellarProvider extends ChangeNotifier {
       // Get XLM balance
       final xlmBalance = await _stellarService.getBalance(publicKey);
       result['xlmBalance'] = xlmBalance;
-      result['hasXlm'] = double.tryParse(xlmBalance) != null && double.parse(xlmBalance) > 0;
+      result['hasXlm'] =
+          double.tryParse(xlmBalance) != null && double.parse(xlmBalance) > 0;
 
       // Check Akofa trustline
       final hasTrustline = await _stellarService.hasAkofaTrustline(publicKey);
@@ -1744,20 +1350,14 @@ class StellarProvider extends ChangeNotifier {
       }
 
       return result;
-
     } catch (e) {
-      return {
-        'publicKey': publicKey,
-        'error': e.toString(),
-        'status': 'error'
-      };
+      return {'publicKey': publicKey, 'error': e.toString(), 'status': 'error'};
     }
   }
 
   // Test method to verify Friendbot funding (for debugging)
   Future<Map<String, dynamic>> testFriendbotFunding(String publicKey) async {
     try {
-
       final friendBotUrl = 'https://friendbot.stellar.org/?addr=$publicKey';
       final response = await http.get(Uri.parse(friendBotUrl));
 
@@ -1771,21 +1371,21 @@ class StellarProvider extends ChangeNotifier {
         return {
           'success': true,
           'message': 'Friendbot funding test successful',
-          'response': response.body
+          'response': response.body,
         };
       } else {
         return {
           'success': false,
           'message': 'Friendbot funding test failed',
           'statusCode': response.statusCode,
-          'response': response.body
+          'response': response.body,
         };
       }
     } catch (e) {
       return {
         'success': false,
         'message': 'Friendbot funding test error',
-        'error': e.toString()
+        'error': e.toString(),
       };
     }
   }
@@ -1813,14 +1413,13 @@ class StellarProvider extends ChangeNotifier {
   /// ```
   Future<Map<String, dynamic>> findAndFixUnfundedAccounts() async {
     try {
-
       final result = <String, dynamic>{
         'success': true,
         'accountsFound': 0,
         'accountsFunded': 0,
         'trustlinesAdded': 0,
         'errors': <String>[],
-        'details': <Map<String, dynamic>>[]
+        'details': <Map<String, dynamic>>[],
       };
 
       // Get current user's Stellar public key first
@@ -1828,7 +1427,7 @@ class StellarProvider extends ChangeNotifier {
         return {
           'success': false,
           'message': 'No current wallet found',
-          'error': 'no_wallet'
+          'error': 'no_wallet',
         };
       }
 
@@ -1842,12 +1441,12 @@ class StellarProvider extends ChangeNotifier {
         'initialStatus': accountInfo,
         'funded': false,
         'trustlineAdded': false,
-        'errors': <String>[]
+        'errors': <String>[],
       };
 
       // Check if account needs funding
-      if (accountInfo['exists'] == false || accountInfo['status'] == 'unfunded') {
-
+      if (accountInfo['exists'] == false ||
+          accountInfo['status'] == 'unfunded') {
         // Fund the account
         final fundingResult = await ensureAccountFunded();
 
@@ -1855,7 +1454,9 @@ class StellarProvider extends ChangeNotifier {
           accountDetail['funded'] = true;
           result['accountsFunded'] = (result['accountsFunded'] as int) + 1;
         } else {
-          accountDetail['errors'].add('Funding failed: ${fundingResult['message']}');
+          accountDetail['errors'].add(
+            'Funding failed: ${fundingResult['message']}',
+          );
         }
       } else {
         accountDetail['funded'] = true;
@@ -1870,14 +1471,12 @@ class StellarProvider extends ChangeNotifier {
       // Also check for other user wallets in Firestore (for multi-wallet scenarios)
       await _checkOtherUserWallets(result);
 
-
       return result;
-
     } catch (e) {
       return {
         'success': false,
         'message': 'Error searching for unfunded accounts',
-        'error': e.toString()
+        'error': e.toString(),
       };
     }
   }
@@ -1887,7 +1486,6 @@ class StellarProvider extends ChangeNotifier {
     try {
       final user = firebase_auth.FirebaseAuth.instance.currentUser;
       if (user == null) return;
-
 
       // Query Firestore for other wallets owned by this user
       final walletsSnapshot = await FirebaseFirestore.instance
@@ -1902,7 +1500,6 @@ class StellarProvider extends ChangeNotifier {
         // Skip current wallet (already checked)
         if (walletPublicKey == _publicKey) continue;
 
-
         result['accountsFound'] = (result['accountsFound'] as int) + 1;
 
         final accountDetail = <String, dynamic>{
@@ -1910,17 +1507,19 @@ class StellarProvider extends ChangeNotifier {
           'initialStatus': {'exists': false, 'status': 'unknown'},
           'funded': false,
           'trustlineAdded': false,
-          'errors': <String>[]
+          'errors': <String>[],
         };
 
         try {
           // Check account status
-          final accountExists = await _stellarService.checkAccountExists(walletPublicKey);
+          final accountExists = await _stellarService.checkAccountExists(
+            walletPublicKey,
+          );
 
           if (!accountExists) {
-
             // Fund using Friendbot directly
-            final friendBotUrl = 'https://friendbot.stellar.org/?addr=$walletPublicKey';
+            final friendBotUrl =
+                'https://friendbot.stellar.org/?addr=$walletPublicKey';
             final response = await http.get(Uri.parse(friendBotUrl));
 
             if (response.statusCode == 200) {
@@ -1936,14 +1535,12 @@ class StellarProvider extends ChangeNotifier {
 
           // Trustline is now handled automatically
           accountDetail['trustlineAdded'] = true;
-
         } catch (walletError) {
           accountDetail['errors'].add('Error processing wallet: $walletError');
         }
 
         result['details'].add(accountDetail);
       }
-
     } catch (e) {
       result['errors'].add('Error checking other wallets: $e');
     }
@@ -1972,9 +1569,10 @@ class StellarProvider extends ChangeNotifier {
   /// ```
   ///
   /// ⚠️ Use with caution - this processes real user data
-  Future<Map<String, dynamic>> batchFixUnfundedAccounts({int limit = 50}) async {
+  Future<Map<String, dynamic>> batchFixUnfundedAccounts({
+    int limit = 50,
+  }) async {
     try {
-
       final result = <String, dynamic>{
         'success': true,
         'usersProcessed': 0,
@@ -1982,11 +1580,14 @@ class StellarProvider extends ChangeNotifier {
         'accountsFunded': 0,
         'trustlinesAdded': 0,
         'errors': <String>[],
-        'userResults': <Map<String, dynamic>>[]
+        'userResults': <Map<String, dynamic>>[],
       };
 
       // Get all users from Firestore (be careful with this in production!)
-      final usersSnapshot = await FirebaseFirestore.instance.collection('USER').limit(limit).get();
+      final usersSnapshot = await FirebaseFirestore.instance
+          .collection('USER')
+          .limit(limit)
+          .get();
 
       for (final userDoc in usersSnapshot.docs) {
         final userData = userDoc.data();
@@ -1997,7 +1598,6 @@ class StellarProvider extends ChangeNotifier {
           continue; // Skip users without Stellar wallets
         }
 
-
         result['usersProcessed'] = (result['usersProcessed'] as int) + 1;
 
         final userResult = <String, dynamic>{
@@ -2006,21 +1606,25 @@ class StellarProvider extends ChangeNotifier {
           'processed': false,
           'funded': false,
           'trustlineAdded': false,
-          'errors': <String>[]
+          'errors': <String>[],
         };
 
         try {
           // Check if account exists
-          final accountExists = await _stellarService.checkAccountExists(stellarPublicKey);
+          final accountExists = await _stellarService.checkAccountExists(
+            stellarPublicKey,
+          );
 
           if (!accountExists) {
-
             // Fund using Friendbot
-            final friendBotUrl = 'https://friendbot.stellar.org/?addr=$stellarPublicKey';
+            final friendBotUrl =
+                'https://friendbot.stellar.org/?addr=$stellarPublicKey';
             final response = await http.get(Uri.parse(friendBotUrl));
 
             if (response.statusCode == 200) {
-              await Future.delayed(const Duration(seconds: 3)); // Shorter delay for batch operations
+              await Future.delayed(
+                const Duration(seconds: 3),
+              ); // Shorter delay for batch operations
               userResult['funded'] = true;
               result['accountsFunded'] = (result['accountsFunded'] as int) + 1;
             } else {
@@ -2037,7 +1641,6 @@ class StellarProvider extends ChangeNotifier {
 
           userResult['processed'] = true;
           result['accountsFound'] = (result['accountsFound'] as int) + 1;
-
         } catch (userError) {
           userResult['errors'].add('Error processing user: $userError');
         }
@@ -2048,21 +1651,18 @@ class StellarProvider extends ChangeNotifier {
         await Future.delayed(const Duration(milliseconds: 500));
       }
 
-
       return result;
-
     } catch (e) {
       return {
         'success': false,
         'message': 'Error in batch fix operation',
-        'error': e.toString()
+        'error': e.toString(),
       };
     }
   }
 
   @override
   void dispose() {
-    _miningTimer?.cancel();
     _stopTransactionAutoRefresh();
     super.dispose();
   }

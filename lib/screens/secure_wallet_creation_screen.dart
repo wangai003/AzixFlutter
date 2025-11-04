@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/secure_wallet_service.dart';
+import '../services/akofa_tag_service.dart';
 import '../theme/app_theme.dart';
 import '../providers/auth_provider.dart' as local_auth;
 
@@ -653,6 +654,9 @@ class _SecureWalletCreationScreenState
       );
 
       if (result['success'] == true) {
+        // Check AKOFA tag creation and linking
+        await _verifyAkofaTagCreation(user.uid);
+
         setState(() {
           _successMessage = result['message'];
         });
@@ -677,6 +681,43 @@ class _SecureWalletCreationScreenState
       });
     } finally {
       setState(() => _isCreating = false);
+    }
+  }
+
+  /// Verify AKOFA tag creation and linking during wallet creation
+  Future<void> _verifyAkofaTagCreation(String userId) async {
+    try {
+      print('🔍 Verifying AKOFA tag creation and linking...');
+
+      // Check if tag was created and linked
+      final tagResult = await AkofaTagService.getUserTag(userId);
+
+      if (tagResult['success'] == true) {
+        final tag = tagResult['tag'];
+        final publicKey = tagResult['publicKey'];
+
+        print('✅ AKOFA tag verified: $tag linked to wallet $publicKey');
+
+        // Additional verification: check if tag resolves correctly
+        final resolveResult = await AkofaTagService.resolveTag(tag);
+
+        if (resolveResult['success'] == true &&
+            resolveResult['publicKey'] == publicKey) {
+          print('✅ AKOFA tag resolution verified');
+        } else {
+          print(
+            '⚠️ AKOFA tag resolution failed - this may cause issues with payments',
+          );
+        }
+      } else {
+        print(
+          '⚠️ AKOFA tag creation failed - wallet created but tag not linked',
+        );
+        print('   Error: ${tagResult['error']}');
+      }
+    } catch (e) {
+      print('⚠️ AKOFA tag verification failed: $e');
+      // Don't fail wallet creation for tag issues
     }
   }
 

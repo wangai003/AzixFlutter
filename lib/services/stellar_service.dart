@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import '../models/transaction.dart' as app_transaction;
 import 'transaction_service.dart';
 import 'secure_wallet_service.dart';
+import 'akofa_tag_service.dart';
 
 class StellarService {
   static final StellarSDK _sdk = StellarSDK.TESTNET;
@@ -19,23 +20,23 @@ class StellarService {
   // Provided credentials (Testnet only)
   // ------------------------
   final String issuerPublic =
-      'GDS33FHEMMX4QHVY53HR2LM53227BH5Y5HB4J3ZSDHMZFMIDP67U537V';
+      'GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW';
   final String distributionSecret =
-      'SAWYDUY5JDXQ6XLDDRBU64RDSWC6I4OXEBTJTWLY52MXTLBF4EHT4C4W';
+      'SD3G2GKZQCD47IU7BOGHXDPEJ4DTCSMRUMKJTDLJECA67RJFKWO5AKJP';
 
   // Constants for backward compatibility
   static const String AKOFA_ASSET_CODE = 'AKOFA';
   static const String AKOFA_ISSUER_ACCOUNT =
-      'GDS33FHEMMX4QHVY53HR2LM53227BH5Y5HB4J3ZSDHMZFMIDP67U537V';
+      'GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW';
   static const String ISSUER_SECRET =
-      'SDMCJRPOGXJRMB2OX5BCH7YW7C4KCNZA26HIWSKP67WPFFBPUZDRJB5N';
+      'SDDXL4EKAH6FAERH2TUAANIDZ7OVGJHKXNZOEMZVNNJ7FQ5GXKVNN4GZ';
 
   final Asset akofaAsset;
 
   StellarService()
     : akofaAsset = AssetTypeCreditAlphaNum12(
         'AKOFA',
-        'GDS33FHEMMX4QHVY53HR2LM53227BH5Y5HB4J3ZSDHMZFMIDP67U537V',
+        'GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW',
       ) {}
 
   // Using provided issuer credentials
@@ -159,12 +160,26 @@ class StellarService {
         // Record transaction in Firestore
         final senderUid = _auth.currentUser!.uid;
 
-        // Record send transaction for sender
+        // Record send transaction for sender with tag resolution
+        String? recipientAkofaTag;
+
+        // Try to resolve tag from address
+        try {
+          final tagResult = await AkofaTagService.resolveTagByAddress(
+            destinationAddress,
+          );
+          if (tagResult['success'] == true) {
+            recipientAkofaTag = tagResult['tag'];
+          }
+        } catch (e) {
+          // Keep recipientAkofaTag as null if resolution fails
+        }
+
         await TransactionService.recordSend(
           amount: double.parse(amount),
           assetCode: 'XLM',
           recipientAddress: destinationAddress,
-          recipientAkofaTag: null, // Will be looked up if needed
+          recipientAkofaTag: recipientAkofaTag,
           memo: memo,
           stellarHash: response.hash,
           additionalMetadata: {
@@ -190,7 +205,7 @@ class StellarService {
               amount: double.parse(amount),
               assetCode: 'XLM',
               senderAddress: sourceAccountId,
-              senderAkofaTag: null, // Will be looked up if needed
+              senderAkofaTag: null, // Will be resolved from address
               memo: memo,
               stellarHash: response.hash,
               additionalMetadata: {
@@ -296,12 +311,26 @@ class StellarService {
         // Record transaction in Firestore
         final senderUid = _auth.currentUser!.uid;
 
-        // Record send transaction for sender
+        // Record send transaction for sender with tag resolution
+        String? recipientAkofaTag;
+
+        // Try to resolve tag from address
+        try {
+          final tagResult = await AkofaTagService.resolveTagByAddress(
+            destinationAddress,
+          );
+          if (tagResult['success'] == true) {
+            recipientAkofaTag = tagResult['tag'];
+          }
+        } catch (e) {
+          // Keep recipientAkofaTag as null if resolution fails
+        }
+
         await TransactionService.recordSend(
           amount: double.parse(amount),
           assetCode: assetCode,
           recipientAddress: destinationAddress,
-          recipientAkofaTag: null,
+          recipientAkofaTag: recipientAkofaTag,
           memo: memo,
           stellarHash: response.hash,
           additionalMetadata: {
@@ -328,7 +357,7 @@ class StellarService {
               amount: double.parse(amount),
               assetCode: assetCode,
               senderAddress: sourceAccountId,
-              senderAkofaTag: null,
+              senderAkofaTag: null, // Will be resolved from address
               memo: memo,
               stellarHash: response.hash,
               additionalMetadata: {
@@ -368,7 +397,7 @@ class StellarService {
     }
   }
 
-  // Send asset from issuer account to user (for mining rewards, buy Akofa, etc.)
+  // Send asset from distribution account to user (for mining rewards, buy Akofa, etc.)
   Future<Map<String, dynamic>> sendAssetFromIssuer(
     String assetCode,
     String destinationAddress,
@@ -376,19 +405,21 @@ class StellarService {
     String? memo,
   }) async {
     try {
-      // Create issuer keypair
-      final issuerKeyPair = KeyPair.fromSecretSeed(ISSUER_SECRET);
-      final issuerAccountId = issuerKeyPair.accountId;
+      // Create distribution keypair (which holds the AKOFA supply)
+      final distributionKeyPair = KeyPair.fromSecretSeed(distributionSecret);
+      final distributionAccountId = distributionKeyPair.accountId;
 
-      // Get issuer account
-      final issuerAccount = await _sdk.accounts.account(issuerAccountId);
+      // Get distribution account
+      final distributionAccount = await _sdk.accounts.account(
+        distributionAccountId,
+      );
 
       // Create the asset
       Asset asset;
       if (assetCode == 'XLM') {
         asset = Asset.NATIVE;
       } else {
-        asset = Asset.createNonNativeAsset(assetCode, issuerAccountId);
+        asset = Asset.createNonNativeAsset(assetCode, AKOFA_ISSUER_ACCOUNT);
       }
 
       // Check if destination account has trustline for this asset
@@ -422,7 +453,7 @@ class StellarService {
       );
 
       // Build transaction
-      final transactionBuilder = TransactionBuilder(issuerAccount);
+      final transactionBuilder = TransactionBuilder(distributionAccount);
       transactionBuilder.addOperation(paymentOperation.build());
 
       if (memo != null && memo.isNotEmpty) {
@@ -432,7 +463,7 @@ class StellarService {
       final transaction = transactionBuilder.build();
 
       // Sign transaction
-      transaction.sign(issuerKeyPair, Network.TESTNET);
+      transaction.sign(distributionKeyPair, Network.TESTNET);
 
       // Submit transaction
       final response = await _sdk.submitTransaction(transaction);
@@ -483,151 +514,6 @@ class StellarService {
       }
     } catch (e) {
       return {'success': false, 'message': 'Error: $e', 'error': e.toString()};
-    }
-  }
-
-  // Record a mining reward transaction
-  Future<Map<String, dynamic>> recordMiningReward(double amount) async {
-    try {
-      final currentUser = _auth.currentUser;
-      if (currentUser == null) {
-        throw Exception('User not authenticated');
-      }
-
-      String? publicKey;
-      String? walletType = 'unknown';
-
-      // First check for secure/enhanced wallet
-      final hasSecureWallet = await SecureWalletService.hasSecureWallet(
-        currentUser.uid,
-      );
-      if (hasSecureWallet) {
-        publicKey = await SecureWalletService.getWalletPublicKey(
-          currentUser.uid,
-        );
-        walletType = 'secure';
-      }
-
-      // If no secure wallet, check for regular wallet
-      if (publicKey == null) {
-        final credentials = await getWalletCredentials();
-        if (credentials != null) {
-          publicKey = credentials['publicKey'];
-          walletType = 'regular';
-        }
-      }
-
-      if (publicKey == null) {
-        throw Exception(
-          'No wallet found. Please create or import a Stellar wallet to receive mining rewards.',
-        );
-      }
-
-      final userDoc = await _firestore
-          .collection('USER')
-          .doc(currentUser.uid)
-          .get();
-      if (!userDoc.exists) {
-        throw Exception('User document not found');
-      }
-
-      final userData = userDoc.data()!;
-      final akofaTag = userData['akofaTag'] as String?;
-
-      if (akofaTag == null || akofaTag.isEmpty) {
-        throw Exception(
-          'User AKOFA tag not found. Please ensure your AKOFA tag is set in your profile.',
-        );
-      }
-
-      // Production mode - actually send the AKOFA coins from issuer to user
-      final result = await sendAssetFromIssuer(
-        AKOFA_ASSET_CODE,
-        publicKey,
-        amount.toString(),
-        memo: 'Mining Reward for $akofaTag',
-      );
-
-      if (result['success'] != true) {
-        // Record as failed
-        await TransactionService.recordMiningReward(
-          amount: amount,
-          stellarHash: null,
-          additionalMetadata: {
-            'errorReason': result['message'] ?? 'Unknown error',
-            'miningSession': 'failed',
-            'rewardType': 'mining',
-            'failureReason': result['message'],
-          },
-        );
-        throw Exception(
-          'Failed to send mining reward: ${result['message']}. Check that your Stellar account is funded and the issuer secret is configured correctly.',
-        );
-      }
-
-      // Record the mining reward transaction in Firestore as completed
-      await TransactionService.recordMiningReward(
-        amount: amount,
-        stellarHash: result['hash'],
-        additionalMetadata: {
-          'miningSession': 'active',
-          'rewardType': 'mining',
-          'akofaTag': akofaTag,
-        },
-      );
-
-      // Send email receipt for mining reward
-      await _sendTransactionReceipt(
-        AKOFA_ISSUER_ACCOUNT,
-        publicKey,
-        amount,
-        app_transaction.TransactionType.mining,
-        result['hash'],
-        'Mining Reward',
-        AKOFA_ASSET_CODE,
-      );
-
-      return {'success': true, 'hash': result['hash']};
-    } catch (e) {
-      // Try to record the failed transaction
-      try {
-        final userDoc = await _firestore
-            .collection('USER')
-            .doc(_auth.currentUser!.uid)
-            .get();
-        if (userDoc.exists) {
-          final userData = userDoc.data()!;
-          final akofaTag = userData['akofaTag'] as String? ?? 'UNKNOWN';
-
-          await TransactionService.recordMiningReward(
-            amount: amount,
-            stellarHash: null,
-            additionalMetadata: {
-              'errorReason': e.toString(),
-              'miningSession': 'failed',
-              'rewardType': 'mining',
-              'failureReason': e.toString(),
-            },
-          );
-        }
-      } catch (recordError) {}
-
-      // Provide more helpful error messages
-      String errorMessage = 'Failed to record mining reward: $e';
-      if (e.toString().contains('sample issuer secret') ||
-          e.toString().contains('SAMPLE_')) {
-        errorMessage =
-            'Mining rewards are not configured. Please replace the sample issuer secret with your actual secret key.';
-      } else if (e.toString().contains('404') ||
-          e.toString().contains('not_found')) {
-        errorMessage =
-            'Your Stellar account is not active. Please ensure it is funded with at least 1 XLM.';
-      } else if (e.toString().contains('op_no_trust')) {
-        errorMessage =
-            'AKOFA trustline not found. Please add the AKOFA asset to your wallet first.';
-      }
-
-      throw Exception(errorMessage);
     }
   }
 
@@ -1052,7 +938,7 @@ The AZIX Team
 
       // Create AKOFA asset for trustline
 
-      // Create asset with validation
+      // Create asset with validation - AKOFA is 5 chars, so use AssetTypeCreditAlphaNum12
       Asset akofaAssetForTrustline;
       try {
         akofaAssetForTrustline = AssetTypeCreditAlphaNum12(
@@ -1152,6 +1038,136 @@ The AZIX Team
     }
   }
 
+  /// Create trustline for any asset
+  Future<bool> createUserAssetTrustline(
+    String userSecretKey,
+    String assetCode,
+    String assetIssuer,
+  ) async {
+    try {
+      // Validate secret key format
+      if (userSecretKey == null || userSecretKey.isEmpty) {
+        return false;
+      }
+
+      // Trim key to prevent checksum errors
+      final trimmedKey = userSecretKey.trim();
+
+      final userKeyPair = KeyPair.fromSecretSeed(trimmedKey);
+      final publicKey = userKeyPair.accountId;
+
+      // Check if account exists on network
+      final accountExists = await _checkAccountExists(publicKey);
+      if (!accountExists) {
+        throw Exception(
+          'Account not found. Please ensure your account is funded with XLM first.',
+        );
+      }
+
+      // Get account details
+      final userAccount = await _sdk.accounts.account(publicKey);
+
+      // Check if trustline already exists
+      bool hasTrustline = false;
+      for (var balance in userAccount.balances!) {
+        if (balance.assetType != 'native' &&
+            balance.assetCode == assetCode &&
+            balance.assetIssuer == assetIssuer) {
+          hasTrustline = true;
+          break;
+        }
+      }
+
+      if (hasTrustline) {
+        return true;
+      }
+
+      // Check XLM balance for transaction fees
+      final xlmBalance = userAccount.balances.firstWhere(
+        (b) => b.assetType == 'native',
+        orElse: () => throw Exception('No XLM balance found'),
+      );
+
+      final balance = double.tryParse(xlmBalance.balance) ?? 0.0;
+      if (balance < 0.5) {
+        throw Exception(
+          'Insufficient XLM balance. You need at least 0.5 XLM to create a trustline.',
+        );
+      }
+
+      // Create asset for trustline - use appropriate type based on asset code length
+      Asset assetForTrustline;
+      try {
+        if (assetCode.length <= 4) {
+          // Use AssetTypeCreditAlphaNum4 for codes 4 characters or less
+          assetForTrustline = AssetTypeCreditAlphaNum4(assetCode, assetIssuer);
+        } else {
+          // Use AssetTypeCreditAlphaNum12 for codes 5-12 characters
+          assetForTrustline = AssetTypeCreditAlphaNum12(assetCode, assetIssuer);
+        }
+      } catch (assetError) {
+        throw Exception(
+          'Failed to create asset for trustline. Asset creation error: $assetError',
+        );
+      }
+
+      // Build trustline transaction
+      final transaction = TransactionBuilder(userAccount)
+          .addOperation(
+            ChangeTrustOperationBuilder(
+              assetForTrustline,
+              '10000000000', // Maximum amount
+            ).build(),
+          )
+          .addMemo(Memo.text('Add $assetCode Trustline'))
+          .build();
+
+      // Sign transaction with user's secret key
+      transaction.sign(userKeyPair, Network.TESTNET);
+
+      // Submit transaction
+      final response = await _sdk.submitTransaction(transaction);
+
+      if (response.success) {
+        return true;
+      } else {
+        // Check for common error patterns in the result XDR
+        final resultXdr = response.resultXdr ?? '';
+
+        // Provide helpful error messages based on common failure patterns
+        if (resultXdr.contains('op_no_trust') ||
+            resultXdr.contains('TRUSTLINE_MISSING')) {
+          throw Exception(
+            'Trustline operation failed. The $assetCode asset may not exist or trustline creation failed.',
+          );
+        } else if (resultXdr.contains('op_bad_auth') ||
+            resultXdr.contains('BAD_AUTH')) {
+          throw Exception(
+            'Authentication failed. Please check your secret key.',
+          );
+        } else if (resultXdr.contains('INSUFFICIENT_BALANCE') ||
+            resultXdr.contains('UNDERFUNDED')) {
+          throw Exception(
+            'Insufficient XLM balance for transaction fees. You need at least 0.5 XLM.',
+          );
+        } else if (resultXdr.contains('NO_ACCOUNT') ||
+            resultXdr.contains('ACCOUNT_NOT_FOUND')) {
+          throw Exception(
+            'Account not found on Stellar network. Please ensure your account is funded.',
+          );
+        } else {
+          throw Exception(
+            'Transaction failed. Please check your XLM balance and try again.',
+          );
+        }
+      }
+    } catch (e) {
+      // Don't rethrow - just return false for trustline setup failures
+      // This allows wallet creation to succeed even if trustline setup fails
+      return false;
+    }
+  }
+
   /// Automatic wallet setup: fund account and add trustline (for new wallets)
   ///
   /// This method handles the complete setup process for new wallets:
@@ -1227,20 +1243,77 @@ The AZIX Team
         };
       }
 
-      // Step 2: Add Akofa trustline
-      final trustlineResult = await createUserAkofaTrustline(secretKey);
+      // Step 2: Add trustlines for all supported assets
+      final trustlineResults = <String, bool>{};
 
-      if (trustlineResult) {
+      // Define all supported assets that need trustlines (excluding native XLM)
+      // For now, only set up AKOFA trustline as it's the only asset we actually use
+      final assetsToSetup = {
+        'AKOFA': AKOFA_ISSUER_ACCOUNT, // Use the constant
+        // Temporarily disabled other assets as they may not exist on testnet
+        // 'USDC': 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN',
+        // 'BTC': 'GAUTUYY2THLF7SGITDFMXJVYH3LHDSMGEAKSBU267M2K7A3W543CKUEF',
+        // 'ETH': 'GBDEVU63Y6NTHJQQZIKVTC23NWLQVP3WJ2RI2OTSJTNYOIGICST6DUXR',
+      };
+
+      // Create trustlines for each asset
+      for (final entry in assetsToSetup.entries) {
+        final assetCode = entry.key;
+        final assetIssuer = entry.value;
+
+        try {
+          final trustlineResult = await createUserAssetTrustline(
+            secretKey,
+            assetCode,
+            assetIssuer,
+          );
+          trustlineResults[assetCode.toLowerCase()] = trustlineResult;
+        } catch (e) {
+          // If trustline creation fails, mark as false but continue with others
+          trustlineResults[assetCode.toLowerCase()] = false;
+        }
+      }
+
+      // Check overall success
+      final allTrustlinesSuccessful = trustlineResults.values.every(
+        (success) => success,
+      );
+      final someTrustlinesSuccessful = trustlineResults.values.any(
+        (success) => success,
+      );
+
+      if (allTrustlinesSuccessful) {
         result['trustlineAdded'] = true;
-        result['trustlineResult'] = {'success': true};
+        result['trustlineResult'] = {'success': true, ...trustlineResults};
         result['success'] = true;
-        result['message'] = 'Wallet setup completed successfully!';
+        result['message'] =
+            'Wallet setup completed successfully with full multi-asset support!';
+      } else if (someTrustlinesSuccessful) {
+        result['trustlineAdded'] = true;
+        result['trustlineResult'] = {'success': true, ...trustlineResults};
+        result['success'] = true;
+
+        // Create a message listing which trustlines were added
+        final successfulAssets = trustlineResults.entries
+            .where((entry) => entry.value)
+            .map((entry) => entry.key.toUpperCase())
+            .join(', ');
+
+        final failedAssets = trustlineResults.entries
+            .where((entry) => !entry.value)
+            .map((entry) => entry.key.toUpperCase())
+            .join(', ');
+
+        result['message'] =
+            'Wallet setup completed with $successfulAssets support. $failedAssets trustlines can be added manually.';
       } else {
         result['trustlineResult'] = {
           'success': false,
-          'message': 'Trustline creation failed',
+          'message': 'All trustline creation failed',
+          ...trustlineResults,
         };
-        result['message'] = 'Wallet funded but trustline addition failed';
+        result['message'] =
+            'Wallet funded but trustline addition failed for all assets';
       }
 
       return result;

@@ -203,11 +203,6 @@ class AuthService {
         'akofaBalance': 0.0,
         'pendingBalance': 0.0,
 
-        // Mining system integration
-        'totalMiningSessions': 0,
-        'totalEarnings': 0.0,
-        'miningRateBoosted': false,
-
         // Referral system
         'referralCode': generatedReferralCode,
         'akofaTag': generatedAkofaTag,
@@ -251,12 +246,10 @@ class AuthService {
                   if (!referrals.contains(uid)) {
                     referrals.add(uid);
                     final referralCount = (data['referralCount'] ?? 0) + 1;
-                    final miningRateBoosted = referralCount >= 5;
 
                     transaction.update(referrerDoc.reference, {
                       'referrals': referrals,
                       'referralCount': referralCount,
-                      'miningRateBoosted': miningRateBoosted,
                     });
                   }
                 }
@@ -329,12 +322,10 @@ class AuthService {
                   if (!referrals.contains(uid)) {
                     referrals.add(uid);
                     final referralCount = (data['referralCount'] ?? 0) + 1;
-                    final miningRateBoosted = referralCount >= 5;
 
                     transaction.update(referrerDoc.reference, {
                       'referrals': referrals,
                       'referralCount': referralCount,
-                      'miningRateBoosted': miningRateBoosted,
                     });
                   }
                 }

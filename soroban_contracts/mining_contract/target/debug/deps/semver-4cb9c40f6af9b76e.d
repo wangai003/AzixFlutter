@@ -1,0 +1,11 @@
+/Users/apple/projects/AzixFlutter/soroban_contracts/mining_contract/target/debug/deps/semver-4cb9c40f6af9b76e.d: /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/lib.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/display.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/error.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/eval.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/identifier.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/impls.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/parse.rs
+
+/Users/apple/projects/AzixFlutter/soroban_contracts/mining_contract/target/debug/deps/libsemver-4cb9c40f6af9b76e.rmeta: /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/lib.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/display.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/error.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/eval.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/identifier.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/impls.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/parse.rs
+
+/Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/lib.rs:
+/Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/display.rs:
+/Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/error.rs:
+/Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/eval.rs:
+/Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/identifier.rs:
+/Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/impls.rs:
+/Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/semver-1.0.27/src/parse.rs:

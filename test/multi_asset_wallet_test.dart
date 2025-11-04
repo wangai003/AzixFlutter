@@ -32,7 +32,7 @@ void main() {
       expect(xlmAsset!.code, 'XLM');
 
       final akofaAsset = AssetConfigs.findByAssetId(
-        'AKOFA_GBJGVMBWKGSMPZ4D7QDTW7VPCJUWCJ26OIHFJNRIWVR362NNUU3YCOTQ',
+        'AKOFA_GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW',
       );
       expect(akofaAsset, isNotNull);
       expect(akofaAsset!.code, 'AKOFA');
@@ -60,7 +60,7 @@ void main() {
       expect(AssetConfigs.xlm.assetId, 'XLM');
       expect(
         AssetConfigs.akofa.assetId,
-        'AKOFA_GBJGVMBWKGSMPZ4D7QDTW7VPCJUWCJ26OIHFJNRIWVR362NNUU3YCOTQ',
+        'AKOFA_GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW',
       );
       expect(
         AssetConfigs.usdc.assetId,
@@ -107,7 +107,7 @@ void main() {
         ],
         'assetConfigs': {
           'XLM': AssetConfigs.xlm,
-          'AKOFA_GBJGVMBWKGSMPZ4D7QDTW7VPCJUWCJ26OIHFJNRIWVR362NNUU3YCOTQ':
+          'AKOFA_GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW':
               AssetConfigs.akofa,
         },
       };

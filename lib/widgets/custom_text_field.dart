@@ -13,6 +13,7 @@ class CustomTextField extends StatefulWidget {
   final FocusNode? focusNode;
   final TextInputAction textInputAction;
   final Function(String)? onSubmitted;
+  final int? maxLines;
 
   const CustomTextField({
     Key? key,
@@ -27,6 +28,7 @@ class CustomTextField extends StatefulWidget {
     this.focusNode,
     this.textInputAction = TextInputAction.next,
     this.onSubmitted,
+    this.maxLines,
   }) : super(key: key);
 
   @override
@@ -47,6 +49,7 @@ class _CustomTextFieldState extends State<CustomTextField> {
       focusNode: widget.focusNode,
       textInputAction: widget.textInputAction,
       onFieldSubmitted: widget.onSubmitted,
+      maxLines: widget.maxLines,
       style: AppTheme.bodyMedium.copyWith(
         color: Theme.of(context).brightness == Brightness.dark
             ? AppTheme.white
@@ -56,10 +59,7 @@ class _CustomTextFieldState extends State<CustomTextField> {
         labelText: widget.label,
         hintText: widget.hint,
         prefixIcon: widget.prefixIcon != null
-            ? Icon(
-                widget.prefixIcon,
-                color: AppTheme.primaryGold,
-              )
+            ? Icon(widget.prefixIcon, color: AppTheme.primaryGold)
             : null,
         suffixIcon: widget.isPassword
             ? IconButton(

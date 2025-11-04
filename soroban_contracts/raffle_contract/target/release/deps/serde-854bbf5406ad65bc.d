@@ -1,0 +1,14 @@
+/Users/apple/projects/AzixFlutter/soroban_contracts/raffle_contract/target/release/deps/serde-854bbf5406ad65bc.d: /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/apple/projects/AzixFlutter/soroban_contracts/raffle_contract/target/release/build/serde-2d560be2e7ead0fe/out/private.rs
+
+/Users/apple/projects/AzixFlutter/soroban_contracts/raffle_contract/target/release/deps/libserde-854bbf5406ad65bc.rlib: /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/apple/projects/AzixFlutter/soroban_contracts/raffle_contract/target/release/build/serde-2d560be2e7ead0fe/out/private.rs
+
+/Users/apple/projects/AzixFlutter/soroban_contracts/raffle_contract/target/release/deps/libserde-854bbf5406ad65bc.rmeta: /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/apple/projects/AzixFlutter/soroban_contracts/raffle_contract/target/release/build/serde-2d560be2e7ead0fe/out/private.rs
+
+/Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/Users/apple/projects/AzixFlutter/soroban_contracts/raffle_contract/target/release/build/serde-2d560be2e7ead0fe/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/apple/projects/AzixFlutter/soroban_contracts/raffle_contract/target/release/build/serde-2d560be2e7ead0fe/out

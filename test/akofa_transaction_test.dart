@@ -4,6 +4,9 @@ import 'package:azixflutter/services/akofa_tag_service.dart';
 import 'package:mockito/mockito.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
+import '../lib/firebase_options.dart';
+import 'package:flutter/widgets.dart' hide Page;
 
 void main() {
   test('AKOFA Transaction Capacity Test', () async {
@@ -15,9 +18,9 @@ void main() {
 
     // AKOFA Asset configuration
     final String issuerPublic =
-        'GBJGVMBWKGSMPZ4D7QDTW7VPCJUWCJ26OIHFJNRIWVR362NNUU3YCOTQ';
+        'GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW';
     final String issuerSecret =
-        'SCB3ICTKZ3FQX6R6JRBV2427JVPGN7IELDUWQOKDFGT5BGKQKWBURPIR';
+        'SD3G2GKZQCD47IU7BOGHXDPEJ4DTCSMRUMKJTDLJECA67RJFKWO5AKJP';
     final String assetCode = 'AKOFA';
 
     // Create a new recipient account for testing
@@ -359,6 +362,38 @@ void main() {
       }
 
       print('✅ Tag search simulation completed');
+    });
+
+    // Test script to resolve akofa tag to wallet address
+    test('Resolve Akofa Tag to Wallet Address', () async {
+      // Initialize Flutter binding for testing
+      TestWidgetsFlutterBinding.ensureInitialized();
+
+      // Initialize Firebase for testing
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+
+      print('\n🔍 Resolving Akofa Tag: david9736');
+
+      try {
+        final result = await AkofaTagService.resolveTag('david9736');
+
+        if (result['success'] == true) {
+          print('✅ Tag resolved successfully!');
+          print('🏷️  Tag: ${result['tag']}');
+          print('👤 User ID: ${result['userId']}');
+          print('📛 First Name: ${result['firstName']}');
+          print('🏦 Wallet Address (Public Key): ${result['publicKey']}');
+        } else {
+          print('❌ Tag resolution failed!');
+          print('📋 Error: ${result['error']}');
+        }
+      } catch (e) {
+        print('❌ Error during tag resolution: $e');
+      }
+
+      print('🎉 Tag resolution test completed!');
     });
   });
 }

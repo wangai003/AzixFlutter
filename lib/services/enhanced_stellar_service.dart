@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import '../models/transaction.dart' as app_transaction;
 import '../models/asset_config.dart';
 import 'transaction_service.dart';
+import 'akofa_tag_service.dart';
 
 class EnhancedStellarService {
   static final StellarSDK _sdk = StellarSDK.TESTNET;
@@ -38,12 +39,12 @@ class EnhancedStellarService {
 
   // AKOFA Asset configuration
   final String issuerPublic =
-      'GBJGVMBWKGSMPZ4D7QDTW7VPCJUWCJ26OIHFJNRIWVR362NNUU3YCOTQ';
+      'GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW';
   final String distributionSecret =
       'SCB3ICTKZ3FQX6R6JRBV2427JVPGN7IELDUWQOKDFGT5BGKQKWBURPIR';
   static const String AKOFA_ASSET_CODE = 'AKOFA';
   static const String AKOFA_ISSUER_ACCOUNT =
-      'GBJGVMBWKGSMPZ4D7QDTW7VPCJUWCJ26OIHFJNRIWVR362NNUU3YCOTQ';
+      'GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW';
   static const String ISSUER_SECRET =
       'SCB3ICTKZ3FQX6R6JRBV2427JVPGN7IELDUWQOKDFGT5BGKQKWBURPIR';
 
@@ -421,7 +422,7 @@ class EnhancedStellarService {
             balance.assetIssuer == AKOFA_ISSUER_ACCOUNT) {
           // Store with both legacy key and correct assetId key
           balances['akofa'] = balance.balance;
-          balances['AKOFA_GBJGVMBWKGSMPZ4D7QDTW7VPCJUWCJ26OIHFJNRIWVR362NNUU3YCOTQ'] =
+          balances['AKOFA_GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW'] =
               balance.balance; // Correct assetId key
           balances['assetConfigs']['AKOFA'] = AssetConfigs.akofa;
         }
@@ -504,12 +505,27 @@ class EnhancedStellarService {
       final response = await _sdk.submitTransaction(transaction);
 
       if (response.success) {
-        // Record transaction
+        // Record transaction with tag resolution
+        String? resolvedRecipientAddress = recipientAddress;
+        String? recipientAkofaTag;
+
+        // Try to resolve tag from address if not already provided
+        try {
+          final tagResult = await AkofaTagService.resolveTagByAddress(
+            recipientAddress,
+          );
+          if (tagResult['success'] == true) {
+            recipientAkofaTag = tagResult['tag'];
+          }
+        } catch (e) {
+          // Keep recipientAkofaTag as null if resolution fails
+        }
+
         await TransactionService.recordSend(
           amount: amount,
           assetCode: AKOFA_ASSET_CODE,
-          recipientAddress: recipientAddress,
-          recipientAkofaTag: await _getAkofaTagForAddress(recipientAddress),
+          recipientAddress: resolvedRecipientAddress,
+          recipientAkofaTag: recipientAkofaTag,
           memo: memo,
           stellarHash: response.hash,
           additionalMetadata: {
@@ -581,12 +597,27 @@ class EnhancedStellarService {
       final response = await _sdk.submitTransaction(transaction);
 
       if (response.success) {
-        // Record transaction
+        // Record transaction with tag resolution
+        String? resolvedRecipientAddress = recipientAddress;
+        String? recipientAkofaTag;
+
+        // Try to resolve tag from address if not already provided
+        try {
+          final tagResult = await AkofaTagService.resolveTagByAddress(
+            recipientAddress,
+          );
+          if (tagResult['success'] == true) {
+            recipientAkofaTag = tagResult['tag'];
+          }
+        } catch (e) {
+          // Keep recipientAkofaTag as null if resolution fails
+        }
+
         await TransactionService.recordSend(
           amount: double.tryParse(amount) ?? 0.0,
           assetCode: 'XLM',
-          recipientAddress: recipientAddress,
-          recipientAkofaTag: await _getAkofaTagForAddress(recipientAddress),
+          recipientAddress: resolvedRecipientAddress,
+          recipientAkofaTag: recipientAkofaTag,
           memo: memo,
           stellarHash: response.hash,
           additionalMetadata: {
@@ -664,12 +695,29 @@ class EnhancedStellarService {
       final response = await _sdk.submitTransaction(transaction);
 
       if (response.success) {
-        // Record transaction as a receive for the recipient
+        // Record transaction as a receive for the recipient with tag resolution
+        String? resolvedSenderAddress = issuerAccountId;
+        String? senderAkofaTag = 'Issuer';
+
+        // Try to resolve tag from sender address if it's not the issuer
+        if (issuerAccountId != AKOFA_ISSUER_ACCOUNT) {
+          try {
+            final tagResult = await AkofaTagService.resolveTagByAddress(
+              issuerAccountId,
+            );
+            if (tagResult['success'] == true) {
+              senderAkofaTag = tagResult['tag'];
+            }
+          } catch (e) {
+            // Keep senderAkofaTag as 'Issuer' if resolution fails
+          }
+        }
+
         await TransactionService.recordReceive(
           amount: double.tryParse(amount) ?? 0.0,
           assetCode: assetCode,
-          senderAddress: issuerAccountId,
-          senderAkofaTag: 'Issuer',
+          senderAddress: resolvedSenderAddress,
+          senderAkofaTag: senderAkofaTag,
           memo: memo,
           stellarHash: response.hash,
           additionalMetadata: {
@@ -780,14 +828,10 @@ class EnhancedStellarService {
   /// Helper method to get Akofa tag for address
   Future<String?> _getAkofaTagForAddress(String address) async {
     try {
-      final query = await _firestore
-          .collection('USER')
-          .where('stellarPublicKey', isEqualTo: address)
-          .limit(1)
-          .get();
-
-      if (query.docs.isNotEmpty) {
-        return query.docs.first.data()['akofaTag'] as String?;
+      // Use the AkofaTagService for proper tag resolution
+      final result = await AkofaTagService.resolveTagByAddress(address);
+      if (result['success'] == true) {
+        return result['tag'] as String?;
       }
       return null;
     } catch (e) {
@@ -1210,12 +1254,27 @@ class EnhancedStellarService {
       final response = await _sdk.submitTransaction(transaction);
 
       if (response.success) {
-        // Record transaction
+        // Record transaction with tag resolution
+        String? resolvedRecipientAddress = recipientAddress;
+        String? recipientAkofaTag;
+
+        // Try to resolve tag from address if not already provided
+        try {
+          final tagResult = await AkofaTagService.resolveTagByAddress(
+            recipientAddress,
+          );
+          if (tagResult['success'] == true) {
+            recipientAkofaTag = tagResult['tag'];
+          }
+        } catch (e) {
+          // Keep recipientAkofaTag as null if resolution fails
+        }
+
         await TransactionService.recordSend(
           amount: amount,
           assetCode: asset.code,
-          recipientAddress: recipientAddress,
-          recipientAkofaTag: await _getAkofaTagForAddress(recipientAddress),
+          recipientAddress: resolvedRecipientAddress,
+          recipientAkofaTag: recipientAkofaTag,
           memo: memo,
           stellarHash: response.hash,
           additionalMetadata: {

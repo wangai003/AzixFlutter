@@ -13,7 +13,7 @@ class SimpleWalletTest {
       final testSecretKey =
           'SCB3ICTKZ3FQX6R6JRBV2427JVPGN7IELDUWQOKDFGT5BGKQKWBURPIR';
       final expectedPublicKey =
-          'GBJGVMBWKGSMPZ4D7QDTW7VPCJUWCJ26OIHFJNRIWVR362NNUU3YCOTQ';
+          'GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW';
 
       // Generate key pair from secret key
       final keyPair = stellar.KeyPair.fromSecretSeed(testSecretKey);
@@ -104,7 +104,7 @@ class SimpleWalletTest {
       // Step 1: Simulate encrypted wallet data structure
       final mockWalletData = {
         'userId': 'testUser123',
-        'publicKey': 'GBJGVMBWKGSMPZ4D7QDTW7VPCJUWCJ26OIHFJNRIWVR362NNUU3YCOTQ',
+        'publicKey': 'GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW',
         'encryptedSecretKey': {
           'ciphertext': base64Encode(
             utf8.encode(

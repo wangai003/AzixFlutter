@@ -3,17 +3,20 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import '../theme/app_theme.dart';
 import '../utils/responsive_layout.dart';
 import '../widgets/enhanced_buy_akofa_dialog.dart';
+import '../screens/buy_crypto_screen.dart';
 
 class QuickActionsRow extends StatelessWidget {
   final VoidCallback onSend;
   final VoidCallback onReceive;
   final VoidCallback onBuy;
+  final VoidCallback? onBuyCrypto;
 
   const QuickActionsRow({
     Key? key,
     required this.onSend,
     required this.onReceive,
     required this.onBuy,
+    this.onBuyCrypto,
   }) : super(key: key);
 
   @override
@@ -23,28 +26,41 @@ class QuickActionsRow extends StatelessWidget {
     final isTablet = ResponsiveLayout.isTablet(context);
     final isLargeDesktop = ResponsiveLayout.isLargeDesktop(context);
     final isWebPlatform = kIsWeb;
-    
+
     void _showBuyAkofaDialog() {
       showDialog(
         context: context,
         builder: (context) => const EnhancedBuyAkofaDialog(),
       );
     }
-    
+
+    void _showBuyCryptoScreen() {
+      if (onBuyCrypto != null) {
+        onBuyCrypto!();
+      } else {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const BuyCryptoScreen()),
+        );
+      }
+    }
+
     return Container(
       width: double.infinity,
       padding: EdgeInsets.symmetric(
         vertical: isDesktop ? 24 : 16,
         horizontal: isDesktop ? 32 : 16,
       ),
-      decoration: isDesktop ? BoxDecoration(
-        color: AppTheme.black,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: AppTheme.grey.withOpacity(0.3),
-          width: 1,
-        ),
-      ) : null,
+      decoration: isDesktop
+          ? BoxDecoration(
+              color: AppTheme.black,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: AppTheme.grey.withOpacity(0.3),
+                width: 1,
+              ),
+            )
+          : null,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
@@ -64,6 +80,12 @@ class QuickActionsRow extends StatelessWidget {
             icon: Icons.shopping_cart,
             label: 'Buy Akofa',
             onTap: _showBuyAkofaDialog,
+            isLarge: isDesktop || isTablet,
+          ),
+          _ActionButton(
+            icon: Icons.currency_exchange,
+            label: 'Buy Crypto',
+            onTap: _showBuyCryptoScreen,
             isLarge: isDesktop || isTablet,
           ),
           if (isDesktop)
@@ -112,15 +134,11 @@ class _ActionButton extends StatelessWidget {
                 ),
               ],
             ),
-            child: Icon(
-              icon, 
-              color: AppTheme.black, 
-              size: isLarge ? 36 : 28,
-            ),
+            child: Icon(icon, color: AppTheme.black, size: isLarge ? 36 : 28),
           ),
           SizedBox(height: isLarge ? 12 : 8),
           Text(
-            label, 
+            label,
             style: AppTheme.bodyMedium.copyWith(
               color: AppTheme.primaryGold,
               fontSize: isLarge ? 16 : null,
@@ -131,4 +149,4 @@ class _ActionButton extends StatelessWidget {
       ),
     );
   }
-} 
+}

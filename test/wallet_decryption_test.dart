@@ -290,7 +290,7 @@ class WalletDecryptionTest {
       final testSecretKey =
           'SCB3ICTKZ3FQX6R6JRBV2427JVPGN7IELDUWQOKDFGT5BGKQKWBURPIR';
       final testPublicKey =
-          'GBJGVMBWKGSMPZ4D7QDTW7VPCJUWCJ26OIHFJNRIWVR362NNUU3YCOTQ';
+          'GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW';
 
       // Simulate encrypted data structure
       final mockEncryptedData = {

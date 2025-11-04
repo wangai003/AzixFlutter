@@ -7,7 +7,7 @@ enum AuthState { initial, loading, authenticated, unauthenticated, error }
 
 class AuthProvider extends ChangeNotifier {
   final local_auth.AuthService _authService = local_auth.AuthService();
-  
+
   AuthState _authState = AuthState.initial;
   User? _user;
   String? _error;
@@ -56,15 +56,18 @@ class AuthProvider extends ChangeNotifier {
   Future<bool> signInWithEmailAndPassword(String email, String password) async {
     _setLoading(true);
     _setError(null);
-    
+
     try {
-      final userCredential = await _authService.signInWithEmailAndPassword(email, password);
+      final userCredential = await _authService.signInWithEmailAndPassword(
+        email,
+        password,
+      );
       final user = userCredential.user;
-      
+
       if (user != null) {
         // Check if user document exists
         final userDoc = await _authService.getUserDocument(user.uid);
-        
+
         if (userDoc == null) {
           // Create complete user document
           await _authService.createCompleteUserDocument(
@@ -75,7 +78,7 @@ class AuthProvider extends ChangeNotifier {
             role: 'user',
           );
         }
-        
+
         return true;
       }
       return false;
@@ -108,21 +111,27 @@ class AuthProvider extends ChangeNotifier {
   }
 
   // Sign up with email and password
-  Future<bool> signUpWithEmailAndPassword(String email, String password, String name) async {
+  Future<bool> signUpWithEmailAndPassword(
+    String email,
+    String password,
+    String name,
+    String deviceFingerprint,
+  ) async {
     _setLoading(true);
     _setError(null);
-    
+
     try {
-      final userCredential = await _authService.createUserWithEmailAndPassword(email, password);
+      // Create user directly with Firebase Auth (client-side registration)
+      final userCredential = await _authService.createUserWithEmailAndPassword(
+        email,
+        password,
+      );
       final user = userCredential.user;
-      
+
       if (user != null) {
-        // Update display name
-        await user.updateDisplayName(name);
-        
         // Send email verification
         await _authService.sendEmailVerification();
-        
+
         // Create complete user document in Firestore
         await _authService.createCompleteUserDocument(
           user.uid,
@@ -131,7 +140,7 @@ class AuthProvider extends ChangeNotifier {
           phoneNumber: null, // Will be completed in registration screen
           role: 'user',
         );
-        
+
         return true;
       }
       return false;
@@ -139,21 +148,24 @@ class AuthProvider extends ChangeNotifier {
       String message;
       switch (e.code) {
         case 'email-already-in-use':
-          message = 'The email address is already in use.';
+          message = 'An account with this email already exists.';
           break;
         case 'invalid-email':
-          message = 'The email address is not valid.';
+          message = 'Please enter a valid email address.';
           break;
         case 'weak-password':
-          message = 'The password is too weak.';
+          message = 'Password should be at least 6 characters long.';
+          break;
+        case 'operation-not-allowed':
+          message = 'Email/password registration is not enabled.';
           break;
         default:
-          message = 'An error occurred: ${e.message}';
+          message = 'Registration failed: ${e.message}';
       }
       _setError(message);
       return false;
     } catch (e) {
-      _setError('An unexpected error occurred.');
+      _setError('Registration failed: ${e.toString()}');
       return false;
     } finally {
       _setLoading(false);
@@ -164,15 +176,15 @@ class AuthProvider extends ChangeNotifier {
   Future<bool> signInWithGoogle() async {
     _setLoading(true);
     _setError(null);
-    
+
     try {
       final userCredential = await _authService.signInWithGoogle();
       final user = userCredential.user;
-      
+
       if (user != null) {
         // Check if user document exists
         final userDoc = await _authService.getUserDocument(user.uid);
-        
+
         if (userDoc == null) {
           // Create complete user document for new Google user
           await _authService.createCompleteUserDocument(
@@ -189,7 +201,7 @@ class AuthProvider extends ChangeNotifier {
             'lastLoginAt': FieldValue.serverTimestamp(),
           });
         }
-        
+
         return true;
       }
       return false;
@@ -210,7 +222,7 @@ class AuthProvider extends ChangeNotifier {
         if (user != null) {
           // Check if user document exists
           final userDoc = await _authService.getUserDocument(user.uid);
-          
+
           if (userDoc == null) {
             // Create complete user document for new Google user
             await _authService.createCompleteUserDocument(
@@ -227,7 +239,7 @@ class AuthProvider extends ChangeNotifier {
               'lastLoginAt': FieldValue.serverTimestamp(),
             });
           }
-          
+
           return true;
         }
       }
@@ -272,7 +284,7 @@ class AuthProvider extends ChangeNotifier {
   // Check if user needs email verification
   Future<bool> needsEmailVerification() async {
     if (_user == null) return false;
-    
+
     try {
       return await _authService.needsEmailVerification(_user!.uid);
     } catch (e) {
@@ -283,7 +295,7 @@ class AuthProvider extends ChangeNotifier {
   // Check if user needs profile completion
   Future<bool> needsProfileCompletion() async {
     if (_user == null) return false;
-    
+
     try {
       return await _authService.needsRegistration(_user!.uid);
     } catch (e) {
@@ -294,7 +306,7 @@ class AuthProvider extends ChangeNotifier {
   // Mark profile as complete
   Future<void> markProfileComplete() async {
     if (_user == null) return;
-    
+
     try {
       await _authService.updateUserFields(_user!.uid, {
         'needsProfileCompletion': false,
@@ -305,11 +317,18 @@ class AuthProvider extends ChangeNotifier {
   }
 
   // Complete Google user registration
-  Future<bool> completeGoogleUserRegistration(String phoneNumber, {String? referralCode}) async {
+  Future<bool> completeGoogleUserRegistration(
+    String phoneNumber, {
+    String? referralCode,
+  }) async {
     if (_user == null) return false;
-    
+
     try {
-      await _authService.completeGoogleUserRegistration(_user!.uid, phoneNumber, referralCode: referralCode);
+      await _authService.completeGoogleUserRegistration(
+        _user!.uid,
+        phoneNumber,
+        referralCode: referralCode,
+      );
       return true;
     } catch (e) {
       _setError('Failed to complete registration: ${e.toString()}');
@@ -320,7 +339,7 @@ class AuthProvider extends ChangeNotifier {
   // Check if user is admin
   Future<bool> isUserAdmin() async {
     if (_user == null) return false;
-    
+
     try {
       return await _authService.isUserAdmin(_user!.uid);
     } catch (e) {
@@ -331,7 +350,7 @@ class AuthProvider extends ChangeNotifier {
   // Update user role (admin only)
   Future<bool> updateUserRole(String newRole) async {
     if (_user == null) return false;
-    
+
     try {
       await _authService.updateUserRole(_user!.uid, newRole);
       return true;

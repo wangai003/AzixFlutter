@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:provider/provider.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:crypto/crypto.dart';
+import 'dart:convert';
 import '../../providers/auth_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/google_sign_in_button.dart';
@@ -33,6 +36,31 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
     super.dispose();
   }
 
+  Future<String> _getDeviceFingerprint() async {
+    final deviceInfo = DeviceInfoPlugin();
+    String deviceData;
+
+    if (Theme.of(context).platform == TargetPlatform.android) {
+      final androidInfo = await deviceInfo.androidInfo;
+      deviceData =
+          '${androidInfo.id}-${androidInfo.model}-${androidInfo.manufacturer}';
+    } else if (Theme.of(context).platform == TargetPlatform.iOS) {
+      final iosInfo = await deviceInfo.iosInfo;
+      deviceData =
+          '${iosInfo.identifierForVendor}-${iosInfo.model}-${iosInfo.systemVersion}';
+    } else {
+      // Web or other platforms
+      final webInfo = await deviceInfo.webBrowserInfo;
+      deviceData =
+          '${webInfo.userAgent}-${webInfo.platform}-${webInfo.appVersion}-${webInfo.vendor}';
+    }
+
+    // Hash the device data
+    final bytes = utf8.encode(deviceData);
+    final digest = sha256.convert(bytes);
+    return digest.toString();
+  }
+
   Future<void> _handleEmailAuth() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -40,10 +68,12 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
     bool success;
 
     if (_isSignUp) {
+      final deviceFingerprint = await _getDeviceFingerprint();
       success = await authProvider.signUpWithEmailAndPassword(
         _emailController.text.trim(),
         _passwordController.text,
         '${_firstNameController.text.trim()} ${_lastNameController.text.trim()}',
+        deviceFingerprint,
       );
     } else {
       success = await authProvider.signInWithEmailAndPassword(
@@ -59,7 +89,7 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
   Future<void> _handleGoogleSignIn() async {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final success = await authProvider.signInWithGoogle();
-    
+
     // Success is handled by the Wrapper routing
     // No need to show success message or navigate manually
   }
@@ -99,7 +129,10 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
         child: Center(
           child: SingleChildScrollView(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 32.0),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 24.0,
+                vertical: 32.0,
+              ),
               child: ConstrainedBox(
                 constraints: BoxConstraints(
                   maxWidth: isDesktop ? 420 : double.infinity,
@@ -127,32 +160,38 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
                             height: 120,
                             width: 120,
                           ),
-                          
+
                           const SizedBox(height: 24),
-                          
+
                           // Title
                           Text(
-                            _isSignUp ? 'Create Account' : 'Welcome Back',
-                            style: AppTheme.headingLarge.copyWith(
-                              color: AppTheme.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ).animate().fadeIn(delay: 200.ms).slideY(begin: 0.3, end: 0),
-                          
+                                _isSignUp ? 'Create Account' : 'Welcome Back',
+                                style: AppTheme.headingLarge.copyWith(
+                                  color: AppTheme.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              )
+                              .animate()
+                              .fadeIn(delay: 200.ms)
+                              .slideY(begin: 0.3, end: 0),
+
                           const SizedBox(height: 8),
-                          
+
                           // Subtitle
                           Text(
-                            _isSignUp 
-                              ? 'Sign up to get started with AZIX'
-                              : 'Sign in to continue to AZIX',
-                            style: AppTheme.bodyMedium.copyWith(
-                              color: Colors.white.withOpacity(0.7),
-                            ),
-                          ).animate().fadeIn(delay: 400.ms).slideY(begin: 0.3, end: 0),
-                          
+                                _isSignUp
+                                    ? 'Sign up to get started with AZIX'
+                                    : 'Sign in to continue to AZIX',
+                                style: AppTheme.bodyMedium.copyWith(
+                                  color: Colors.white.withOpacity(0.7),
+                                ),
+                              )
+                              .animate()
+                              .fadeIn(delay: 400.ms)
+                              .slideY(begin: 0.3, end: 0),
+
                           const SizedBox(height: 32),
-                          
+
                           // Auth Form
                           Form(
                             key: _formKey,
@@ -165,53 +204,79 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
                                     style: const TextStyle(color: Colors.white),
                                     decoration: InputDecoration(
                                       labelText: 'First Name',
-                                      labelStyle: TextStyle(color: Colors.white.withOpacity(0.7)),
-                                      prefixIcon: Icon(Icons.person, color: Colors.white.withOpacity(0.7)),
+                                      labelStyle: TextStyle(
+                                        color: Colors.white.withOpacity(0.7),
+                                      ),
+                                      prefixIcon: Icon(
+                                        Icons.person,
+                                        color: Colors.white.withOpacity(0.7),
+                                      ),
                                       border: OutlineInputBorder(
                                         borderRadius: BorderRadius.circular(12),
-                                        borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                                        borderSide: BorderSide(
+                                          color: Colors.white.withOpacity(0.3),
+                                        ),
                                       ),
                                       enabledBorder: OutlineInputBorder(
                                         borderRadius: BorderRadius.circular(12),
-                                        borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                                        borderSide: BorderSide(
+                                          color: Colors.white.withOpacity(0.3),
+                                        ),
                                       ),
                                       focusedBorder: OutlineInputBorder(
                                         borderRadius: BorderRadius.circular(12),
-                                        borderSide: const BorderSide(color: AppTheme.primaryGold),
+                                        borderSide: const BorderSide(
+                                          color: AppTheme.primaryGold,
+                                        ),
                                       ),
                                     ),
                                     validator: (value) {
-                                      if (_isSignUp && (value == null || value.trim().isEmpty)) {
+                                      if (_isSignUp &&
+                                          (value == null ||
+                                              value.trim().isEmpty)) {
                                         return 'Please enter your first name';
                                       }
                                       return null;
                                     },
                                   ),
                                   const SizedBox(height: 16),
-                                  
+
                                   // Last Name field (only for sign up)
                                   TextFormField(
                                     controller: _lastNameController,
                                     style: const TextStyle(color: Colors.white),
                                     decoration: InputDecoration(
                                       labelText: 'Last Name',
-                                      labelStyle: TextStyle(color: Colors.white.withOpacity(0.7)),
-                                      prefixIcon: Icon(Icons.person, color: Colors.white.withOpacity(0.7)),
+                                      labelStyle: TextStyle(
+                                        color: Colors.white.withOpacity(0.7),
+                                      ),
+                                      prefixIcon: Icon(
+                                        Icons.person,
+                                        color: Colors.white.withOpacity(0.7),
+                                      ),
                                       border: OutlineInputBorder(
                                         borderRadius: BorderRadius.circular(12),
-                                        borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                                        borderSide: BorderSide(
+                                          color: Colors.white.withOpacity(0.3),
+                                        ),
                                       ),
                                       enabledBorder: OutlineInputBorder(
                                         borderRadius: BorderRadius.circular(12),
-                                        borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                                        borderSide: BorderSide(
+                                          color: Colors.white.withOpacity(0.3),
+                                        ),
                                       ),
                                       focusedBorder: OutlineInputBorder(
                                         borderRadius: BorderRadius.circular(12),
-                                        borderSide: const BorderSide(color: AppTheme.primaryGold),
+                                        borderSide: const BorderSide(
+                                          color: AppTheme.primaryGold,
+                                        ),
                                       ),
                                     ),
                                     validator: (value) {
-                                      if (_isSignUp && (value == null || value.trim().isEmpty)) {
+                                      if (_isSignUp &&
+                                          (value == null ||
+                                              value.trim().isEmpty)) {
                                         return 'Please enter your last name';
                                       }
                                       return null;
@@ -226,34 +291,47 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
                                   style: const TextStyle(color: Colors.white),
                                   decoration: InputDecoration(
                                     labelText: 'Email',
-                                    labelStyle: TextStyle(color: Colors.white.withOpacity(0.7)),
-                                    prefixIcon: Icon(Icons.email, color: Colors.white.withOpacity(0.7)),
+                                    labelStyle: TextStyle(
+                                      color: Colors.white.withOpacity(0.7),
+                                    ),
+                                    prefixIcon: Icon(
+                                      Icons.email,
+                                      color: Colors.white.withOpacity(0.7),
+                                    ),
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                                      borderSide: BorderSide(
+                                        color: Colors.white.withOpacity(0.3),
+                                      ),
                                     ),
                                     enabledBorder: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                                      borderSide: BorderSide(
+                                        color: Colors.white.withOpacity(0.3),
+                                      ),
                                     ),
                                     focusedBorder: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
-                                      borderSide: const BorderSide(color: AppTheme.primaryGold),
+                                      borderSide: const BorderSide(
+                                        color: AppTheme.primaryGold,
+                                      ),
                                     ),
                                   ),
                                   validator: (value) {
                                     if (value == null || value.trim().isEmpty) {
                                       return 'Please enter your email';
                                     }
-                                    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+                                    if (!RegExp(
+                                      r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
+                                    ).hasMatch(value)) {
                                       return 'Please enter a valid email';
                                     }
                                     return null;
                                   },
                                 ),
-                                
+
                                 const SizedBox(height: 16),
-                                
+
                                 // Password field
                                 TextFormField(
                                   controller: _passwordController,
@@ -261,26 +339,39 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
                                   style: const TextStyle(color: Colors.white),
                                   decoration: InputDecoration(
                                     labelText: 'Password',
-                                    labelStyle: TextStyle(color: Colors.white.withOpacity(0.7)),
-                                    prefixIcon: Icon(Icons.lock, color: Colors.white.withOpacity(0.7)),
+                                    labelStyle: TextStyle(
+                                      color: Colors.white.withOpacity(0.7),
+                                    ),
+                                    prefixIcon: Icon(
+                                      Icons.lock,
+                                      color: Colors.white.withOpacity(0.7),
+                                    ),
                                     suffixIcon: IconButton(
                                       icon: Icon(
-                                        _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
+                                        _isPasswordVisible
+                                            ? Icons.visibility
+                                            : Icons.visibility_off,
                                         color: Colors.white.withOpacity(0.7),
                                       ),
                                       onPressed: _togglePasswordVisibility,
                                     ),
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                                      borderSide: BorderSide(
+                                        color: Colors.white.withOpacity(0.3),
+                                      ),
                                     ),
                                     enabledBorder: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                                      borderSide: BorderSide(
+                                        color: Colors.white.withOpacity(0.3),
+                                      ),
                                     ),
                                     focusedBorder: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
-                                      borderSide: const BorderSide(color: AppTheme.primaryGold),
+                                      borderSide: const BorderSide(
+                                        color: AppTheme.primaryGold,
+                                      ),
                                     ),
                                   ),
                                   validator: (value) {
@@ -293,15 +384,17 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
                                     return null;
                                   },
                                 ),
-                                
+
                                 const SizedBox(height: 24),
-                                
+
                                 // Sign In/Up Button
                                 SizedBox(
                                   width: double.infinity,
                                   height: 50,
                                   child: ElevatedButton(
-                                    onPressed: authProvider.isLoading ? null : _handleEmailAuth,
+                                    onPressed: authProvider.isLoading
+                                        ? null
+                                        : _handleEmailAuth,
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: AppTheme.primaryGold,
                                       foregroundColor: Colors.black,
@@ -315,11 +408,16 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
                                             height: 20,
                                             child: CircularProgressIndicator(
                                               strokeWidth: 2,
-                                              valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
+                                              valueColor:
+                                                  AlwaysStoppedAnimation<Color>(
+                                                    Colors.black,
+                                                  ),
                                             ),
                                           )
                                         : Text(
-                                            _isSignUp ? 'Create Account' : 'Sign In',
+                                            _isSignUp
+                                                ? 'Create Account'
+                                                : 'Sign In',
                                             style: AppTheme.bodyLarge.copyWith(
                                               fontWeight: FontWeight.bold,
                                             ),
@@ -329,41 +427,59 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
                               ],
                             ),
                           ),
-                          
+
                           const SizedBox(height: 24),
-                          
+
                           // Divider
                           Row(
                             children: [
-                              Expanded(child: Divider(color: Colors.white.withOpacity(0.3))),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 16),
-                                child: Text(
-                                  'OR',
-                                  style: TextStyle(color: Colors.white.withOpacity(0.7)),
+                              Expanded(
+                                child: Divider(
+                                  color: Colors.white.withOpacity(0.3),
                                 ),
                               ),
-                              Expanded(child: Divider(color: Colors.white.withOpacity(0.3))),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                ),
+                                child: Text(
+                                  'OR',
+                                  style: TextStyle(
+                                    color: Colors.white.withOpacity(0.7),
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: Divider(
+                                  color: Colors.white.withOpacity(0.3),
+                                ),
+                              ),
                             ],
                           ),
-                          
+
                           const SizedBox(height: 24),
-                          
+
                           // Google Sign In Button
                           GoogleSignInButton(
-                            onPressed: authProvider.isLoading ? () {} : _handleGoogleSignIn,
+                            onPressed: authProvider.isLoading
+                                ? () {}
+                                : _handleGoogleSignIn,
                             isLoading: authProvider.isLoading,
                           ),
-                          
+
                           const SizedBox(height: 24),
-                          
+
                           // Toggle Auth Mode
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Text(
-                                _isSignUp ? 'Already have an account?' : 'Don\'t have an account?',
-                                style: TextStyle(color: Colors.white.withOpacity(0.7)),
+                                _isSignUp
+                                    ? 'Already have an account?'
+                                    : 'Don\'t have an account?',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.7),
+                                ),
                               ),
                               TextButton(
                                 onPressed: _toggleAuthMode,
@@ -377,7 +493,7 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
                               ),
                             ],
                           ),
-                          
+
                           // Error Message
                           if (authProvider.error != null) ...[
                             const SizedBox(height: 16),
@@ -386,7 +502,9 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
                               decoration: BoxDecoration(
                                 color: Colors.red.withOpacity(0.1),
                                 borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.red.withOpacity(0.3)),
+                                border: Border.all(
+                                  color: Colors.red.withOpacity(0.3),
+                                ),
                               ),
                               child: Text(
                                 authProvider.error!,
@@ -395,9 +513,9 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
                               ),
                             ),
                           ],
-                          
+
                           const SizedBox(height: 16),
-                          
+
                           // Terms & Privacy
                           Text(
                             'By signing in, you agree to our Terms & Privacy Policy.',
@@ -419,4 +537,4 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
       ),
     );
   }
-} 
+}

@@ -23,8 +23,6 @@ import 'providers/marketplace/marketplace_provider.dart';
 import 'providers/enhanced_wallet_provider.dart';
 import 'wallet/providers/wallet_provider.dart';
 import 'wallet/providers/wallet_auth_provider.dart';
-import 'services/secure_mining_service.dart';
-import 'services/mining_security_service.dart';
 import 'services/app_initialization_service.dart';
 import 'services/stellar_service.dart';
 import 'services/notification_service.dart';
@@ -160,11 +158,6 @@ class MyApp extends StatelessWidget {
             return previousProvider ?? SecureStellarProvider();
           },
         ),
-        // Mining services
-        Provider<SecureMiningService>(
-          create: (_) => SecureMiningService()..initialize(),
-        ),
-        Provider<MiningSecurityService>(create: (_) => MiningSecurityService()),
         ChangeNotifierProvider(create: (_) => ChatProvider()),
         ChangeNotifierProvider(create: (_) => AdminProvider()),
         ChangeNotifierProvider(create: (_) => CartProvider()),

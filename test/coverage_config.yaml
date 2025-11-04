@@ -1,0 +1,45 @@
+# Test Coverage Configuration for Raffle System
+
+# Minimum coverage thresholds
+coverage:
+  minimum_coverage: 80
+  minimum_coverage_per_file: 70
+
+# Files to include in coverage analysis
+include:
+  - lib/services/raffle_service.dart
+  - lib/services/soroban_raffle_service.dart
+  - lib/models/raffle_model.dart
+  - lib/models/raffle_entry_model.dart
+  - lib/models/raffle_winner_model.dart
+  - lib/screens/raffle/*.dart
+
+# Files to exclude from coverage analysis
+exclude:
+  - lib/main.dart
+  - lib/firebase_options.dart
+  - lib/secrets.dart
+  - test/**
+  - lib/examples/**
+  - android/**
+  - ios/**
+  - web/**
+  - windows/**
+  - macos/**
+  - linux/**
+
+# Coverage report format
+report:
+  format: lcov
+  output: coverage/lcov.info
+
+# HTML report generation
+html:
+  enabled: true
+  output: coverage/html
+
+# Badge generation for README
+badge:
+  enabled: true
+  output: coverage/badge.svg
+  style: flat-square

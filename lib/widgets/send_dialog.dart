@@ -6,7 +6,9 @@ import '../theme/app_theme.dart';
 import 'qr_scanner.dart';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../providers/auth_provider.dart';
+import '../providers/auth_provider.dart' as local_auth;
+import 'package:firebase_auth/firebase_auth.dart';
+import '../services/akofa_tag_service.dart';
 
 class SendDialog extends StatefulWidget {
   final String assetCode;
@@ -21,7 +23,7 @@ class SendDialog extends StatefulWidget {
 
 class _SendDialogState extends State<SendDialog> {
   final _formKey = GlobalKey<FormState>();
-  final _addressController = TextEditingController();
+  final _recipientController = TextEditingController();
   final _amountController = TextEditingController();
   final _memoController = TextEditingController();
   bool _isLoading = false;
@@ -29,6 +31,10 @@ class _SendDialogState extends State<SendDialog> {
   bool _showAdvanced = false;
   final _qrKey = GlobalKey(debugLabel: 'QR');
   bool _isScanning = false;
+  bool _isResolving = false;
+  String? _resolvedAddress;
+  String? _resolvedName;
+  bool _isValidInput = false;
 
   // For asset selection
   String _selectedAssetCode = '';
@@ -90,9 +96,72 @@ class _SendDialogState extends State<SendDialog> {
     setState(() {});
   }
 
+  Future<void> _resolveInput() async {
+    final input = _recipientController.text.trim();
+    if (input.isEmpty) {
+      setState(() {
+        _resolvedAddress = null;
+        _resolvedName = null;
+        _error = null;
+        _isValidInput = false;
+      });
+      return;
+    }
+
+    setState(() {
+      _isResolving = true;
+      _error = null;
+    });
+
+    try {
+      // Check if input is a valid Stellar address
+      if (_isValidStellarAddress(input)) {
+        setState(() {
+          _resolvedAddress = input;
+          _resolvedName = null; // No name for raw addresses
+          _error = null;
+          _isValidInput = true;
+        });
+      } else {
+        // Try to resolve as AKOFA tag
+        final result = await AkofaTagService.resolveTag(input);
+
+        if (result['success']) {
+          setState(() {
+            _resolvedAddress = result['publicKey'];
+            _resolvedName = result['firstName'];
+            _error = null;
+            _isValidInput = true;
+          });
+        } else {
+          setState(() {
+            _resolvedAddress = null;
+            _resolvedName = null;
+            _error = result['error'];
+            _isValidInput = false;
+          });
+        }
+      }
+    } catch (e) {
+      setState(() {
+        _resolvedAddress = null;
+        _resolvedName = null;
+        _error = 'Failed to resolve input: $e';
+        _isValidInput = false;
+      });
+    } finally {
+      setState(() => _isResolving = false);
+    }
+  }
+
+  bool _isValidStellarAddress(String address) {
+    // Basic Stellar address validation: starts with 'G' and is 56 characters long
+    return address.startsWith('G') && address.length == 56;
+  }
+
   @override
   void dispose() {
-    _addressController.dispose();
+    _recipientController.dispose();
     _amountController.dispose();
     _memoController.dispose();
     super.dispose();
@@ -175,110 +244,129 @@ class _SendDialogState extends State<SendDialog> {
               ),
               const SizedBox(height: 24),
 
-              // Recipient Address
-              _selectedAssetCode == 'AKOFA'
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Recipient Akofa Tag',
-                          style: TextStyle(color: AppTheme.grey, fontSize: 13),
+              // Recipient Input (Tag or Address)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Recipient (AKOFA Tag or Wallet Address)',
+                    style: TextStyle(color: AppTheme.grey, fontSize: 13),
+                  ),
+                  const SizedBox(height: 6),
+                  TextFormField(
+                    controller: _recipientController,
+                    decoration: InputDecoration(
+                      hintText: 'e.g., john1234 or G...',
+                      hintStyle: TextStyle(
+                        color: AppTheme.grey.withOpacity(0.5),
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                          color: AppTheme.grey.withOpacity(0.3),
                         ),
-                        const SizedBox(height: 6),
-                        Container(
-                          decoration: BoxDecoration(
-                            color: AppTheme.black,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: AppTheme.grey.withOpacity(0.3),
-                            ),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                          color: AppTheme.grey.withOpacity(0.3),
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: AppTheme.primaryGold),
+                      ),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _isResolving ? Icons.hourglass_top : Icons.search,
+                          color: AppTheme.primaryGold,
+                        ),
+                        onPressed: _isResolving ? null : _resolveInput,
+                      ),
+                    ),
+                    style: const TextStyle(color: AppTheme.white, fontSize: 16),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter a recipient tag or address';
+                      }
+                      return null;
+                    },
+                    onChanged: (_) {
+                      // Auto-resolve after user stops typing
+                      Future.delayed(const Duration(milliseconds: 500), () {
+                        if (mounted &&
+                            _recipientController.text.trim() !=
+                                (_resolvedAddress != null
+                                    ? _recipientController.text.trim()
+                                    : '')) {
+                          _resolveInput();
+                        }
+                      });
+                    },
+                  ),
+
+                  // Resolution Result
+                  if (_resolvedAddress != null && _isValidInput) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: Colors.green.withOpacity(0.3),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.check_circle,
+                            color: Colors.green,
+                            size: 20,
                           ),
-                          child: Row(
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                ),
-                                child: Text(
-                                  '₳',
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _resolvedName != null
+                                      ? 'Tag Resolved'
+                                      : 'Valid Address',
                                   style: TextStyle(
-                                    fontSize: 22,
-                                    color: AppTheme.primaryGold,
+                                    color: Colors.green,
+                                    fontSize: 12,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
-                              ),
-                              Expanded(
-                                child: TextFormField(
-                                  controller: _addressController,
-                                  decoration: InputDecoration(
-                                    hintText: 'username',
-                                    border: InputBorder.none,
-                                    isDense: true,
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      vertical: 16,
+                                if (_resolvedName != null)
+                                  Text(
+                                    _resolvedName!,
+                                    style: const TextStyle(
+                                      color: AppTheme.white,
+                                      fontSize: 14,
                                     ),
                                   ),
-                                  style: const TextStyle(
-                                    color: AppTheme.white,
-                                    fontSize: 18,
+                                Text(
+                                  _resolvedAddress!.substring(0, 8) +
+                                      '...' +
+                                      _resolvedAddress!.substring(
+                                        _resolvedAddress!.length - 8,
+                                      ),
+                                  style: TextStyle(
+                                    color: AppTheme.grey,
+                                    fontSize: 12,
                                   ),
-                                  validator: (value) {
-                                    if (value == null || value.isEmpty) {
-                                      return 'Please enter an Akofa Tag';
-                                    }
-                                    if (value.contains(' ')) {
-                                      return 'No spaces allowed in Akofa Tag';
-                                    }
-                                    return null;
-                                  },
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ),
-                      ],
-                    )
-                  : TextFormField(
-                      controller: _addressController,
-                      decoration: InputDecoration(
-                        labelText: 'Recipient Address or ₳Tag',
-                        labelStyle: TextStyle(color: AppTheme.grey),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(
-                            color: AppTheme.grey.withOpacity(0.3),
-                          ),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(
-                            color: AppTheme.grey.withOpacity(0.3),
-                          ),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: AppTheme.primaryGold),
-                        ),
+                        ],
                       ),
-                      style: const TextStyle(color: AppTheme.white),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter a recipient address or ₳Tag';
-                        }
-                        if (value.startsWith('₳')) {
-                          if (value.length < 2) {
-                            return 'Enter a valid Akofa Tag (e.g. ₳username)';
-                          }
-                          return null;
-                        }
-                        // Basic Stellar address validation
-                        if (!value.startsWith('G') || value.length != 56) {
-                          return 'Please enter a valid Stellar address or ₳Tag';
-                        }
-                        return null;
-                      },
                     ),
+                  ],
+                ],
+              ),
               const SizedBox(height: 16),
 
               // Amount
@@ -425,14 +513,120 @@ class _SendDialogState extends State<SendDialog> {
     );
   }
 
+  Future<String?> _showTransactionPasswordDialog() async {
+    final controller = TextEditingController();
+    return await showDialog<String>(
+      context: context,
+      barrierDismissible: false, // Prevent dismissing by tapping outside
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppTheme.black,
+          title: Text(
+            'Confirm Transaction',
+            style: AppTheme.headingSmall.copyWith(color: AppTheme.primaryGold),
+            textAlign: TextAlign.center,
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Enter your password to sign and send $_amountController.text $_selectedAssetCode to ${_recipientController.text}',
+                style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: controller,
+                obscureText: true,
+                decoration: InputDecoration(
+                  labelText: 'Password',
+                  labelStyle: TextStyle(color: AppTheme.grey),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: AppTheme.grey.withOpacity(0.3),
+                    ),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: AppTheme.grey.withOpacity(0.3),
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: AppTheme.primaryGold),
+                  ),
+                ),
+                style: const TextStyle(color: AppTheme.white),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, null),
+              child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, controller.text),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryGold,
+                foregroundColor: AppTheme.black,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text('Confirm & Send'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   void _handleSend() async {
-    if (_formKey.currentState!.validate()) {
+    if (_formKey.currentState!.validate() && _isValidInput) {
+      // Show password confirmation dialog
+      final password = await _showTransactionPasswordDialog();
+      if (password == null || password.isEmpty) {
+        return; // User cancelled
+      }
+
+      // Verify password with Firebase Auth
+      final authProvider = Provider.of<local_auth.AuthProvider>(
+        context,
+        listen: false,
+      );
+      final currentUser = authProvider.user;
+      if (currentUser == null || currentUser.email == null) {
+        setState(() {
+          _error = 'Authentication required. Please log in again.';
+        });
+        return;
+      }
+
+      try {
+        // Re-authenticate user with password
+        final credential = EmailAuthProvider.credential(
+          email: currentUser.email!,
+          password: password,
+        );
+        await currentUser.reauthenticateWithCredential(credential);
+      } catch (e) {
+        setState(() {
+          _error = 'Invalid password. Please try again.';
+        });
+        return;
+      }
+
       setState(() {
         _isLoading = true;
         _error = null;
       });
+
       try {
-        String destinationAddress = _addressController.text.trim();
+        String destinationAddress =
+            _resolvedAddress ?? _recipientController.text.trim();
         final amount = _amountController.text;
         final memo = _memoController.text.isNotEmpty
             ? _memoController.text

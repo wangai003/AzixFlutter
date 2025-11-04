@@ -9,7 +9,7 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "deviceId", 
+          "fieldPath": "deviceId",
           "order": "ASCENDING"
         },
         {
@@ -20,7 +20,7 @@
     },
     {
       "collectionGroup": "secure_mining_sessions",
-      "queryScope": "COLLECTION", 
+      "queryScope": "COLLECTION",
       "fields": [
         {
           "fieldPath": "userId",
@@ -79,6 +79,178 @@
         {
           "fieldPath": "severity",
           "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "raffles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "startDate",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "raffles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "endDate",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "raffles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "creatorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "raffles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "isPublic",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "raffle_entries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "raffleId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "raffle_entries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "raffleId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "entryDate",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "raffle_entries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "raffleId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "isValid",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "raffle_entries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "entryDate",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "raffle_winners",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "raffleId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "winnerPosition",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "raffle_winners",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "raffleId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "claimStatus",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "raffle_winners",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "winnerUserId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "claimStatus",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "notifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
         }
       ]
     }

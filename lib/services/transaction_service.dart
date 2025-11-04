@@ -77,7 +77,7 @@ class TransactionService {
   static Future<void> recordBuyAkofa({
     required double amount,
     required String paymentMethod,
-    required String flutterwaveRef,
+    required String paymentRef,
     String? stellarHash,
     Map<String, dynamic>? additionalMetadata,
   }) async {
@@ -105,56 +105,14 @@ class TransactionService {
       assetCode: 'AKOFA',
       description: 'Bought $amount AKOFA via $paymentMethod',
       transactionHash: stellarHash,
-      senderAkofaTag: 'Flutterwave',
+      senderAkofaTag: 'PaymentProvider',
       recipientAkofaTag: recipientAkofaTag,
-      senderAddress: 'Flutterwave',
+      senderAddress: 'PaymentProvider',
       recipientAddress: recipientAddress,
       additionalMetadata: {
         'paymentMethod': paymentMethod,
-        'flutterwaveRef': flutterwaveRef,
+        'paymentRef': paymentRef,
         'transactionType': 'onramp',
-        ...?additionalMetadata,
-      },
-    );
-  }
-
-  // Record a mining reward transaction
-  static Future<void> recordMiningReward({
-    required double amount,
-    String? stellarHash,
-    Map<String, dynamic>? additionalMetadata,
-  }) async {
-    final user = _auth.currentUser;
-    if (user == null) return;
-
-    // Resolve recipient's Akofa tag
-    String? recipientAkofaTag;
-    String? recipientAddress;
-    try {
-      final tagResult = await AkofaTagService.getUserTag(user.uid);
-      if (tagResult['success']) {
-        recipientAkofaTag = tagResult['tag'];
-        recipientAddress = tagResult['publicKey'];
-      }
-    } catch (e) {
-      // If tag resolution fails, use user ID as fallback
-      recipientAkofaTag = user.uid;
-      recipientAddress = user.uid;
-    }
-
-    await recordTransaction(
-      type: 'mining',
-      amount: amount,
-      assetCode: 'AKOFA',
-      description: 'Mining reward of $amount AKOFA',
-      transactionHash: stellarHash,
-      senderAkofaTag: 'SYSTEM',
-      recipientAkofaTag: recipientAkofaTag,
-      senderAddress: 'SYSTEM_ISSUER',
-      recipientAddress: recipientAddress,
-      additionalMetadata: {
-        'rewardType': 'mining',
-        'miningSession': 'active',
         ...?additionalMetadata,
       },
     );
@@ -173,7 +131,7 @@ class TransactionService {
     final user = _auth.currentUser;
     if (user == null) return;
 
-    // Resolve sender's Akofa tag
+    // Resolve sender's Akofa tag and address
     String? senderAkofaTag;
     String? senderAddress;
     try {
@@ -188,6 +146,32 @@ class TransactionService {
       senderAddress = user.uid;
     }
 
+    // Resolve recipient's Akofa tag and address if not provided
+    String? resolvedRecipientAddress = recipientAddress;
+    if (recipientAkofaTag != null && recipientAkofaTag.isNotEmpty) {
+      // If recipient tag is provided, resolve it to address
+      try {
+        final tagResult = await AkofaTagService.resolveTag(recipientAkofaTag);
+        if (tagResult['success']) {
+          resolvedRecipientAddress = tagResult['publicKey'];
+        }
+      } catch (e) {
+        // Keep original recipientAddress if resolution fails
+      }
+    } else {
+      // If no recipient tag provided, try to resolve tag from address
+      try {
+        final recipientTagResult = await AkofaTagService.resolveTagByAddress(
+          recipientAddress,
+        );
+        if (recipientTagResult['success'] == true) {
+          recipientAkofaTag = recipientTagResult['tag'];
+        }
+      } catch (e) {
+        // Keep recipientAkofaTag as null if resolution fails
+      }
+    }
+
     await recordTransaction(
       type: 'send',
       amount: amount,
@@ -198,7 +182,7 @@ class TransactionService {
       senderAkofaTag: senderAkofaTag,
       recipientAkofaTag: recipientAkofaTag,
       senderAddress: senderAddress,
-      recipientAddress: recipientAddress,
+      recipientAddress: resolvedRecipientAddress,
       additionalMetadata: {
         'transactionType': 'transfer',
         ...?additionalMetadata,
@@ -219,7 +203,7 @@ class TransactionService {
     final user = _auth.currentUser;
     if (user == null) return;
 
-    // Resolve recipient's Akofa tag
+    // Resolve recipient's Akofa tag and address
     String? recipientAkofaTag;
     String? recipientAddress;
     try {
@@ -234,6 +218,32 @@ class TransactionService {
       recipientAddress = user.uid;
     }
 
+    // Resolve sender's Akofa tag and address if not provided
+    String? resolvedSenderAddress = senderAddress;
+    if (senderAkofaTag != null && senderAkofaTag.isNotEmpty) {
+      // If sender tag is provided, resolve it to address
+      try {
+        final tagResult = await AkofaTagService.resolveTag(senderAkofaTag);
+        if (tagResult['success']) {
+          resolvedSenderAddress = tagResult['publicKey'];
+        }
+      } catch (e) {
+        // Keep original senderAddress if resolution fails
+      }
+    } else {
+      // If no sender tag provided, try to resolve tag from address
+      try {
+        final senderTagResult = await AkofaTagService.resolveTagByAddress(
+          senderAddress,
+        );
+        if (senderTagResult['success'] == true) {
+          senderAkofaTag = senderTagResult['tag'];
+        }
+      } catch (e) {
+        // Keep senderAkofaTag as null if resolution fails
+      }
+    }
+
     await recordTransaction(
       type: 'receive',
       amount: amount,
@@ -243,7 +253,7 @@ class TransactionService {
       transactionHash: stellarHash,
       senderAkofaTag: senderAkofaTag,
       recipientAkofaTag: recipientAkofaTag,
-      senderAddress: senderAddress,
+      senderAddress: resolvedSenderAddress,
       recipientAddress: recipientAddress,
       additionalMetadata: {
         'transactionType': 'transfer',

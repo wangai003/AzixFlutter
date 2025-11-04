@@ -1,0 +1,38 @@
+{
+  "name": "functions",
+  "description": "Cloud Functions for Azix Flutter Mining Infrastructure",
+  "scripts": {
+    "serve": "firebase emulators:start --only functions",
+    "shell": "firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log",
+    "test": "mocha test/**/*.test.js --timeout 10000",
+    "test:watch": "mocha test/**/*.test.js --watch",
+    "lint": "eslint src/**/*.js",
+    "build": "echo 'No build step required for Node.js functions'"
+  },
+  "engines": {
+    "node": "18"
+  },
+  "main": "lib/index.js",
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "firebase-functions": "^5.0.0",
+    "stellar-sdk": "^11.3.0",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "joi": "^17.11.0",
+    "crypto": "^1.0.1",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "firebase-functions-test": "^3.1.0",
+    "mocha": "^10.2.0",
+    "chai": "^4.3.10",
+    "eslint": "^8.54.0"
+  },
+  "private": true
+}

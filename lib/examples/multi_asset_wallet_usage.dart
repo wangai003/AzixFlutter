@@ -240,6 +240,7 @@ class MultiAssetWalletProgrammaticExample {
       recipientAddress: 'GEXAMPLE_RECIPIENT_ADDRESS',
       stablecoin: AssetConfigs.eurc,
       amount: 15.0,
+      memo: 'EURC Transfer',
     );
   }
 
@@ -247,7 +248,7 @@ class MultiAssetWalletProgrammaticExample {
   void checkAssetBalances() {
     final xlmBalance = walletProvider.getAssetBalance('XLM');
     final akofaBalance = walletProvider.getAssetBalance(
-      'AKOFA_GBJGVMBWKGSMPZ4D7QDTW7VPCJUWCJ26OIHFJNRIWVR362NNUU3YCOTQ',
+      'AKOFA_GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW',
     );
     final usdcBalance = walletProvider.getAssetBalance(
       'USDC_GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN',

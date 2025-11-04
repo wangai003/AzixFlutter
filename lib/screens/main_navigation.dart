@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
 
-import 'enhanced_mining_analytics_screen.dart';
 import 'explore_screen.dart';
 import 'marketplace/new_marketplace.dart';
-import 'secure_mining_screen.dart';
 
 import 'vendor/functional_vendor_dashboard.dart';
 import 'notifications_screen.dart';
@@ -15,7 +14,12 @@ import 'settings_screen.dart';
 import 'enhanced_wallet_screen.dart';
 import 'all_transactions_screen.dart';
 import 'referral_screen.dart';
+import 'tag_resolver_screen.dart';
+import 'mining_screen.dart';
+import 'raffle/raffle_hub_screen.dart';
+import 'raffle/my_raffles_screen.dart';
 import '../widgets/app_logo.dart';
+import '../providers/admin_provider.dart';
 
 /// Main navigation with responsive design and real-time updates
 class MainNavigation extends StatefulWidget {
@@ -67,27 +71,45 @@ class _MainNavigationState extends State<MainNavigation> {
                 userRole == 'vendor' ||
                 userRole == 'goods_vendor' ||
                 userRole == 'service_vendor';
+            final isAdmin = userRole == 'admin' || userRole == 'super_admin';
 
             // Build screens list
             final List<Widget> screens = [
-              const SecureMiningScreen(), // Reverted to old mining system
+              const MiningScreen(),
               const ExploreScreen(),
               const WebViewPage(),
               if (isVendor) const FunctionalVendorDashboard(),
               const EnhancedWalletScreen(),
               const ReferralScreen(),
+              const RaffleHubScreen(),
+              if (isAdmin) const MyRafflesScreen(),
               const CommunityScreen(),
               const AllTransactionsScreen(),
               const SettingsScreen(),
+              const TagResolverScreen(),
             ];
 
             // Calculate indices for all screens
+            final int miningIndex = 0;
+            final int exploreIndex = 1;
+            final int marketIndex = 2;
             final int vendorIndex = isVendor ? 3 : -1;
             final int walletIndex = isVendor ? 4 : 3;
             final int referralIndex = isVendor ? 5 : 4;
-            final int communityIndex = isVendor ? 6 : 5;
-            final int transactionsIndex = isVendor ? 7 : 6;
-            final int settingsIndex = isVendor ? 8 : 7;
+            final int raffleHubIndex = isVendor ? 6 : 5;
+            final int myRafflesIndex = isAdmin ? (isVendor ? 7 : 6) : -1;
+            final int communityIndex = isAdmin
+                ? (isVendor ? 8 : 7)
+                : (isVendor ? 7 : 6);
+            final int transactionsIndex = isAdmin
+                ? (isVendor ? 9 : 8)
+                : (isVendor ? 8 : 7);
+            final int settingsIndex = isAdmin
+                ? (isVendor ? 10 : 9)
+                : (isVendor ? 9 : 8);
+            final int tagResolverIndex = isAdmin
+                ? (isVendor ? 11 : 10)
+                : (isVendor ? 10 : 9);
 
             return LayoutBuilder(
               builder: (context, constraints) {
@@ -95,12 +117,19 @@ class _MainNavigationState extends State<MainNavigation> {
                 return _buildResponsiveLayout(
                   screens,
                   isVendor,
+                  isAdmin,
+                  miningIndex,
+                  exploreIndex,
+                  marketIndex,
                   vendorIndex,
                   walletIndex,
                   referralIndex,
+                  raffleHubIndex,
+                  myRafflesIndex,
                   communityIndex,
                   transactionsIndex,
                   settingsIndex,
+                  tagResolverIndex,
                   isMobile,
                 );
               },
@@ -114,12 +143,19 @@ class _MainNavigationState extends State<MainNavigation> {
   Widget _buildResponsiveLayout(
     List<Widget> screens,
     bool isVendor,
+    bool isAdmin,
+    int miningIndex,
+    int exploreIndex,
+    int marketIndex,
     int vendorIndex,
     int walletIndex,
     int referralIndex,
+    int raffleHubIndex,
+    int myRafflesIndex,
     int communityIndex,
     int transactionsIndex,
     int settingsIndex,
+    int tagResolverIndex,
     bool isMobile,
   ) {
     // Use collapsible side navigation for both mobile and desktop
@@ -128,12 +164,19 @@ class _MainNavigationState extends State<MainNavigation> {
         children: [
           _buildCollapsibleSideNavigation(
             isVendor,
+            isAdmin,
+            miningIndex,
+            exploreIndex,
+            marketIndex,
             vendorIndex,
             walletIndex,
             referralIndex,
+            raffleHubIndex,
+            myRafflesIndex,
             communityIndex,
             transactionsIndex,
             settingsIndex,
+            tagResolverIndex,
             isMobile,
           ),
           Expanded(
@@ -194,9 +237,15 @@ class _MainNavigationState extends State<MainNavigation> {
   // Mobile drawer
   Widget _buildDrawer(
     bool isVendor,
+    bool isAdmin,
+    int miningIndex,
+    int exploreIndex,
+    int marketIndex,
     int vendorIndex,
     int walletIndex,
     int referralIndex,
+    int raffleHubIndex,
+    int myRafflesIndex,
     int communityIndex,
     int transactionsIndex,
     int settingsIndex,
@@ -232,9 +281,9 @@ class _MainNavigationState extends State<MainNavigation> {
               child: ListView(
                 padding: EdgeInsets.zero,
                 children: [
-                  _buildDrawerItem(Icons.home, 'Home', 0),
-                  _buildDrawerItem(Icons.explore, 'Explore', 1),
-                  _buildDrawerItem(Icons.shopping_cart, 'Market', 2),
+                  _buildDrawerItem(Icons.engineering, 'Mining', miningIndex),
+                  _buildDrawerItem(Icons.explore, 'Explore', exploreIndex),
+                  _buildDrawerItem(Icons.shopping_cart, 'Market', marketIndex),
                   if (isVendor)
                     _buildDrawerItem(Icons.store, 'Vendor', vendorIndex),
                   _buildDrawerItem(
@@ -243,6 +292,17 @@ class _MainNavigationState extends State<MainNavigation> {
                     walletIndex,
                   ),
                   _buildDrawerItem(Icons.share, 'Referrals', referralIndex),
+                  _buildDrawerItem(
+                    Icons.local_activity,
+                    'Raffles',
+                    raffleHubIndex,
+                  ),
+                  if (isAdmin)
+                    _buildDrawerItem(
+                      Icons.emoji_events,
+                      'My Raffles',
+                      myRafflesIndex,
+                    ),
                   _buildDrawerItem(Icons.people, 'Community', communityIndex),
                   _buildDrawerItem(
                     Icons.history,
@@ -263,12 +323,19 @@ class _MainNavigationState extends State<MainNavigation> {
   // Collapsible side navigation for desktop and mobile
   Widget _buildCollapsibleSideNavigation(
     bool isVendor,
+    bool isAdmin,
+    int miningIndex,
+    int exploreIndex,
+    int marketIndex,
     int vendorIndex,
     int walletIndex,
     int referralIndex,
+    int raffleHubIndex,
+    int myRafflesIndex,
     int communityIndex,
     int transactionsIndex,
     int settingsIndex,
+    int tagResolverIndex,
     bool isMobile,
   ) {
     final double width = _isDrawerOpen
@@ -304,9 +371,21 @@ class _MainNavigationState extends State<MainNavigation> {
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
-                _buildCollapsibleNavItem(Icons.home, 'Home', 0),
-                _buildCollapsibleNavItem(Icons.explore, 'Explore', 1),
-                _buildCollapsibleNavItem(Icons.shopping_cart, 'Market', 2),
+                _buildCollapsibleNavItem(
+                  Icons.engineering,
+                  'Mining',
+                  miningIndex,
+                ),
+                _buildCollapsibleNavItem(
+                  Icons.explore,
+                  'Explore',
+                  exploreIndex,
+                ),
+                _buildCollapsibleNavItem(
+                  Icons.shopping_cart,
+                  'Market',
+                  marketIndex,
+                ),
                 if (isVendor)
                   _buildCollapsibleNavItem(Icons.store, 'Vendor', vendorIndex),
                 _buildCollapsibleNavItem(
@@ -319,6 +398,17 @@ class _MainNavigationState extends State<MainNavigation> {
                   'Referrals',
                   referralIndex,
                 ),
+                _buildCollapsibleNavItem(
+                  Icons.local_activity,
+                  'Raffles',
+                  raffleHubIndex,
+                ),
+                if (isAdmin)
+                  _buildCollapsibleNavItem(
+                    Icons.emoji_events,
+                    'My Raffles',
+                    myRafflesIndex,
+                  ),
                 _buildCollapsibleNavItem(
                   Icons.people,
                   'Community',
@@ -334,6 +424,11 @@ class _MainNavigationState extends State<MainNavigation> {
                   Icons.settings,
                   'Settings',
                   settingsIndex,
+                ),
+                _buildCollapsibleNavItem(
+                  Icons.search,
+                  'Tag Resolver',
+                  tagResolverIndex,
                 ),
               ],
             ),

@@ -1,41 +1,258 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import '../providers/enhanced_wallet_provider.dart';
-import '../theme/app_theme.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../services/akofa_tag_service.dart';
+import '../services/secure_wallet_service.dart';
+import '../theme/app_theme.dart';
 
 class SendAkofaDialog extends StatefulWidget {
-  final EnhancedWalletProvider walletProvider;
-  final bool useBiometrics;
+  final String? initialTag;
 
-  const SendAkofaDialog({
-    super.key,
-    required this.walletProvider,
-    this.useBiometrics = false,
-  });
+  const SendAkofaDialog({super.key, this.initialTag});
 
   @override
   State<SendAkofaDialog> createState() => _SendAkofaDialogState();
 }
 
 class _SendAkofaDialogState extends State<SendAkofaDialog> {
-  final _formKey = GlobalKey<FormState>();
-  final _addressController = TextEditingController();
+  final _recipientController = TextEditingController();
   final _amountController = TextEditingController();
   final _memoController = TextEditingController();
 
-  bool _isLoading = false;
-  String? _error;
-  bool _isResolvingTag = false;
+  bool _isResolving = false;
+  bool _isSending = false;
   String? _resolvedAddress;
-  String? _resolvedTagInfo;
+  String? _resolvedName;
+  String? _error;
+  String? _successMessage;
+  bool _isValidInput = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialTag != null) {
+      _recipientController.text = widget.initialTag!;
+      _resolveInput();
+    }
+  }
 
   @override
   void dispose() {
-    _addressController.dispose();
+    _recipientController.dispose();
     _amountController.dispose();
     _memoController.dispose();
     super.dispose();
+  }
+
+  Future<void> _resolveInput() async {
+    final input = _recipientController.text.trim();
+    if (input.isEmpty) {
+      setState(() {
+        _resolvedAddress = null;
+        _resolvedName = null;
+        _error = null;
+        _isValidInput = false;
+      });
+      return;
+    }
+
+    setState(() {
+      _isResolving = true;
+      _error = null;
+    });
+
+    try {
+      // Check if input is a valid Stellar address
+      if (_isValidStellarAddress(input)) {
+        setState(() {
+          _resolvedAddress = input;
+          _resolvedName = null; // No name for raw addresses
+          _error = null;
+          _isValidInput = true;
+        });
+      } else {
+        // Try to resolve as AKOFA tag
+        final result = await AkofaTagService.resolveTag(input);
+
+        if (result['success']) {
+          setState(() {
+            _resolvedAddress = result['publicKey'];
+            _resolvedName = result['firstName'];
+            _error = null;
+            _isValidInput = true;
+          });
+        } else {
+          setState(() {
+            _resolvedAddress = null;
+            _resolvedName = null;
+            _error = result['error'];
+            _isValidInput = false;
+          });
+        }
+      }
+    } catch (e) {
+      setState(() {
+        _resolvedAddress = null;
+        _resolvedName = null;
+        _error = 'Failed to resolve input: $e';
+        _isValidInput = false;
+      });
+    } finally {
+      setState(() => _isResolving = false);
+    }
+  }
+
+  bool _isValidStellarAddress(String address) {
+    // Basic Stellar address validation: starts with 'G' and is 56 characters long
+    return address.startsWith('G') && address.length == 56;
+  }
+
+  Future<void> _sendAkofa() async {
+    if (_resolvedAddress == null || !_isValidInput) {
+      setState(
+        () => _error = 'Please enter a valid AKOFA tag or wallet address',
+      );
+      return;
+    }
+
+    final amountText = _amountController.text.trim();
+    if (amountText.isEmpty) {
+      setState(() => _error = 'Please enter an amount');
+      return;
+    }
+
+    final amount = double.tryParse(amountText);
+    if (amount == null || amount <= 0) {
+      setState(() => _error = 'Please enter a valid amount');
+      return;
+    }
+
+    // Show password dialog for secure transaction
+    final password = await _showPasswordDialog();
+    if (password == null) return; // User cancelled
+
+    setState(() {
+      _isSending = true;
+      _error = null;
+      _successMessage = null;
+    });
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not authenticated');
+
+      final result = await SecureWalletService.signTransactionWithPassword(
+        userId: user.uid,
+        password: password,
+        recipientAddress: _resolvedAddress!,
+        amount: amount,
+        assetCode: 'AKOFA',
+        memo: _memoController.text.trim().isNotEmpty
+            ? _memoController.text.trim()
+            : 'AKOFA Transfer',
+      );
+
+      if (result['success']) {
+        setState(() {
+          _successMessage =
+              'Successfully sent $amount AKOFA to ${_resolvedName ?? _recipientController.text}';
+        });
+
+        // Clear form after successful send
+        _amountController.clear();
+        _memoController.clear();
+
+        // Auto-close after success
+        await Future.delayed(const Duration(seconds: 2));
+        if (mounted) {
+          Navigator.of(context).pop(true);
+        }
+      } else {
+        setState(() => _error = result['error'] ?? 'Failed to send AKOFA');
+      }
+    } catch (e) {
+      setState(() => _error = 'Error sending AKOFA: $e');
+    } finally {
+      setState(() => _isSending = false);
+    }
+  }
+
+  Future<String?> _showPasswordDialog() async {
+    String password = '';
+    bool obscurePassword = true;
+
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          backgroundColor: AppTheme.darkGrey,
+          title: Text(
+            'Enter Password',
+            style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Confirm your password to send AKOFA',
+                style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                obscureText: obscurePassword,
+                onChanged: (value) => password = value,
+                style: AppTheme.bodyLarge.copyWith(color: AppTheme.white),
+                decoration: InputDecoration(
+                  hintText: 'Enter your password',
+                  hintStyle: AppTheme.bodyMedium.copyWith(
+                    color: AppTheme.grey.withOpacity(0.5),
+                  ),
+                  filled: true,
+                  fillColor: AppTheme.darkGrey.withOpacity(0.5),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(
+                      color: AppTheme.primaryGold.withOpacity(0.3),
+                    ),
+                  ),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      obscurePassword ? Icons.visibility_off : Icons.visibility,
+                      color: AppTheme.primaryGold,
+                    ),
+                    onPressed: () =>
+                        setState(() => obscurePassword = !obscurePassword),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(
+                'Cancel',
+                style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(password),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryGold,
+                foregroundColor: AppTheme.black,
+              ),
+              child: Text(
+                'Confirm',
+                style: AppTheme.bodyMedium.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.black,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -43,447 +260,330 @@ class _SendAkofaDialogState extends State<SendAkofaDialog> {
     return Dialog(
       backgroundColor: AppTheme.darkGrey,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Container(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
-        constraints: const BoxConstraints(maxWidth: 400),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Send AKOFA Tokens',
-                    style: AppTheme.headingMedium.copyWith(
-                      color: AppTheme.primaryGold,
-                    ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              children: [
+                Icon(Icons.send, color: AppTheme.primaryGold, size: 28),
+                const SizedBox(width: 12),
+                Text(
+                  'Send AKOFA',
+                  style: AppTheme.headingMedium.copyWith(
+                    color: AppTheme.primaryGold,
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: AppTheme.grey),
-                    onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 24),
+
+            // Recipient Input (Tag or Address)
+            Text(
+              'Recipient (AKOFA Tag or Wallet Address)',
+              style: AppTheme.labelMedium.copyWith(color: AppTheme.grey),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _recipientController,
+              style: AppTheme.bodyLarge.copyWith(color: AppTheme.white),
+              decoration: InputDecoration(
+                hintText: 'e.g., john1234 or G...',
+                hintStyle: AppTheme.bodyMedium.copyWith(
+                  color: AppTheme.grey.withOpacity(0.5),
+                ),
+                filled: true,
+                fillColor: AppTheme.darkGrey.withOpacity(0.5),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: AppTheme.primaryGold.withOpacity(0.3),
                   ),
-                ],
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: AppTheme.primaryGold.withOpacity(0.3),
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: AppTheme.primaryGold),
+                ),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _isResolving ? Icons.hourglass_top : Icons.search,
+                    color: AppTheme.primaryGold,
+                  ),
+                  onPressed: _isResolving ? null : _resolveInput,
+                ),
               ),
+              onChanged: (_) {
+                // Auto-resolve after user stops typing
+                Future.delayed(const Duration(milliseconds: 500), () {
+                  if (mounted &&
+                      _recipientController.text.trim() !=
+                          (_resolvedAddress != null
+                              ? _recipientController.text.trim()
+                              : '')) {
+                    _resolveInput();
+                  }
+                });
+              },
+            ),
 
-              const SizedBox(height: 24),
-
-              // Balance Display
+            // Resolution Result
+            if (_resolvedAddress != null && _isValidInput) ...[
+              const SizedBox(height: 16),
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: AppTheme.darkGrey.withOpacity(0.5),
-                  borderRadius: BorderRadius.circular(8),
+                  color: Colors.green.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.green.withOpacity(0.3)),
                 ),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      'Available Balance',
-                      style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
-                    ),
-                    Text(
-                      '${widget.walletProvider.akofaBalance} AKOFA',
-                      style: AppTheme.bodyLarge.copyWith(
-                        color: AppTheme.primaryGold,
-                        fontWeight: FontWeight.w600,
+                    Icon(Icons.check_circle, color: Colors.green, size: 24),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _resolvedName != null
+                                ? 'Tag Resolved'
+                                : 'Valid Address',
+                            style: AppTheme.bodyMedium.copyWith(
+                              color: Colors.green,
+                            ),
+                          ),
+                          if (_resolvedName != null)
+                            Text(
+                              _resolvedName!,
+                              style: AppTheme.bodyLarge.copyWith(
+                                color: AppTheme.white,
+                              ),
+                            ),
+                          Text(
+                            _resolvedAddress!.substring(0, 8) +
+                                '...' +
+                                _resolvedAddress!.substring(
+                                  _resolvedAddress!.length - 8,
+                                ),
+                            style: AppTheme.caption.copyWith(
+                              color: AppTheme.grey,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
               ),
+            ],
 
-              const SizedBox(height: 24),
+            const SizedBox(height: 24),
 
-              // Recipient Address or Akofa Tag
-              TextFormField(
-                controller: _addressController,
-                style: TextStyle(color: AppTheme.white),
-                decoration: InputDecoration(
-                  labelText: 'Recipient Address or Akofa Tag',
-                  labelStyle: TextStyle(color: AppTheme.grey),
-                  hintText: 'G... (Stellar address) or john1234 (Akofa tag)',
-                  hintStyle: TextStyle(color: AppTheme.grey.withOpacity(0.5)),
-                  prefixIcon: Icon(
-                    Icons.account_circle,
-                    color: AppTheme.primaryGold,
-                  ),
-                  suffixIcon: _isResolvingTag
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.blue,
-                          ),
-                        )
-                      : null,
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(
-                      color: AppTheme.primaryGold.withOpacity(0.3),
-                    ),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: AppTheme.primaryGold),
-                  ),
-                  errorBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.red),
-                  ),
-                  focusedErrorBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.red),
+            // Amount Input
+            Text(
+              'Amount (AKOFA)',
+              style: AppTheme.labelMedium.copyWith(color: AppTheme.grey),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _amountController,
+              keyboardType: TextInputType.numberWithOptions(decimal: true),
+              style: AppTheme.bodyLarge.copyWith(color: AppTheme.white),
+              decoration: InputDecoration(
+                hintText: '0.00',
+                hintStyle: AppTheme.bodyMedium.copyWith(
+                  color: AppTheme.grey.withOpacity(0.5),
+                ),
+                filled: true,
+                fillColor: AppTheme.darkGrey.withOpacity(0.5),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: AppTheme.primaryGold.withOpacity(0.3),
                   ),
                 ),
-                validator: _validateAddress,
-                maxLines: null,
-                onChanged: _onAddressChanged,
-              ),
-
-              // Show resolved tag info
-              if (_resolvedTagInfo != null) ...[
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.green.withOpacity(0.3)),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.check_circle, color: Colors.green, size: 16),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _resolvedTagInfo!,
-                          style: TextStyle(color: Colors.green, fontSize: 12),
-                        ),
-                      ),
-                    ],
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: AppTheme.primaryGold.withOpacity(0.3),
                   ),
                 ),
-              ],
-
-              const SizedBox(height: 16),
-
-              // Amount
-              TextFormField(
-                controller: _amountController,
-                style: TextStyle(color: AppTheme.white),
-                keyboardType: TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
-                ],
-                decoration: InputDecoration(
-                  labelText: 'Amount (AKOFA)',
-                  labelStyle: TextStyle(color: AppTheme.grey),
-                  hintText: '0.00',
-                  hintStyle: TextStyle(color: AppTheme.grey.withOpacity(0.5)),
-                  prefixIcon: Icon(Icons.token, color: AppTheme.primaryGold),
-                  suffixText: 'AKOFA',
-                  suffixStyle: TextStyle(color: AppTheme.primaryGold),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(
-                      color: AppTheme.primaryGold.withOpacity(0.3),
-                    ),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: AppTheme.primaryGold),
-                  ),
-                  errorBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.red),
-                  ),
-                  focusedErrorBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.red),
-                  ),
-                ),
-                validator: _validateAmount,
-              ),
-
-              const SizedBox(height: 16),
-
-              // Memo (Optional)
-              TextFormField(
-                controller: _memoController,
-                style: TextStyle(color: AppTheme.white),
-                maxLength: 28,
-                decoration: InputDecoration(
-                  labelText: 'Memo (Optional)',
-                  labelStyle: TextStyle(color: AppTheme.grey),
-                  hintText: 'Add a note...',
-                  hintStyle: TextStyle(color: AppTheme.grey.withOpacity(0.5)),
-                  prefixIcon: Icon(Icons.message, color: AppTheme.primaryGold),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(
-                      color: AppTheme.primaryGold.withOpacity(0.3),
-                    ),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: AppTheme.primaryGold),
-                  ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: AppTheme.primaryGold),
                 ),
               ),
+            ),
 
+            const SizedBox(height: 16),
+
+            // Memo Input (Optional)
+            Text(
+              'Memo (Optional)',
+              style: AppTheme.labelMedium.copyWith(color: AppTheme.grey),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _memoController,
+              style: AppTheme.bodyLarge.copyWith(color: AppTheme.white),
+              maxLength: 28,
+              decoration: InputDecoration(
+                hintText: 'Add a note...',
+                hintStyle: AppTheme.bodyMedium.copyWith(
+                  color: AppTheme.grey.withOpacity(0.5),
+                ),
+                filled: true,
+                fillColor: AppTheme.darkGrey.withOpacity(0.5),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: AppTheme.primaryGold.withOpacity(0.3),
+                  ),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: AppTheme.primaryGold.withOpacity(0.3),
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: AppTheme.primaryGold),
+                ),
+              ),
+            ),
+
+            // Error Message
+            if (_error != null) ...[
               const SizedBox(height: 16),
-
-              // Fee Information
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
+                  color: Colors.red.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                  border: Border.all(color: Colors.red.withOpacity(0.3)),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.info_outline, color: Colors.blue, size: 16),
+                    Icon(Icons.error_outline, color: Colors.red, size: 20),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Network fee: ~0.00001 XLM',
-                        style: AppTheme.bodySmall.copyWith(color: Colors.blue),
+                        _error!,
+                        style: AppTheme.bodySmall.copyWith(color: Colors.red),
                       ),
                     ),
                   ],
                 ),
               ),
+            ],
 
-              if (_error != null) ...[
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.red.withOpacity(0.3)),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.error_outline, color: Colors.red, size: 16),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _error!,
-                          style: AppTheme.bodySmall.copyWith(color: Colors.red),
-                        ),
+            // Success Message
+            if (_successMessage != null) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.check_circle_outline,
+                      color: Colors.green,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _successMessage!,
+                        style: AppTheme.bodySmall.copyWith(color: Colors.green),
                       ),
-                    ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 24),
+
+            // Action Buttons
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: _isSending
+                        ? null
+                        : () => Navigator.of(context).pop(),
+                    child: Text(
+                      'Cancel',
+                      style: AppTheme.bodyLarge.copyWith(color: AppTheme.grey),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: (_isSending || !_isValidInput)
+                        ? null
+                        : _sendAkofa,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _isValidInput
+                          ? AppTheme.primaryGold
+                          : AppTheme.grey,
+                      foregroundColor: AppTheme.black,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      disabledBackgroundColor: AppTheme.grey.withOpacity(0.3),
+                    ),
+                    child: _isSending
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.black,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : Text(
+                            'Send AKOFA',
+                            style: AppTheme.bodyLarge.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.black,
+                            ),
+                          ),
                   ),
                 ),
               ],
-
-              const SizedBox(height: 24),
-
-              // Action Buttons
-              Row(
-                children: [
-                  Expanded(
-                    child: TextButton(
-                      onPressed: _isLoading
-                          ? null
-                          : () => Navigator.pop(context),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      child: Text(
-                        'Cancel',
-                        style: TextStyle(color: AppTheme.grey),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _sendTokens,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primaryGold,
-                        foregroundColor: AppTheme.black,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      child: _isLoading
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.black,
-                              ),
-                            )
-                          : const Text(
-                              'Send Tokens',
-                              style: TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
+}
 
-  String? _validateAddress(String? value) {
-    if (value == null || value.isEmpty) {
-      return 'Please enter recipient address or Akofa tag';
-    }
-
-    final trimmedValue = value.trim();
-
-    // Check if it's a Stellar address
-    if (trimmedValue.startsWith('G') && trimmedValue.length == 56) {
-      return null; // Valid Stellar address
-    }
-
-    // Check if it's an Akofa tag
-    if (AkofaTagService.isValidTagFormat(trimmedValue)) {
-      return null; // Valid tag format
-    }
-
-    return 'Please enter a valid Stellar address (G...) or Akofa tag (name + 4 digits)';
-  }
-
-  Future<void> _onAddressChanged(String value) async {
-    final trimmedValue = value.trim();
-
-    // Clear previous resolution
-    setState(() {
-      _resolvedAddress = null;
-      _resolvedTagInfo = null;
-    });
-
-    // If it's a potential tag, try to resolve it
-    if (AkofaTagService.isValidTagFormat(trimmedValue) &&
-        trimmedValue.length >= 5) {
-      setState(() {
-        _isResolvingTag = true;
-      });
-
-      try {
-        final result = await AkofaTagService.resolveTag(trimmedValue);
-        if (result['success']) {
-          setState(() {
-            _resolvedAddress = result['publicKey'];
-            _resolvedTagInfo =
-                'Tag resolved to: ${result['firstName']}\'s wallet';
-            _isResolvingTag = false;
-          });
-        } else {
-          setState(() {
-            _resolvedTagInfo = 'Tag not found or inactive';
-            _isResolvingTag = false;
-          });
-        }
-      } catch (e) {
-        setState(() {
-          _resolvedTagInfo = 'Error resolving tag';
-          _isResolvingTag = false;
-        });
-      }
-    } else {
-      setState(() {
-        _isResolvingTag = false;
-      });
-    }
-  }
-
-  String? _validateAmount(String? value) {
-    if (value == null || value.isEmpty) {
-      return 'Please enter amount';
-    }
-
-    final amount = double.tryParse(value);
-    if (amount == null) {
-      return 'Please enter a valid number';
-    }
-
-    if (amount <= 0) {
-      return 'Amount must be greater than 0';
-    }
-
-    final balance = double.tryParse(widget.walletProvider.akofaBalance) ?? 0;
-    if (amount > balance) {
-      return 'Insufficient balance';
-    }
-
-    return null;
-  }
-
-  Future<void> _sendTokens() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
-
-    try {
-      // Determine the recipient address (use resolved address if tag was used)
-      final inputAddress = _addressController.text.trim();
-      final recipientAddress = _resolvedAddress ?? inputAddress;
-
-      final result = widget.useBiometrics
-          ? await widget.walletProvider.sendAkofaWithBiometrics(
-              recipientAddress: recipientAddress,
-              amount: double.parse(_amountController.text),
-              memo: _memoController.text.trim().isEmpty
-                  ? null
-                  : _memoController.text.trim(),
-            )
-          : await widget.walletProvider.sendAkofaTokens(
-              recipientAddress: recipientAddress,
-              amount: double.parse(_amountController.text),
-              memo: _memoController.text.trim().isEmpty
-                  ? null
-                  : _memoController.text.trim(),
-            );
-
-      if (result['success'] == true) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              widget.useBiometrics
-                  ? 'AKOFA tokens sent securely with biometric authentication!'
-                  : 'AKOFA tokens sent successfully!',
-            ),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } else {
-        setState(() {
-          _error = result['error'] ?? 'Failed to send tokens';
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _error = 'Error: $e';
-      });
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
+/// Utility function to show send AKOFA dialog
+Future<bool?> showSendAkofaDialog({
+  required BuildContext context,
+  String? initialTag,
+}) async {
+  return showDialog<bool>(
+    context: context,
+    builder: (context) => SendAkofaDialog(initialTag: initialTag),
+  );
 }

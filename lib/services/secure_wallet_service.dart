@@ -302,7 +302,7 @@ class SecureWalletService {
       // Create trustline operation for AKOFA asset
       final akofaAsset = stellar.AssetTypeCreditAlphaNum12(
         'AKOFA',
-        'GBJGVMBWKGSMPZ4D7QDTW7VPCJUWCJ26OIHFJNRIWVR362NNUU3YCOTQ',
+        'GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW',
       );
 
       final trustlineOperation = stellar.ChangeTrustOperationBuilder(
@@ -372,7 +372,285 @@ class SecureWalletService {
     }
   }
 
-  /// Verify wallet setup (funding and trustline)
+  /// Create USDC trustline for the wallet
+  static Future<Map<String, dynamic>> _createUsdcTrustline(
+    String publicKey,
+    String secretKey,
+  ) async {
+    try {
+      print('🔗 Checking if USDC trustline already exists...');
+
+      // Fetch account details
+      final account = await stellar.StellarSDK.TESTNET.accounts.account(
+        publicKey,
+      );
+
+      // Check if USDC trustline already exists
+      final hasUsdcTrustline = account.balances!.any(
+        (b) =>
+            b.assetCode == 'USDC' &&
+            b.assetIssuer ==
+                'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
+      );
+
+      if (hasUsdcTrustline) {
+        print('✅ USDC trustline already exists, skipping creation');
+        return {
+          'success': true,
+          'message': 'USDC trustline already exists',
+          'skipped': true,
+        };
+      }
+
+      print('🔗 Creating new USDC trustline...');
+
+      final keyPair = stellar.KeyPair.fromSecretSeed(secretKey);
+      final sourceAccount = await stellar.StellarSDK.TESTNET.accounts.account(
+        publicKey,
+      );
+
+      // Check if account has sufficient XLM for transaction fees
+      final nativeBalance = sourceAccount.balances!.firstWhere(
+        (b) => b.assetType == 'native',
+      );
+      final xlmBalance = double.tryParse(nativeBalance.balance) ?? 0.0;
+
+      if (xlmBalance < 2.0) {
+        print(
+          '❌ Insufficient XLM balance for trustline creation: $xlmBalance XLM',
+        );
+        return {
+          'success': false,
+          'error':
+              'Insufficient XLM balance. Need at least 2 XLM for trustline creation. Current balance: $xlmBalance XLM',
+        };
+      }
+
+      print('💰 Sufficient XLM balance confirmed: $xlmBalance XLM');
+
+      // Create trustline operation for USDC asset
+      final usdcAsset = stellar.AssetTypeCreditAlphaNum4(
+        'USDC',
+        'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
+      );
+
+      final trustlineOperation = stellar.ChangeTrustOperationBuilder(
+        usdcAsset,
+        '10000000', // Limit (10 million USDC)
+      );
+
+      // Build transaction
+      final transactionBuilder = stellar.TransactionBuilder(sourceAccount);
+      transactionBuilder.addOperation(trustlineOperation.build());
+
+      final transaction = transactionBuilder.build();
+      transaction.sign(keyPair, stellar.Network.TESTNET);
+
+      print('📤 Submitting trustline transaction...');
+
+      // Submit transaction
+      final response = await stellar.StellarSDK.TESTNET.submitTransaction(
+        transaction,
+      );
+
+      if (response.success) {
+        print('✅ USDC trustline created successfully');
+        return {
+          'success': true,
+          'message': 'USDC trustline created successfully',
+          'hash': response.hash,
+        };
+      } else {
+        print('❌ Trustline creation failed');
+        print('   - Response extras: ${response.extras}');
+        print('   - Result codes: ${response.extras?.resultCodes}');
+
+        String errorMessage = 'Trustline creation failed';
+        if (response.extras?.resultCodes != null) {
+          errorMessage += ': ${response.extras!.resultCodes}';
+        } else if (response.extras != null) {
+          errorMessage += ': ${response.extras}';
+        }
+
+        return {
+          'success': false,
+          'error': errorMessage,
+          'extras': response.extras?.toString(),
+        };
+      }
+    } catch (e) {
+      print('❌ Trustline creation error: $e');
+
+      if (e.toString().contains('Account not found')) {
+        return {
+          'success': false,
+          'error':
+              'Account not found on Stellar network. Please wait a moment and try again.',
+        };
+      } else if (e.toString().contains('insufficient balance')) {
+        return {
+          'success': false,
+          'error':
+              'Insufficient XLM balance for transaction fee. Need at least 2 XLM.',
+        };
+      }
+
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// Create trustlines for all supported assets (AKOFA, USDC, EURC)
+  static Future<Map<String, dynamic>> _createAllTrustlines(
+    String publicKey,
+    String secretKey,
+  ) async {
+    try {
+      print('🔗 Setting up trustlines for supported assets...');
+
+      // Define supported assets (Testnet issuers)
+      final assetsToSetup = {
+        'AKOFA': 'GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW',
+        'USDC':
+            'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5', // Circle USDC Testnet
+        'EURC':
+            'GB7T3TSZT5ERXMNV7CGHUWKU2LUB2EPRYQDNQ5R6J3QKJUNNODKRVHCZ', // Circle EURC Testnet
+      };
+
+      final keyPair = stellar.KeyPair.fromSecretSeed(secretKey);
+      final sourceAccount = await stellar.StellarSDK.TESTNET.accounts.account(
+        publicKey,
+      );
+
+      // Check if account has sufficient XLM for trustlines
+      final nativeBalance = sourceAccount.balances!.firstWhere(
+        (b) => b.assetType == 'native',
+      );
+      final xlmBalance = double.tryParse(nativeBalance.balance) ?? 0.0;
+
+      // Each trustline requires 0.5 XLM reserve + fees
+      final requiredBalance = 3.0; // buffer for 2–3 trustlines
+      if (xlmBalance < requiredBalance) {
+        print('❌ Insufficient XLM: $xlmBalance, need $requiredBalance+');
+        return {
+          'success': false,
+          'error':
+              'Insufficient XLM balance. Need at least $requiredBalance XLM. Current balance: $xlmBalance',
+        };
+      }
+
+      print('💰 Sufficient XLM balance confirmed: $xlmBalance XLM');
+
+      // Gather existing trustlines
+      final existingTrustlines = <String>[];
+      for (final balance in sourceAccount.balances!) {
+        if (balance.assetType != 'native' && balance.assetCode != null) {
+          existingTrustlines.add(balance.assetCode!);
+        }
+      }
+      print('📋 Existing trustlines: ${existingTrustlines.join(', ')}');
+
+      // Build trustline operations
+      final operations = <stellar.Operation>[];
+      final assetsBeingSetup = <String>[];
+
+      for (final entry in assetsToSetup.entries) {
+        final assetCode = entry.key;
+        final assetIssuer = entry.value;
+
+        if (!existingTrustlines.contains(assetCode)) {
+          print('🔗 Adding trustline for $assetCode...');
+          final asset = stellar.AssetTypeCreditAlphaNum12(
+            assetCode,
+            assetIssuer,
+          );
+
+          final trustlineOperation = stellar.ChangeTrustOperationBuilder(
+            asset,
+            '10000000000', // high trust limit
+          );
+
+          operations.add(trustlineOperation.build());
+          assetsBeingSetup.add(assetCode);
+        } else {
+          print('✅ $assetCode trustline already exists, skipping');
+        }
+      }
+
+      if (operations.isEmpty) {
+        print('✅ All trustlines already exist');
+        return {
+          'success': true,
+          'message': 'All trustlines already exist',
+          'skipped': true,
+          'assets': assetsToSetup.keys.toList(),
+        };
+      }
+
+      print('📤 Submitting trustline tx for: ${assetsBeingSetup.join(', ')}');
+
+      // Build and sign transaction
+      final txBuilder = stellar.TransactionBuilder(sourceAccount);
+      for (final op in operations) {
+        txBuilder.addOperation(op);
+      }
+      final transaction = txBuilder.build();
+      transaction.sign(keyPair, stellar.Network.TESTNET);
+
+      // Submit transaction
+      final response = await stellar.StellarSDK.TESTNET.submitTransaction(
+        transaction,
+      );
+
+      if (response.success) {
+        print('✅ Trustlines created successfully');
+        return {
+          'success': true,
+          'message':
+              'Trustlines created successfully for: ${assetsBeingSetup.join(', ')}',
+          'hash': response.hash,
+          'assets': assetsBeingSetup,
+          'trustlineResult': {
+            for (final asset in assetsToSetup.keys)
+              asset.toLowerCase(): assetsBeingSetup.contains(asset),
+          },
+        };
+      } else {
+        print('❌ Trustline creation failed');
+        print('   - Response extras: ${response.extras}');
+        print('   - Result codes: ${response.extras?.resultCodes}');
+
+        String errorMessage = 'Trustline creation failed';
+        if (response.extras?.resultCodes != null) {
+          errorMessage += ': ${response.extras!.resultCodes}';
+        }
+
+        return {
+          'success': false,
+          'error': errorMessage,
+          'extras': response.extras?.toString(),
+          'assets': assetsBeingSetup,
+        };
+      }
+    } catch (e) {
+      print('❌ Trustline creation error: $e');
+
+      if (e.toString().contains('Account not found')) {
+        return {
+          'success': false,
+          'error': 'Account not found on Stellar network.',
+        };
+      } else if (e.toString().contains('insufficient balance')) {
+        return {
+          'success': false,
+          'error': 'Insufficient XLM balance for trustline creation.',
+        };
+      }
+
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// Verify wallet setup (funding and trustlines)
   static Future<Map<String, dynamic>> _verifyWalletSetup(
     String publicKey,
   ) async {
@@ -387,27 +665,42 @@ class SecureWalletService {
       );
       final xlmBalance = double.tryParse(nativeBalance.balance) ?? 0.0;
 
-      // Check AKOFA trustline
+      // Check both AKOFA and USDC trustlines
       final hasAkofaTrustline = account.balances!.any(
         (b) =>
             b.assetCode == 'AKOFA' &&
             b.assetIssuer ==
-                'GBJGVMBWKGSMPZ4D7QDTW7VPCJUWCJ26OIHFJNRIWVR362NNUU3YCOTQ',
+                'GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW',
+      );
+      final hasUsdcTrustline = account.balances!.any(
+        (b) =>
+            b.assetCode == 'USDC' &&
+            b.assetIssuer ==
+                'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
       );
 
-      if (xlmBalance > 0 && hasAkofaTrustline) {
+      final trustlineStatus = {
+        'akofa': hasAkofaTrustline,
+        'usdc': hasUsdcTrustline,
+      };
+
+      if (xlmBalance > 0 && hasAkofaTrustline && hasUsdcTrustline) {
         return {
           'success': true,
           'message': 'Wallet setup verified successfully',
           'xlmBalance': xlmBalance,
-          'hasAkofaTrustline': hasAkofaTrustline,
+          'trustlines': trustlineStatus,
         };
       } else {
         return {
           'success': false,
           'error': 'Wallet setup incomplete',
           'xlmBalance': xlmBalance,
-          'hasAkofaTrustline': hasAkofaTrustline,
+          'trustlines': trustlineStatus,
+          'missingTrustlines': trustlineStatus.entries
+              .where((e) => !e.value)
+              .map((e) => e.key.toUpperCase())
+              .toList(),
         };
       }
     } catch (e) {
@@ -505,15 +798,30 @@ class SecureWalletService {
       }
       print('✅ Wallet funded with test XLM');
 
-      // Step 2: Create AKOFA trustline
+      // Step 2: Create trustlines for both AKOFA and USDC
       print('🔗 Creating AKOFA trustline...');
-      final trustlineResult = await _createAkofaTrustline(publicKey, secretKey);
-      if (!trustlineResult['success']) {
+      final akofaTrustlineResult = await _createAkofaTrustline(
+        publicKey,
+        secretKey,
+      );
+      if (!akofaTrustlineResult['success']) {
         throw Exception(
-          'Failed to create trustline: ${trustlineResult['error']}',
+          'Failed to create AKOFA trustline: ${akofaTrustlineResult['error']}',
         );
       }
       print('✅ AKOFA trustline created successfully');
+
+      print('🔗 Creating USDC trustline...');
+      final usdcTrustlineResult = await _createUsdcTrustline(
+        publicKey,
+        secretKey,
+      );
+      if (!usdcTrustlineResult['success']) {
+        throw Exception(
+          'Failed to create USDC trustline: ${usdcTrustlineResult['error']}',
+        );
+      }
+      print('✅ USDC trustline created successfully');
 
       // Step 3: Verify wallet setup
       print('🔍 Verifying wallet setup...');
@@ -580,7 +888,8 @@ class SecureWalletService {
         'encryptionMethod': 'cryptography-aes-gcm',
         'biometricsEnabled': enableBiometrics && biometricData != null,
         'walletFunded': true,
-        'trustlineCreated': true,
+        'akofaTrustlineCreated': true,
+        'usdcTrustlineCreated': true,
         'setupComplete': true,
       };
 
@@ -592,46 +901,81 @@ class SecureWalletService {
         'hasSecureWallet': true,
         'walletSecurityLevel': securityLevel,
         'walletFunded': true,
-        'trustlineCreated': true,
+        'usdcTrustlineCreated': true,
         'lastWalletUpdate': FieldValue.serverTimestamp(),
       });
 
-      // Generate and link Akofa tag
-      print('🏷️ Generating Akofa tag...');
-      final user = _auth.currentUser;
-      if (user != null &&
-          user.displayName != null &&
-          user.displayName!.isNotEmpty) {
-        final firstName = user.displayName!.split(' ').first;
-        final tagResult = await AkofaTagService.generateUniqueTag(
-          userId: userId,
-          firstName: firstName,
-        );
+      // Generate and link Akofa tag (optional - don't fail wallet creation if this fails)
+      print('🏷️ Checking for existing Akofa tag or generating new one...');
+      try {
+        final user = _auth.currentUser;
+        if (user != null) {
+          // Get first name from displayName or email as fallback
+          String? firstName;
+          String? email = user.email;
 
-        if (tagResult['success']) {
-          // Link the tag to the wallet
-          final linkResult = await AkofaTagService.linkTagToWallet(
-            userId: userId,
-            tag: tagResult['tag'],
-            publicKey: publicKey,
-          );
+          if (user.displayName != null && user.displayName!.isNotEmpty) {
+            firstName = user.displayName!.split(' ').first;
+          } else if (email != null && email.isNotEmpty) {
+            firstName = email.split('@').first;
+          }
 
-          if (linkResult['success']) {
-            print('✅ Akofa tag generated and linked: ${tagResult['tag']}');
+          if (firstName != null && firstName.isNotEmpty) {
+            // First, check if user already has an Akofa tag
+            final existingTagResult = await AkofaTagService.getUserTag(userId);
 
-            // Update wallet data with tag info
-            await _firestore.collection('secure_wallets').doc(userId).update({
-              'akofaTag': tagResult['tag'],
-              'tagLinked': true,
-            });
+            String? tagToLink;
+            if (existingTagResult['success']) {
+              // User already has a tag, reuse it
+              tagToLink = existingTagResult['tag'];
+              print('✅ Found existing Akofa tag: $tagToLink');
+            } else {
+              // Generate a new unique tag
+              final tagResult = await AkofaTagService.generateUniqueTag(
+                userId: userId,
+                firstName: firstName,
+                email: email,
+              );
+
+              if (tagResult['success']) {
+                tagToLink = tagResult['tag'];
+                print('✅ Generated new Akofa tag: $tagToLink');
+              } else {
+                print('⚠️ Failed to generate Akofa tag: ${tagResult['error']}');
+                // Skip tag linking if generation fails
+              }
+            }
+
+            // Link the tag (existing or new) to the wallet if we have one
+            if (tagToLink != null) {
+              final linkResult = await AkofaTagService.linkTagToWallet(
+                userId: userId,
+                tag: tagToLink,
+                publicKey: publicKey,
+              );
+
+              if (linkResult['success']) {
+                print('✅ Akofa tag linked to wallet: $tagToLink -> $publicKey');
+
+                // Update wallet data with tag info
+                await _firestore
+                    .collection('secure_wallets')
+                    .doc(userId)
+                    .update({'akofaTag': tagToLink, 'tagLinked': true});
+              } else {
+                print('⚠️ Failed to link Akofa tag: ${linkResult['error']}');
+              }
+            }
           } else {
-            print('⚠️ Failed to link Akofa tag: ${linkResult['error']}');
+            print('⚠️ User display name not available for tag operations');
           }
         } else {
-          print('⚠️ Failed to generate Akofa tag: ${tagResult['error']}');
+          print('⚠️ User not authenticated for tag operations');
         }
-      } else {
-        print('⚠️ User display name not available for tag generation');
+      } catch (e) {
+        // Tag operations are optional - don't fail wallet creation
+        print('⚠️ Akofa tag operation failed (non-critical): $e');
+        print('✅ Wallet created successfully (tag operations skipped)');
       }
 
       print('✅ Secure wallet created and encrypted successfully');
@@ -642,13 +986,13 @@ class SecureWalletService {
         'message':
             'Secure wallet created successfully with automatic funding and trustline setup',
         'walletFunded': true,
-        'trustlineCreated': true,
+        'usdcTrustlineCreated': true,
         'securityFeatures': [
           'AES-GCM encryption',
           'PBKDF2 key derivation',
           'Password-based protection',
           'Automatic XLM funding',
-          'AKOFA trustline creation',
+          'AKOFA and USDC trustline creation',
           if (enableBiometrics && biometricData != null)
             'Biometric authentication',
           'Recovery phrase support',
@@ -670,6 +1014,14 @@ class SecureWalletService {
     String password,
   ) async {
     try {
+      // Check if we're on web platform
+      if (!identical(0, 0.0)) {
+        return {
+          'success': false,
+          'error': 'WebAuthn is only supported on web platforms',
+        };
+      }
+
       // Generate cryptographically secure challenge
       final challenge = Uint8List(32);
       for (int i = 0; i < 32; i++) {
@@ -682,82 +1034,33 @@ class SecureWalletService {
         userHandle[i] = Random.secure().nextInt(256);
       }
 
-      // In a real WebAuthn implementation, this would be:
-      /*
-      const credential = await navigator.credentials.create({
-        publicKey: {
+      // Use real WebAuthn API for web platforms
+      try {
+        // Access WebAuthn API through JavaScript interop
+        final credential = await _callWebAuthnCreateCredential(
           challenge: challenge,
-          rp: {
-            name: "Azix Secure Wallet",
-            id: window.location.hostname
-          },
-          user: {
-            id: userHandle,
-            name: userId,
-            displayName: userId
-          },
-          pubKeyCredParams: [
-            { alg: -7, type: "public-key" }, // ES256
-            { alg: -257, type: "public-key" } // RS256
-          ],
-          authenticatorSelection: {
-            authenticatorAttachment: "platform",
-            userVerification: "required",
-            requireResidentKey: false
-          },
-          timeout: 60000,
-          attestation: "direct"
-        }
-      });
-      */
+          userId: userId,
+          userHandle: userHandle,
+        );
 
-      // For this implementation, we'll create a structured credential
-      // that simulates a real WebAuthn credential
-      final credentialId = Uint8List(32);
-      for (int i = 0; i < 32; i++) {
-        credentialId[i] = Random.secure().nextInt(256);
+        return {
+          'success': true,
+          'credentialId': credential['credentialId'],
+          'publicKey': credential['publicKey'],
+          'challenge': base64Encode(challenge),
+          'userHandle': base64Encode(userHandle),
+          'authenticatorData': credential['authenticatorData'],
+          'signature': credential['signature'],
+          'createdAt': FieldValue.serverTimestamp(),
+          'credentialType': 'WebAuthn',
+          'algorithm': credential['algorithm'] ?? 'ES256',
+        };
+      } catch (webauthnError) {
+        return {
+          'success': false,
+          'error': 'WebAuthn credential creation failed: $webauthnError',
+        };
       }
-
-      // Simulate ECDSA public key (uncompressed format: 0x04 + x + y)
-      final publicKeyX = Uint8List(32);
-      final publicKeyY = Uint8List(32);
-      for (int i = 0; i < 32; i++) {
-        publicKeyX[i] = Random.secure().nextInt(256);
-        publicKeyY[i] = Random.secure().nextInt(256);
-      }
-
-      final publicKey = Uint8List(65);
-      publicKey[0] = 0x04; // Uncompressed point format
-      publicKey.setRange(1, 33, publicKeyX);
-      publicKey.setRange(33, 65, publicKeyY);
-
-      // Create authenticator data (simplified)
-      final authenticatorData = _createAuthenticatorData(
-        rpIdHash: _hashRpId(
-          'localhost',
-        ), // In production: window.location.hostname
-        userHandle: userHandle,
-        credentialId: credentialId,
-      );
-
-      // Create attestation signature (simplified)
-      final signature = _createAttestationSignature(
-        authenticatorData: authenticatorData,
-        clientDataHash: _hashClientData(challenge),
-      );
-
-      return {
-        'success': true,
-        'credentialId': base64Encode(credentialId),
-        'publicKey': base64Encode(publicKey),
-        'challenge': base64Encode(challenge),
-        'userHandle': base64Encode(userHandle),
-        'authenticatorData': base64Encode(authenticatorData),
-        'signature': base64Encode(signature),
-        'createdAt': FieldValue.serverTimestamp(),
-        'credentialType': 'WebAuthn',
-        'algorithm': 'ES256',
-      };
     } catch (e) {
       return {'success': false, 'error': e.toString()};
     }
@@ -870,6 +1173,31 @@ class SecureWalletService {
     cbor.add(Uint8List(32)); // placeholder y coordinate
 
     return cbor.toBytes();
+  }
+
+  /// Call WebAuthn create credential API (web platform only)
+  static Future<Map<String, dynamic>> _callWebAuthnCreateCredential({
+    required Uint8List challenge,
+    required String userId,
+    required Uint8List userHandle,
+  }) async {
+    // This would use JavaScript interop to call the WebAuthn API
+    // For now, throw an error indicating this needs to be implemented
+    throw Exception(
+      'WebAuthn create credential not implemented. Requires JavaScript interop for web platform.',
+    );
+  }
+
+  /// Call WebAuthn get credential API (web platform only)
+  static Future<Map<String, dynamic>> _callWebAuthnGetCredential({
+    required Uint8List challenge,
+    required String credentialId,
+  }) async {
+    // This would use JavaScript interop to call the WebAuthn API
+    // For now, throw an error indicating this needs to be implemented
+    throw Exception(
+      'WebAuthn get credential not implemented. Requires JavaScript interop for web platform.',
+    );
   }
 
   /// Authenticate with password (and optionally biometrics) and decrypt wallet
@@ -993,17 +1321,15 @@ class SecureWalletService {
     String userId,
   ) async {
     try {
-      // For now, we'll simulate WebAuthn authentication
-      // In a real implementation, this would use the WebAuthn API
+      // Check if we're on web platform
+      if (!identical(0, 0.0)) {
+        return {
+          'success': false,
+          'error': 'WebAuthn is only supported on web platforms',
+        };
+      }
 
-      // Simulate biometric authentication delay
-      await Future.delayed(const Duration(seconds: 1));
-
-      // In production, this would retrieve the wrapped DEK from the WebAuthn credential
-      // For simulation, we need to get the original DEK from the stored wallet data
-      // Since we can't easily retrieve it from the credential, we'll get it from the wallet data
-
-      // Get the stored wallet data to retrieve the original wrapped DEK
+      // Get stored credential data
       final walletDoc = await _firestore
           .collection('secure_wallets')
           .doc(userId)
@@ -1014,38 +1340,46 @@ class SecureWalletService {
       }
 
       final walletData = walletDoc.data()!;
-      final webauthnResult = walletData['webauthnCredentialId'] as String?;
+      final biometricData =
+          walletData['biometricData'] as Map<String, dynamic>?;
 
-      // In production, we would use the credentialId to retrieve the wrapped DEK
-      // For now, we'll use the stored wrapped DEK from wallet creation
-      final wrappedDEK = walletData['wrappedDEK'] as String?;
-
-      if (wrappedDEK == null) {
-        // Fallback for wallets created before wrapped DEK was stored
-        // Try to recover by using the WebAuthn public key as a substitute
-        // This is a temporary solution for backward compatibility
-        final fallbackDEK = walletData['webauthnPublicKey'] as String?;
-
-        if (fallbackDEK == null) {
-          throw Exception(
-            'No recovery mechanism available for this wallet. Please recreate your secure wallet.',
-          );
-        }
-
-        print('⚠️  Using fallback recovery mechanism for legacy wallet');
-        return {
-          'success': true,
-          'wrappedDEK': fallbackDEK,
-          'message': 'Biometric authentication successful (legacy recovery)',
-          'recovery': true,
-        };
+      if (biometricData == null) {
+        throw Exception('Biometric data not found for this wallet');
       }
 
-      return {
-        'success': true,
-        'wrappedDEK': wrappedDEK,
-        'message': 'Biometric authentication successful',
-      };
+      final storedCredentialId = biometricData['credentialId'] as String;
+      if (storedCredentialId != credentialId) {
+        throw Exception('Credential ID mismatch');
+      }
+
+      // Generate new challenge for authentication
+      final challenge = Uint8List(32);
+      for (int i = 0; i < 32; i++) {
+        challenge[i] = Random.secure().nextInt(256);
+      }
+
+      // Use real WebAuthn API for authentication
+      try {
+        final authResult = await _callWebAuthnGetCredential(
+          challenge: challenge,
+          credentialId: credentialId,
+        );
+
+        return {
+          'success': true,
+          'message': 'Biometric authentication successful',
+          'credentialId': credentialId,
+          'challenge': base64Encode(challenge),
+          'authenticatorData': authResult['authenticatorData'],
+          'signature': authResult['signature'],
+          'userHandle': authResult['userHandle'],
+        };
+      } catch (webauthnError) {
+        return {
+          'success': false,
+          'error': 'WebAuthn authentication failed: $webauthnError',
+        };
+      }
     } catch (e) {
       return {'success': false, 'error': e.toString()};
     }
@@ -1272,7 +1606,7 @@ class SecureWalletService {
           (b) =>
               b.assetCode == 'AKOFA' &&
               b.assetIssuer ==
-                  'GBJGVMBWKGSMPZ4D7QDTW7VPCJUWCJ26OIHFJNRIWVR362NNUU3YCOTQ',
+                  'GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW',
           orElse: () => throw Exception('AKOFA trustline not found'),
         );
         final balance = double.tryParse(akofaBalance.balance) ?? 0.0;
@@ -1302,7 +1636,7 @@ class SecureWalletService {
     required String recipientAddress,
     required double amount,
     required String assetCode,
-    String? memo,
+    required String memo, // Memo is now required
   }) async {
     try {
       // Authenticate and decrypt wallet
@@ -1349,7 +1683,7 @@ class SecureWalletService {
       } else if (assetCode == 'AKOFA') {
         final akofaAsset = stellar.AssetTypeCreditAlphaNum12(
           'AKOFA',
-          'GBJGVMBWKGSMPZ4D7QDTW7VPCJUWCJ26OIHFJNRIWVR362NNUU3YCOTQ',
+          'GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW',
         );
         paymentOp = stellar.PaymentOperationBuilder(
           recipientAddress,
@@ -1364,9 +1698,8 @@ class SecureWalletService {
       final transactionBuilder = stellar.TransactionBuilder(sourceAccount);
       transactionBuilder.addOperation(paymentOp.build());
 
-      if (memo != null && memo.isNotEmpty) {
-        transactionBuilder.addMemo(stellar.MemoText(memo));
-      }
+      // Memo is now required for all transactions
+      transactionBuilder.addMemo(stellar.MemoText(memo));
 
       final transaction = transactionBuilder.build();
       transaction.sign(keyPair, stellar.Network.TESTNET);
@@ -1417,7 +1750,7 @@ class SecureWalletService {
     required String recipientAddress,
     required double amount,
     required String assetCode,
-    String? memo,
+    required String memo, // Memo is now required
     String? password, // Now required for password-based auth
   }) async {
     if (password == null || password.isEmpty) {

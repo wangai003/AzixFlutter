@@ -4,11 +4,12 @@ import '../theme/app_theme.dart';
 
 class CustomButton extends StatelessWidget {
   final String text;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final bool isLoading;
   final bool isOutlined;
   final IconData? icon;
   final double? width;
+  final Color? backgroundColor;
 
   const CustomButton({
     Key? key,
@@ -18,16 +19,16 @@ class CustomButton extends StatelessWidget {
     this.isOutlined = false,
     this.icon,
     this.width,
+    this.backgroundColor,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     final buttonStyle = isOutlined
-        ? OutlinedButton.styleFrom(
-            minimumSize: const Size(0, 56),
-          )
+        ? OutlinedButton.styleFrom(minimumSize: const Size(0, 56))
         : ElevatedButton.styleFrom(
             minimumSize: const Size(0, 56),
+            backgroundColor: backgroundColor,
           );
 
     final child = isLoading
@@ -57,7 +58,7 @@ class CustomButton extends StatelessWidget {
           );
 
     Widget button;
-    
+
     if (width != null) {
       // Fixed width button
       button = SizedBox(
@@ -90,7 +91,10 @@ class CustomButton extends StatelessWidget {
     }
 
     return button
-        .animate(onPlay: (controller) => isLoading ? controller.stop() : controller.repeat())
+        .animate(
+          onPlay: (controller) =>
+              isLoading ? controller.stop() : controller.repeat(),
+        )
         .shimmer(
           duration: const Duration(seconds: 2),
           color: AppTheme.primaryGold.withOpacity(0.1),

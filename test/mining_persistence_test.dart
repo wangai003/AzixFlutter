@@ -1,57 +1,106 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:azixflutter/services/real_time_mining_service.dart';
-import 'package:azixflutter/services/stellar_service.dart';
+import 'package:flutter/widgets.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:azixflutter/services/mining_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('Mining Persistence Tests', () {
-    late RealTimeMiningService miningService;
+    late MiningService miningService;
 
-    setUp(() async {
-      // Use real StellarService for integration testing
-      final stellarService = StellarService();
-      miningService = RealTimeMiningService(stellarService);
+    setUpAll(() async {
+      // Initialize Firebase for testing
+      await Firebase.initializeApp();
+    });
+
+    setUp(() {
+      miningService = MiningService();
     });
 
     tearDown(() {
       miningService.dispose();
     });
 
-    test('Mining session can be started', () async {
-      // Test that mining session can be created (basic functionality test)
-      final userId = 'test_user_id';
-      final deviceId = 'test_device_id';
+    test('Test mining persistence on service restart', () async {
+      print('🧪 Testing mining persistence...');
 
-      try {
-        // This will test the basic session creation logic
-        // Note: This may fail in test environment due to Firebase dependencies
-        final session = await miningService.startSession(userId, deviceId);
+      // Start mining
+      miningService.startMining();
+      await Future.delayed(const Duration(seconds: 2));
+      miningService.stopMining();
 
-        if (session != null) {
-          expect(session.userId, equals(userId));
-          expect(session.deviceId, equals(deviceId));
-          expect(session.isActive, isTrue);
-        } else {
-          // Expected in test environment without full Firebase setup
-          expect(session, isNull);
-        }
-      } catch (e) {
-        // Expected in test environment
-        expect(e, isNotNull);
-      }
+      // Get current mined tokens
+      double initialTokens = 0.0;
+      final subscription = miningService.minedTokenStream.listen((tokens) {
+        initialTokens = tokens;
+      });
+
+      await Future.delayed(const Duration(milliseconds: 100));
+      subscription.cancel();
+
+      expect(initialTokens, greaterThan(0.0));
+      print('✅ Initial mining accumulated: $initialTokens tokens');
+
+      // Simulate app restart by creating new service instance
+      final newMiningService = MiningService();
+
+      // Set initial tokens (simulating restoration from Firestore)
+      newMiningService.setInitialMinedTokens(initialTokens);
+
+      // Verify tokens are set
+      double restoredTokens = 0.0;
+      final restoredSubscription = newMiningService.minedTokenStream.listen((
+        tokens,
+      ) {
+        restoredTokens = tokens;
+      });
+
+      await Future.delayed(const Duration(milliseconds: 100));
+      restoredSubscription.cancel();
+
+      expect(restoredTokens, equals(initialTokens));
+      print('✅ Tokens successfully restored: $restoredTokens');
+
+      newMiningService.dispose();
     });
 
-    test('Mining service initializes properly', () async {
-      // Test that the service can be initialized
-      expect(miningService, isNotNull);
+    test('Test mining continuation after restoration', () async {
+      print('🧪 Testing mining continuation after restoration...');
 
-      // Test that we can get current session (may be null)
-      final currentSession = miningService.getCurrentSession();
-      expect(
-        currentSession,
-        isA<dynamic>(),
-      ); // Can be null or SecureMiningSession
+      final miningService = MiningService();
+      miningService.setInitialMinedTokens(1.0); // Simulate restored session
+
+      double tokensBefore = 0.0;
+      double tokensAfter = 0.0;
+
+      final subscription = miningService.minedTokenStream.listen((tokens) {
+        tokensBefore = tokens;
+      });
+
+      await Future.delayed(const Duration(milliseconds: 100));
+      subscription.cancel();
+
+      expect(tokensBefore, equals(1.0));
+
+      // Start mining again
+      miningService.startMining();
+      await Future.delayed(const Duration(seconds: 1));
+
+      final afterSubscription = miningService.minedTokenStream.listen((tokens) {
+        tokensAfter = tokens;
+      });
+
+      await Future.delayed(const Duration(milliseconds: 100));
+      afterSubscription.cancel();
+
+      miningService.stopMining();
+
+      expect(tokensAfter, greaterThan(tokensBefore));
+      print('✅ Mining continued successfully: $tokensBefore -> $tokensAfter');
+
+      miningService.dispose();
     });
   });
 }

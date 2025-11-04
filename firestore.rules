@@ -1,49 +1,192 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Allow read/write access to authenticated users for their own USER document
-    match /USER/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
     }
-    
-    // Secure mining sessions - users can only access their own sessions
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'super_admin'];
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin';
+    }
+
+    function raffleExists(raffleId) {
+      return exists(/databases/$(database)/documents/raffles/$(raffleId));
+    }
+
+    function isRaffleCreator(raffleId) {
+      return raffleExists(raffleId) &&
+             get(/databases/$(database)/documents/raffles/$(raffleId)).data.creatorId == request.auth.uid;
+    }
+
+    function isRaffleActive(raffleId) {
+      return raffleExists(raffleId) &&
+             get(/databases/$(database)/documents/raffles/$(raffleId)).data.status == 'active';
+    }
+
+    function canEnterRaffle(raffleId) {
+      let raffle = get(/databases/$(database)/documents/raffles/$(raffleId)).data;
+      let now = request.time;
+      return raffle.status == 'active' &&
+             now >= raffle.startDate &&
+             now <= raffle.endDate &&
+             raffle.currentEntries < raffle.maxEntries;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId) || isAdmin();
+      allow update: if isOwner(userId) || isAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Raffles collection
+    match /raffles/{raffleId} {
+      // Anyone can read public raffles, authenticated users can read all
+      allow read: if isAuthenticated() ||
+                     (exists(/databases/$(database)/documents/raffles/$(raffleId)) &&
+                      get(/databases/$(database)/documents/raffles/$(raffleId)).data.isPublic == true);
+
+      // Only authenticated users can create raffles
+      allow create: if isAuthenticated() &&
+                       request.auth.uid == request.resource.data.creatorId;
+
+      // Creators and admins can update their raffles
+      allow update: if isAuthenticated() &&
+                       (isRaffleCreator(raffleId) || isAdmin()) &&
+                       // Prevent updating critical fields
+                       !(request.resource.data.diff(resource.data).affectedKeys()
+                         .hasAny(['creatorId', 'createdAt', 'currentEntries']));
+
+      // Only super admins can delete raffles
+      allow delete: if isSuperAdmin();
+    }
+
+    // Raffle entries collection
+    match /raffle_entries/{entryId} {
+      // Users can read their own entries, creators can read entries for their raffles, admins can read all
+      allow read: if isAuthenticated() &&
+                     (request.auth.uid == resource.data.userId ||
+                      isRaffleCreator(resource.data.raffleId) ||
+                      isAdmin());
+
+      // Users can create entries for themselves if raffle allows it
+      allow create: if isAuthenticated() &&
+                       request.auth.uid == request.resource.data.userId &&
+                       canEnterRaffle(request.resource.data.raffleId) &&
+                       // Check if user hasn't already entered
+                       !exists(/databases/$(database)/documents/raffle_entries/$(entryId));
+
+      // Only admins can update entries (for validation purposes)
+      allow update: if isAdmin();
+
+      // Users can delete their own entries, admins can delete any
+      allow delete: if isAuthenticated() &&
+                       (request.auth.uid == resource.data.userId || isAdmin());
+    }
+
+    // Raffle winners collection
+    match /raffle_winners/{winnerId} {
+      // Anyone can read winners for public raffles, authenticated users can read all
+      allow read: if isAuthenticated() ||
+                     (exists(/databases/$(database)/documents/raffle_winners/$(winnerId)) &&
+                      exists(/databases/$(database)/documents/raffles/$(resource.data.raffleId)) &&
+                      get(/databases/$(database)/documents/raffles/$(resource.data.raffleId)).data.isPublic == true);
+
+      // Only system/admin can create winners (through cloud functions)
+      allow create: if false; // Disable direct creation, use cloud functions
+
+      // Winners can update their own records (for claiming prizes)
+      allow update: if isAuthenticated() &&
+                       request.auth.uid == resource.data.winnerUserId &&
+                       // Only allow updating claim-related fields
+                       request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['claimStatus', 'claimedAt', 'claimTransactionId']);
+
+      // Only admins can delete winners
+      allow delete: if isAdmin();
+    }
+
+    // Notifications collection
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow create: if false; // Only through cloud functions
+      allow update: if isAuthenticated() &&
+                       request.auth.uid == resource.data.userId &&
+                       // Only allow marking as read
+                       request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['isRead', 'readAt']);
+      allow delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    // Existing collections (keeping existing rules)
     match /secure_mining_sessions/{sessionId} {
-      allow read, write: if request.auth != null 
-        && request.auth.uid == resource.data.userId;
-      allow create: if request.auth != null 
-        && request.auth.uid == request.resource.data.userId;
+      allow read, write: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow create: if isAuthenticated();
     }
-    
-    // Secure mining history - users can only access their own history
-    match /secure_mining_history/{userId}/sessions/{sessionId} {
-      allow read, write: if request.auth != null 
-        && request.auth.uid == userId;
+
+    match /secure_mining_history/{historyId} {
+      allow read: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow create: if isAuthenticated();
     }
-    
-    // Mining attempts - users can access their own attempts
-    match /mining_attempts/{userId}/attempts/{attemptId} {
-      allow read, write: if request.auth != null 
-        && request.auth.uid == userId;
+
+    match /mining_attempts/{attemptId} {
+      allow read: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow create: if isAuthenticated();
     }
-    
-    // Security audit - read-only for authenticated users, write for system
+
     match /security_audit/{auditId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
     }
-    
-    // Transactions - users can access their own transactions
-    match /transactions/{transactionId} {
-      allow read, write: if request.auth != null 
-        && (request.auth.uid == resource.data.userId 
-        || request.auth.uid == resource.data.senderUid);
+
+    // Marketplace collections (existing)
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+      allow update: if isAuthenticated() && request.auth.uid == resource.data.vendorId;
+      allow delete: if isAuthenticated() && request.auth.uid == resource.data.vendorId;
     }
-    
-    // Allow read access to all other collections for authenticated users
-    match /{document=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+
+    match /orders/{orderId} {
+      allow read: if isAuthenticated() &&
+                     (request.auth.uid == resource.data.customerId ||
+                      request.auth.uid == resource.data.vendorId ||
+                      isAdmin());
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() &&
+                       (request.auth.uid == resource.data.customerId ||
+                        request.auth.uid == resource.data.vendorId ||
+                        isAdmin());
+    }
+
+    match /conversations/{conversationId} {
+      allow read: if isAuthenticated() &&
+                     request.auth.uid in resource.data.participants;
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() &&
+                       request.auth.uid in resource.data.participants;
+    }
+
+    match /messages/{messageId} {
+      allow read: if isAuthenticated() &&
+                     exists(/databases/$(database)/documents/conversations/$(resource.data.conversationId)) &&
+                     request.auth.uid in get(/databases/$(database)/documents/conversations/$(resource.data.conversationId)).data.participants;
+      allow create: if isAuthenticated();
     }
   }
 }

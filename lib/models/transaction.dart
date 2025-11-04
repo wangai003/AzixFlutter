@@ -1,22 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-enum TransactionType {
-  send,
-  receive,
-  mining,
-  buyAkofa,
-  swap,
-  funding,
-  withdrawal
-}
+enum TransactionType { send, receive, buyAkofa, swap, funding, withdrawal }
 
-enum TransactionStatus {
-  pending,
-  processing,
-  completed,
-  failed,
-  cancelled
-}
+enum TransactionStatus { pending, processing, completed, failed, cancelled }
 
 class Transaction {
   // Core fields
@@ -27,18 +13,18 @@ class Transaction {
   final double amount;
   final String assetCode;
   final DateTime timestamp;
-  
+
   // Transaction details
   final String? memo;
   final String? description;
   final String? transactionHash;
-  
+
   // User identification
   final String? senderAkofaTag;
   final String? recipientAkofaTag;
   final String? senderAddress;
   final String? recipientAddress;
-  
+
   // Additional metadata
   final Map<String, dynamic> metadata;
 
@@ -63,7 +49,7 @@ class Transaction {
   // Factory constructor from Firestore
   factory Transaction.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
-    
+
     return Transaction(
       id: doc.id,
       userId: data['userId'] ?? '',
@@ -71,8 +57,8 @@ class Transaction {
       status: data['status'] ?? '',
       amount: (data['amount'] ?? 0).toDouble(),
       assetCode: data['assetCode'] ?? '',
-      timestamp: data['timestamp'] is Timestamp 
-          ? (data['timestamp'] as Timestamp).toDate() 
+      timestamp: data['timestamp'] is Timestamp
+          ? (data['timestamp'] as Timestamp).toDate()
           : DateTime.now(),
       memo: data['memo'],
       description: data['description'],
@@ -106,30 +92,42 @@ class Transaction {
   }
 
   // Helper getters
-  bool get isIncoming => type == 'receive' || type == 'mining' || type == 'buyAkofa';
+  bool get isIncoming => type == 'receive' || type == 'buyAkofa';
   bool get isOutgoing => type == 'send' || type == 'withdrawal';
-  
+
   String get typeLabel {
     switch (type) {
-      case 'send': return 'Sent';
-      case 'receive': return 'Received';
-      case 'mining': return 'Mining Reward';
-      case 'buyAkofa': return 'Bought';
-      case 'swap': return 'Swapped';
-      case 'funding': return 'Funded';
-      case 'withdrawal': return 'Withdrew';
-      default: return type;
+      case 'send':
+        return 'Sent';
+      case 'receive':
+        return 'Received';
+      case 'buyAkofa':
+        return 'Bought';
+      case 'swap':
+        return 'Swapped';
+      case 'funding':
+        return 'Funded';
+      case 'withdrawal':
+        return 'Withdrew';
+      default:
+        return type;
     }
   }
 
   String get statusLabel {
     switch (status) {
-      case 'pending': return 'Pending';
-      case 'processing': return 'Processing';
-      case 'completed': return 'Completed';
-      case 'failed': return 'Failed';
-      case 'cancelled': return 'Cancelled';
-      default: return status;
+      case 'pending':
+        return 'Pending';
+      case 'processing':
+        return 'Processing';
+      case 'completed':
+        return 'Completed';
+      case 'failed':
+        return 'Failed';
+      case 'cancelled':
+        return 'Cancelled';
+      default:
+        return status;
     }
   }
 

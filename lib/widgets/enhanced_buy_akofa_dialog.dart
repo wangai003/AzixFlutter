@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
-import '../services/flutterwave_service.dart';
 import '../theme/app_theme.dart';
-import '../config/flutterwave_config.dart';
 
 class EnhancedBuyAkofaDialog extends StatefulWidget {
   const EnhancedBuyAkofaDialog({Key? key}) : super(key: key);
@@ -17,18 +15,18 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _nameController = TextEditingController();
-  
+
   bool _isLoading = false;
   String? _error;
   String? _successMessage;
   String _selectedPaymentMethod = 'all';
-  
+
   @override
   void initState() {
     super.initState();
     _initializeUserData();
   }
-  
+
   void _initializeUserData() {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     if (authProvider.user != null) {
@@ -51,7 +49,7 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
       ),
     );
   }
-  
+
   Widget _buildSuccessView() {
     return Padding(
       padding: const EdgeInsets.all(24.0),
@@ -82,9 +80,7 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
           const SizedBox(height: 16),
           Text(
             _successMessage!,
-            style: AppTheme.bodyMedium.copyWith(
-              color: AppTheme.grey,
-            ),
+            style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 32),
@@ -110,7 +106,7 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
       ),
     );
   }
-  
+
   Widget _buildPaymentForm() {
     return SingleChildScrollView(
       child: Padding(
@@ -147,7 +143,7 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
                         ),
                       ),
                       Text(
-                        'Exchange Rate: 1 Akofa = \$${FlutterwaveConfig.akofaRate.toStringAsFixed(2)}',
+                        'Exchange Rate: 1 Akofa = \$0.06',
                         style: AppTheme.bodySmall.copyWith(
                           color: AppTheme.grey,
                         ),
@@ -158,7 +154,7 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
               ],
             ),
             const SizedBox(height: 24),
-            
+
             // Payment Method Selection
             Text(
               'Choose Payment Method',
@@ -170,7 +166,7 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
             const SizedBox(height: 16),
             _buildPaymentMethodGrid(),
             const SizedBox(height: 24),
-            
+
             // Amount Input
             Text(
               'Amount (USD)',
@@ -200,23 +196,25 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
                 ),
                 filled: true,
                 fillColor: AppTheme.darkGrey.withOpacity(0.3),
-                prefixIcon: const Icon(Icons.attach_money, color: AppTheme.primaryGold),
+                prefixIcon: const Icon(
+                  Icons.attach_money,
+                  color: AppTheme.primaryGold,
+                ),
               ),
               style: const TextStyle(color: AppTheme.white, fontSize: 16),
               onChanged: (value) => setState(() {}),
             ),
             const SizedBox(height: 16),
-            
+
             // Akofa Preview
-            if (_amountController.text.isNotEmpty)
-              _buildAkofaPreview(),
-            
+            if (_amountController.text.isNotEmpty) _buildAkofaPreview(),
+
             const SizedBox(height: 24),
-            
+
             // User Details
             _buildUserDetailsSection(),
             const SizedBox(height: 24),
-            
+
             // Error Message
             if (_error != null)
               Container(
@@ -239,9 +237,9 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
                   ],
                 ),
               ),
-            
+
             const SizedBox(height: 24),
-            
+
             // Buy Button
             SizedBox(
               width: double.infinity,
@@ -262,12 +260,17 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
                         height: 20,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(AppTheme.black),
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            AppTheme.black,
+                          ),
                         ),
                       )
                     : const Text(
                         'Buy Akofa Coins',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
               ),
             ),
@@ -276,10 +279,11 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
       ),
     );
   }
-  
+
   Widget _buildPaymentMethodGrid() {
-    final paymentMethods = FlutterwaveService.getAvailablePaymentMethods();
-    
+    // Payment methods removed - Flutterwave integration no longer available
+    final paymentMethods = [];
+
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -293,17 +297,17 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
       itemBuilder: (context, index) {
         final method = paymentMethods[index];
         final isSelected = _selectedPaymentMethod == method['id'];
-        
+
         return GestureDetector(
           onTap: () => setState(() => _selectedPaymentMethod = method['id']),
           child: Container(
             decoration: BoxDecoration(
-              color: isSelected 
+              color: isSelected
                   ? method['color'].withOpacity(0.2)
                   : AppTheme.darkGrey.withOpacity(0.3),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: isSelected 
+                color: isSelected
                     ? method['color']
                     : AppTheme.grey.withOpacity(0.3),
                 width: isSelected ? 2 : 1,
@@ -327,7 +331,9 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
                         Text(
                           method['name'],
                           style: TextStyle(
-                            color: isSelected ? method['color'] : AppTheme.white,
+                            color: isSelected
+                                ? method['color']
+                                : AppTheme.white,
                             fontWeight: FontWeight.bold,
                             fontSize: 12,
                           ),
@@ -350,11 +356,11 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
       },
     );
   }
-  
+
   Widget _buildAkofaPreview() {
     final amount = double.tryParse(_amountController.text) ?? 0;
-    final akofaCoins = amount / FlutterwaveConfig.akofaRate;
-    
+    final akofaCoins = amount / 0.06; // Fixed exchange rate
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -380,7 +386,7 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
       ),
     );
   }
-  
+
   Widget _buildUserDetailsSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -393,7 +399,7 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
           ),
         ),
         const SizedBox(height: 16),
-        
+
         // Name
         TextField(
           controller: _nameController,
@@ -419,7 +425,7 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
           style: const TextStyle(color: AppTheme.white),
         ),
         const SizedBox(height: 16),
-        
+
         // Email
         TextField(
           controller: _emailController,
@@ -446,7 +452,7 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
           style: const TextStyle(color: AppTheme.white),
         ),
         const SizedBox(height: 16),
-        
+
         // Phone
         TextField(
           controller: _phoneController,
@@ -475,39 +481,23 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
       ],
     );
   }
-  
+
   Future<void> _processPayment() async {
     // Validate inputs
     if (!_validateInputs()) return;
-    
+
     setState(() {
       _isLoading = true;
       _error = null;
     });
-    
+
     try {
-      final amount = double.parse(_amountController.text.trim());
-      
-      final result = await FlutterwaveService.initiatePayment(
-        context: context,
-        amountInUSD: amount,
-        paymentMethod: _selectedPaymentMethod,
-        phoneNumber: _phoneController.text.trim(),
-        email: _emailController.text.trim(),
-        name: _nameController.text.trim(),
-      );
-      
-      if (result['success']) {
-        setState(() {
-          _successMessage = result['message'];
-          _isLoading = false;
-        });
-      } else {
-        setState(() {
-          _error = result['message'];
-          _isLoading = false;
-        });
-      }
+      // Payment processing removed - Flutterwave integration no longer available
+      setState(() {
+        _error =
+            'Payment processing is currently unavailable - Flutterwave integration removed';
+        _isLoading = false;
+      });
     } catch (e) {
       setState(() {
         _error = 'Payment failed: $e';
@@ -515,50 +505,40 @@ class _EnhancedBuyAkofaDialogState extends State<EnhancedBuyAkofaDialog> {
       });
     }
   }
-  
+
   bool _validateInputs() {
     if (_amountController.text.trim().isEmpty) {
       setState(() => _error = 'Please enter an amount');
       return false;
     }
-    
+
     final amount = double.tryParse(_amountController.text.trim());
     if (amount == null || amount <= 0) {
       setState(() => _error = 'Please enter a valid amount');
       return false;
     }
-    
+
     if (_nameController.text.trim().isEmpty) {
       setState(() => _error = 'Please enter your full name');
       return false;
     }
-    
+
     if (_emailController.text.trim().isEmpty) {
       setState(() => _error = 'Please enter your email address');
       return false;
     }
-    
+
     if (_phoneController.text.trim().isEmpty) {
       setState(() => _error = 'Please enter your phone number');
       return false;
     }
-    
-    // Check payment method limits
-    final paymentMethods = FlutterwaveService.getAvailablePaymentMethods();
-    final selectedMethod = paymentMethods.firstWhere(
-      (method) => method['id'] == _selectedPaymentMethod,
-      orElse: () => paymentMethods.first,
-    );
-    
-    if (amount < selectedMethod['minAmount'] || amount > selectedMethod['maxAmount']) {
-      setState(() => _error = 'Amount must be between \$${selectedMethod['minAmount']} and \$${selectedMethod['maxAmount']} for ${selectedMethod['name']}');
-      return false;
-    }
-    
+
+    // Payment method validation removed - Flutterwave integration no longer available
+
     setState(() => _error = null);
     return true;
   }
-  
+
   @override
   void dispose() {
     _amountController.dispose();

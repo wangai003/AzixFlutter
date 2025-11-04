@@ -58,6 +58,7 @@ class EnhancedMpesaService {
       '$_baseUrl/oauth/v1/generate?grant_type=client_credentials';
   static String get _stkPushUrl => '$_baseUrl/mpesa/stkpush/v1/processrequest';
   static String get _queryUrl => '$_baseUrl/mpesa/stkpushquery/v1/query';
+  static String get _b2cUrl => '$_baseUrl/mpesa/b2c/v1/paymentrequest';
 
   // ==================== SANDBOX CREDENTIALS ====================
   // These are the default sandbox credentials provided by Safaricom
@@ -101,6 +102,445 @@ class EnhancedMpesaService {
   static const double KES_TO_AKOFA_RATE = 0.01; // 100 KES = 1 AKOFA
   static const double MIN_PURCHASE_KES = 100.0; // Minimum 100 KES
   static const double MAX_PURCHASE_KES = 50000.0; // Maximum 50,000 KES
+
+  // Sell transaction limits
+  static const double MIN_SELL_AKOFA = 100.0; // Minimum 100 AKOFA
+  static const double MAX_SELL_AKOFA = 50000.0; // Maximum 50,000 AKOFA
+
+  /// Sell AKOFA tokens for M-Pesa
+  Future<Map<String, dynamic>> sellAkofaTokens({
+    required String phoneNumber,
+    required double akofaAmount,
+    String? accountReference,
+  }) async {
+    try {
+      // Validate amount
+      if (akofaAmount < MIN_SELL_AKOFA) {
+        return {
+          'success': false,
+          'error': 'Minimum sell amount is $MIN_SELL_AKOFA AKOFA',
+        };
+      }
+
+      if (akofaAmount > MAX_SELL_AKOFA) {
+        return {
+          'success': false,
+          'error': 'Maximum sell amount is $MAX_SELL_AKOFA AKOFA',
+        };
+      }
+
+      // Calculate KES amount (reverse of purchase rate)
+      final amountKES =
+          akofaAmount * KES_TO_AKOFA_RATE * 100; // 1 AKOFA = 100 KES
+
+      // Format phone number
+      final formattedPhone = _formatPhoneNumber(phoneNumber);
+      if (formattedPhone == null) {
+        return {'success': false, 'error': 'Invalid phone number format'};
+      }
+
+      // Generate account reference
+      final reference =
+          accountReference ??
+          'SELL_AKOFA_${DateTime.now().millisecondsSinceEpoch}';
+
+      print('💰 Initiating AKOFA sell: $akofaAmount AKOFA = $amountKES KES');
+
+      // For sell transactions, we need to burn the AKOFA tokens first
+      // Then initiate M-Pesa payment to user
+      final sellResult = await _processAkofaSell(
+        phoneNumber: formattedPhone,
+        akofaAmount: akofaAmount,
+        amountKES: amountKES,
+        accountReference: reference,
+      );
+
+      return sellResult;
+    } catch (e) {
+      return {'success': false, 'error': 'Failed to initiate sell: $e'};
+    }
+  }
+
+  /// Process AKOFA sell transaction (burn tokens and initiate M-Pesa payment)
+  Future<Map<String, dynamic>> _processAkofaSell({
+    required String phoneNumber,
+    required double akofaAmount,
+    required double amountKES,
+    required String accountReference,
+  }) async {
+    try {
+      print('🔥 Processing AKOFA sell transaction...');
+
+      // Get current user
+      final currentUser = _auth.currentUser;
+      if (currentUser == null) {
+        throw Exception('No authenticated user found');
+      }
+
+      // Get user's Stellar public key
+      final userDoc = await _firestore
+          .collection('USER')
+          .doc(currentUser.uid)
+          .get();
+      if (!userDoc.exists) {
+        return {'success': false, 'error': 'User profile not found'};
+      }
+
+      final userData = userDoc.data()!;
+      final stellarPublicKey = userData['stellarPublicKey'] as String?;
+
+      if (stellarPublicKey == null || stellarPublicKey.isEmpty) {
+        return {'success': false, 'error': 'No wallet found for user'};
+      }
+
+      // Check user's AKOFA balance
+      final balances = await _stellarService.getWalletBalances(
+        stellarPublicKey,
+      );
+      final akofaBalance = double.tryParse(balances['akofa'] ?? '0') ?? 0.0;
+
+      if (akofaBalance < akofaAmount) {
+        return {
+          'success': false,
+          'error':
+              'Insufficient AKOFA balance. Available: $akofaBalance, Required: $akofaAmount',
+        };
+      }
+
+      // Burn AKOFA tokens by sending them back to the issuer
+      print(
+        '🔥 Burning AKOFA tokens by sending to issuer: $akofaAmount tokens',
+      );
+      final burnResult = await _stellarService.sendAkofaTokens(
+        recipientAddress: EnhancedStellarService.AKOFA_ISSUER_ACCOUNT,
+        amount: akofaAmount,
+        memo: 'Token sell - $accountReference',
+      );
+
+      if (burnResult['success'] != true) {
+        return {
+          'success': false,
+          'error': 'Failed to burn AKOFA tokens: ${burnResult['error']}',
+        };
+      }
+
+      // Generate a unique transaction ID for M-Pesa payment
+      final transactionId = 'SELL_${DateTime.now().millisecondsSinceEpoch}';
+
+      // Record the sell transaction
+      await _recordMpesaSellTransaction(
+        phoneNumber: phoneNumber,
+        akofaAmount: akofaAmount,
+        amountKES: amountKES,
+        transactionId: transactionId,
+        accountReference: accountReference,
+        stellarHash: burnResult['hash'] as String,
+        status: 'processing',
+      );
+
+      // Initiate real M-Pesa B2C payment
+      final mpesaPaymentResult = await _initiateMpesaB2CPayment(
+        phoneNumber: phoneNumber,
+        amountKES: amountKES,
+        transactionId: transactionId,
+        accountReference: accountReference,
+      );
+
+      if (mpesaPaymentResult['success'] == true) {
+        // Update transaction status to completed
+        await _updateMpesaSellTransactionStatus(transactionId, 'completed');
+
+        // Send notification
+        await _sendSellNotification(
+          currentUser.uid,
+          akofaAmount,
+          amountKES,
+          transactionId,
+        );
+
+        return {
+          'success': true,
+          'transactionId': transactionId,
+          'akofaAmount': akofaAmount,
+          'amountKES': amountKES,
+          'message': 'AKOFA sell transaction completed successfully',
+          'stellarHash': burnResult['hash'],
+          'mpesaReference': mpesaPaymentResult['mpesaReference'],
+        };
+      } else {
+        // Payment failed, but tokens are already burned
+        // This is a critical error - tokens are lost
+        await _updateMpesaSellTransactionStatus(
+          transactionId,
+          'payment_failed',
+        );
+
+        return {
+          'success': false,
+          'error':
+              'Tokens burned but M-Pesa payment failed. Contact support immediately.',
+          'transactionId': transactionId,
+          'stellarHash': burnResult['hash'],
+        };
+      }
+    } catch (e) {
+      print('❌ AKOFA sell processing error: $e');
+      return {
+        'success': false,
+        'error': 'Failed to process sell transaction: $e',
+      };
+    }
+  }
+
+  /// Initiate M-Pesa B2C payment (Business to Customer)
+  Future<Map<String, dynamic>> _initiateMpesaB2CPayment({
+    required String phoneNumber,
+    required double amountKES,
+    required String transactionId,
+    required String accountReference,
+  }) async {
+    try {
+      print(
+        '💰 Initiating M-Pesa B2C payment for $amountKES KES to $phoneNumber',
+      );
+
+      // Get access token
+      final accessToken = await _getAccessToken();
+
+      // Prepare B2C request body
+      final body = {
+        'InitiatorName': _shortCode, // Use shortcode as initiator for B2C
+        'SecurityCredential': _generateSecurityCredential(),
+        'CommandID': 'BusinessPayment', // B2C payment
+        'Amount': amountKES.round().toString(),
+        'PartyA': _shortCode,
+        'PartyB': phoneNumber,
+        'Remarks': 'AKOFA Token Sell - $transactionId',
+        'QueueTimeOutURL': _callbackUrl,
+        'ResultURL': _callbackUrl,
+        'Occasion': accountReference,
+      };
+
+      print('📤 Sending M-Pesa B2C payment request');
+
+      // Make API request to M-Pesa B2C endpoint
+      final response = await http.post(
+        Uri.parse(_b2cUrl),
+        headers: {
+          'Authorization': 'Bearer $accessToken',
+          'Content-Type': 'application/json',
+        },
+        body: json.encode(body),
+      );
+
+      print('📥 M-Pesa B2C Response: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        print('✅ B2C payment initiated successfully');
+
+        // Check response code
+        if (data['ResponseCode'] == '0') {
+          return {
+            'success': true,
+            'mpesaReference':
+                data['ConversationID'] ?? data['OriginatorConversationID'],
+            'responseCode': data['ResponseCode'],
+            'responseDescription': data['ResponseDescription'],
+          };
+        } else {
+          print(
+            '❌ B2C payment initiation failed: ${data['ResponseDescription']}',
+          );
+          return {
+            'success': false,
+            'error': 'B2C payment failed: ${data['ResponseDescription']}',
+            'responseCode': data['ResponseCode'],
+          };
+        }
+      } else {
+        print(
+          '❌ B2C payment request failed: ${response.statusCode} - ${response.body}',
+        );
+        return {
+          'success': false,
+          'error':
+              'Failed to initiate B2C payment: ${response.statusCode} - ${response.body}',
+        };
+      }
+    } catch (e) {
+      print('❌ B2C payment error: $e');
+
+      // Provide helpful error messages for common issues
+      if (e.toString().contains('CORS')) {
+        print('🚫 CORS Error: Use a CORS proxy for web development');
+        print(
+          '💡 For B2C payments, you may need to implement this on the backend',
+        );
+      }
+
+      return {'success': false, 'error': 'Error initiating B2C payment: $e'};
+    }
+  }
+
+  /// Generate security credential for B2C API
+  String _generateSecurityCredential() {
+    // In production, this would encrypt the password with the public key
+    // For now, return a placeholder
+    // This needs to be implemented properly with M-Pesa's public key
+    return base64Encode(utf8.encode(_passKey));
+  }
+
+  /// Record M-Pesa sell transaction
+  Future<DocumentReference> _recordMpesaSellTransaction({
+    required String phoneNumber,
+    required double akofaAmount,
+    required double amountKES,
+    required String transactionId,
+    required String accountReference,
+    required String stellarHash,
+    required String status,
+  }) async {
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) {
+      throw Exception('No authenticated user found');
+    }
+
+    return await _firestore.collection('mpesa_sell_transactions').add({
+      'userId': currentUser.uid,
+      'phoneNumber': phoneNumber,
+      'akofaAmount': akofaAmount,
+      'amountKES': amountKES,
+      'transactionId': transactionId,
+      'accountReference': accountReference,
+      'stellarHash': stellarHash,
+      'status': status,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Update M-Pesa sell transaction status
+  Future<void> _updateMpesaSellTransactionStatus(
+    String transactionId,
+    String status,
+  ) async {
+    final querySnapshot = await _firestore
+        .collection('mpesa_sell_transactions')
+        .where('transactionId', isEqualTo: transactionId)
+        .get();
+
+    if (querySnapshot.docs.isNotEmpty) {
+      await querySnapshot.docs.first.reference.update({
+        'status': status,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+  }
+
+  /// Send sell notification to user
+  Future<void> _sendSellNotification(
+    String userId,
+    double akofaAmount,
+    double amountKES,
+    String transactionId,
+  ) async {
+    try {
+      await _firestore.collection('notifications').add({
+        'userId': userId,
+        'title': 'AKOFA Sell Successful',
+        'message':
+            'You have successfully sold $akofaAmount AKOFA for KES $amountKES!',
+        'type': 'sell',
+        'transactionId': transactionId,
+        'isRead': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('Warning: Failed to send sell notification: $e');
+    }
+  }
+
+  /// Get M-Pesa sell transaction history
+  Future<List<Map<String, dynamic>>> getMpesaSellTransactionHistory() async {
+    try {
+      final currentUser = _auth.currentUser;
+      if (currentUser == null) {
+        return [];
+      }
+
+      final querySnapshot = await _firestore
+          .collection('mpesa_sell_transactions')
+          .where('userId', isEqualTo: currentUser.uid)
+          .orderBy('timestamp', descending: true)
+          .get();
+
+      return querySnapshot.docs.map((doc) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        return data;
+      }).toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// Get sell statistics
+  Future<Map<String, dynamic>> getSellStats() async {
+    try {
+      final currentUser = _auth.currentUser;
+      if (currentUser == null) {
+        return {
+          'totalAkofaSold': 0.0,
+          'totalKESReceived': 0.0,
+          'successfulSells': 0,
+          'pendingSells': 0,
+          'totalSells': 0,
+        };
+      }
+
+      final querySnapshot = await _firestore
+          .collection('mpesa_sell_transactions')
+          .where('userId', isEqualTo: currentUser.uid)
+          .get();
+
+      double totalAkofaSold = 0;
+      double totalKESReceived = 0;
+      int successfulSells = 0;
+      int pendingSells = 0;
+
+      for (final doc in querySnapshot.docs) {
+        final data = doc.data();
+        final akofaAmount = data['akofaAmount'] as double? ?? 0.0;
+        final amountKES = data['amountKES'] as double? ?? 0.0;
+        final status = data['status'] as String? ?? 'unknown';
+
+        totalAkofaSold += akofaAmount;
+        totalKESReceived += amountKES;
+
+        if (status == 'completed') {
+          successfulSells++;
+        } else if (status == 'processing' || status == 'pending') {
+          pendingSells++;
+        }
+      }
+
+      return {
+        'totalAkofaSold': totalAkofaSold,
+        'totalKESReceived': totalKESReceived,
+        'successfulSells': successfulSells,
+        'pendingSells': pendingSells,
+        'totalSells': querySnapshot.docs.length,
+      };
+    } catch (e) {
+      return {
+        'totalAkofaSold': 0.0,
+        'totalKESReceived': 0.0,
+        'successfulSells': 0,
+        'pendingSells': 0,
+        'totalSells': 0,
+      };
+    }
+  }
 
   /// Purchase AKOFA tokens using M-Pesa
   Future<Map<String, dynamic>> purchaseAkofaTokens({

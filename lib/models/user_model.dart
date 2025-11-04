@@ -13,15 +13,12 @@ class UserModel {
   final Map<String, dynamic>? preferences;
   final String? stellarPublicKey;
   final bool hasWallet;
-  final int? totalMiningSessions;
-  final double? totalEarnings;
   final List<String>? notificationSettings;
   final Map<String, dynamic>? profile;
   final String? referralCode;
   final String? referredBy;
   final List<String>? referrals;
   final int? referralCount;
-  final bool? miningRateBoosted;
   final String akofaTag;
 
   UserModel({
@@ -37,15 +34,12 @@ class UserModel {
     this.preferences,
     this.stellarPublicKey,
     this.hasWallet = false,
-    this.totalMiningSessions,
-    this.totalEarnings,
     this.notificationSettings,
     this.profile,
     this.referralCode,
     this.referredBy,
     this.referrals,
     this.referralCount,
-    this.miningRateBoosted,
     required this.akofaTag,
   });
 
@@ -64,23 +58,24 @@ class UserModel {
       photoUrl: map['photoUrl'],
       role: map['role'] ?? 'user',
       createdAt: parseDate(map['createdAt']),
-      lastLoginAt: map['lastLoginAt'] != null ? parseDate(map['lastLoginAt']) : null,
+      lastLoginAt: map['lastLoginAt'] != null
+          ? parseDate(map['lastLoginAt'])
+          : null,
       isActive: map['isActive'] ?? true,
       isEmailVerified: map['isEmailVerified'] ?? false,
       preferences: map['preferences'],
       stellarPublicKey: map['stellarPublicKey'],
       hasWallet: map['hasWallet'] ?? false,
-      totalMiningSessions: map['totalMiningSessions'],
-      totalEarnings: map['totalEarnings']?.toDouble(),
-      notificationSettings: map['notificationSettings'] != null 
+      notificationSettings: map['notificationSettings'] != null
           ? List<String>.from(map['notificationSettings'])
           : null,
       profile: map['profile'],
       referralCode: map['referralCode'],
       referredBy: map['referredBy'],
-      referrals: map['referrals'] != null ? List<String>.from(map['referrals']) : null,
+      referrals: map['referrals'] != null
+          ? List<String>.from(map['referrals'])
+          : null,
       referralCount: map['referralCount'],
-      miningRateBoosted: map['miningRateBoosted'],
       akofaTag: map['akofaTag'] ?? '',
     );
   }
@@ -99,15 +94,12 @@ class UserModel {
       'preferences': preferences,
       'stellarPublicKey': stellarPublicKey,
       'hasWallet': hasWallet,
-      'totalMiningSessions': totalMiningSessions,
-      'totalEarnings': totalEarnings,
       'notificationSettings': notificationSettings,
       'profile': profile,
       'referralCode': referralCode,
       'referredBy': referredBy,
       'referrals': referrals,
       'referralCount': referralCount,
-      'miningRateBoosted': miningRateBoosted,
       'akofaTag': akofaTag,
     };
   }
@@ -125,15 +117,12 @@ class UserModel {
     Map<String, dynamic>? preferences,
     String? stellarPublicKey,
     bool? hasWallet,
-    int? totalMiningSessions,
-    double? totalEarnings,
     List<String>? notificationSettings,
     Map<String, dynamic>? profile,
     String? referralCode,
     String? referredBy,
     List<String>? referrals,
     int? referralCount,
-    bool? miningRateBoosted,
     String? akofaTag,
   }) {
     return UserModel(
@@ -149,19 +138,16 @@ class UserModel {
       preferences: preferences ?? this.preferences,
       stellarPublicKey: stellarPublicKey ?? this.stellarPublicKey,
       hasWallet: hasWallet ?? this.hasWallet,
-      totalMiningSessions: totalMiningSessions ?? this.totalMiningSessions,
-      totalEarnings: totalEarnings ?? this.totalEarnings,
       notificationSettings: notificationSettings ?? this.notificationSettings,
       profile: profile ?? this.profile,
       referralCode: referralCode ?? this.referralCode,
       referredBy: referredBy ?? this.referredBy,
       referrals: referrals ?? this.referrals,
       referralCount: referralCount ?? this.referralCount,
-      miningRateBoosted: miningRateBoosted ?? this.miningRateBoosted,
       akofaTag: akofaTag ?? this.akofaTag,
     );
   }
 
   bool get isAdmin => role == 'admin' || role == 'super_admin';
   bool get isSuperAdmin => role == 'super_admin';
-} 
+}

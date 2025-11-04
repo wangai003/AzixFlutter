@@ -1,0 +1,14 @@
+{
+  "contractId": "REPLACE_WITH_ACTUAL_CONTRACT_ID",
+  "network": "testnet",
+  "akofaAsset": "AKOFA:GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW",
+  "miningRate": "0.25 AKOFA/hour",
+  "deploymentSteps": [
+    "1. Upload WASM file to Stellar testnet",
+    "2. Create contract instance",
+    "3. Call initialize() with AKOFA parameters",
+    "4. Update Flutter app with contract ID"
+  ],
+  "wasmHash": "REPLACE_WITH_ACTUAL_WASM_HASH",
+  "deployedAt": "2025-11-02T17:55:59.406Z"
+}

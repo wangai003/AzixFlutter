@@ -1,0 +1,1 @@
+/Users/apple/projects/AzixFlutter/soroban_contracts/raffle_contract/target/wasm32-unknown-unknown/release/raffle_contract.wasm: /Users/apple/projects/AzixFlutter/soroban_contracts/raffle_contract/src/lib.rs

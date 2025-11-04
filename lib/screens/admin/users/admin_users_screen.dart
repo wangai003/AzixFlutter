@@ -39,13 +39,19 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
     final users = adminProvider.users.where((user) {
       if (_searchQuery.isEmpty) return true;
       return user.email.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-             (user.displayName?.toLowerCase().contains(_searchQuery.toLowerCase()) ?? false);
+          (user.displayName?.toLowerCase().contains(
+                _searchQuery.toLowerCase(),
+              ) ??
+              false);
     }).toList();
 
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppTheme.black,
-        title: const Text('User Management', style: TextStyle(color: AppTheme.primaryGold)),
+        title: const Text(
+          'User Management',
+          style: TextStyle(color: AppTheme.primaryGold),
+        ),
         iconTheme: const IconThemeData(color: AppTheme.primaryGold),
         elevation: 0,
       ),
@@ -76,18 +82,29 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                 const SizedBox(height: 16),
                 Expanded(
                   child: adminProvider.isLoading
-                      ? const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryGold)))
-                      : users.isEmpty
-                          ? Center(
-                              child: Text('No users found.', style: AppTheme.bodyLarge.copyWith(color: AppTheme.grey)),
-                            )
-                          : ListView.builder(
-                              itemCount: users.length,
-                              itemBuilder: (context, index) {
-                                final user = users[index];
-                                return _buildUserCard(user);
-                              },
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              AppTheme.primaryGold,
                             ),
+                          ),
+                        )
+                      : users.isEmpty
+                      ? Center(
+                          child: Text(
+                            'No users found.',
+                            style: AppTheme.bodyLarge.copyWith(
+                              color: AppTheme.grey,
+                            ),
+                          ),
+                        )
+                      : ListView.builder(
+                          itemCount: users.length,
+                          itemBuilder: (context, index) {
+                            final user = users[index];
+                            return _buildUserCard(user);
+                          },
+                        ),
                 ),
               ],
             ),
@@ -137,17 +154,30 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
         leading: CircleAvatar(
           backgroundColor: AppTheme.primaryGold.withOpacity(0.2),
           child: Text(
-            user.displayName?.isNotEmpty == true ? user.displayName![0].toUpperCase() : 'U',
-            style: const TextStyle(color: AppTheme.primaryGold, fontWeight: FontWeight.bold),
+            user.displayName?.isNotEmpty == true
+                ? user.displayName![0].toUpperCase()
+                : 'U',
+            style: const TextStyle(
+              color: AppTheme.primaryGold,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ),
-        title: Text(user.displayName ?? 'No Name', style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.bold)),
+        title: Text(
+          user.displayName ?? 'No Name',
+          style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.bold),
+        ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(user.email, style: AppTheme.bodySmall),
             Text('Role: ${user.role}', style: AppTheme.bodySmall),
-            Text('Status: ${user.isActive ? 'Active' : 'Deactivated'}', style: AppTheme.bodySmall.copyWith(color: user.isActive ? Colors.green : Colors.red)),
+            Text(
+              'Status: ${user.isActive ? 'Active' : 'Deactivated'}',
+              style: AppTheme.bodySmall.copyWith(
+                color: user.isActive ? Colors.green : Colors.red,
+              ),
+            ),
           ],
         ),
         trailing: PopupMenuButton<String>(
@@ -155,13 +185,22 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
           onSelected: (value) => _handleUserAction(value, user),
           itemBuilder: (context) => [
             if (user.isActive)
-              const PopupMenuItem(value: 'deactivate', child: Text('Deactivate')),
+              const PopupMenuItem(
+                value: 'deactivate',
+                child: Text('Deactivate'),
+              ),
             if (!user.isActive)
               const PopupMenuItem(value: 'activate', child: Text('Activate')),
             if (user.role == 'user')
-              const PopupMenuItem(value: 'promote', child: Text('Promote to Admin')),
+              const PopupMenuItem(
+                value: 'promote',
+                child: Text('Promote to Admin'),
+              ),
             if (user.role == 'admin')
-              const PopupMenuItem(value: 'demote', child: Text('Demote to User')),
+              const PopupMenuItem(
+                value: 'demote',
+                child: Text('Demote to User'),
+              ),
           ],
         ),
         onTap: () => _showUserDetails(user),
@@ -192,31 +231,47 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.darkGrey,
-        title: Text(user.displayName ?? 'User Details', style: const TextStyle(color: AppTheme.primaryGold)),
+        title: Text(
+          user.displayName ?? 'User Details',
+          style: const TextStyle(color: AppTheme.primaryGold),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Email: ${user.email}', style: const TextStyle(color: AppTheme.white)),
-            Text('Role: ${user.role}', style: const TextStyle(color: AppTheme.white)),
-            Text('Status: ${user.isActive ? 'Active' : 'Deactivated'}', style: TextStyle(color: user.isActive ? Colors.green : Colors.red)),
+            Text(
+              'Email: ${user.email}',
+              style: const TextStyle(color: AppTheme.white),
+            ),
+            Text(
+              'Role: ${user.role}',
+              style: const TextStyle(color: AppTheme.white),
+            ),
+            Text(
+              'Status: ${user.isActive ? 'Active' : 'Deactivated'}',
+              style: TextStyle(
+                color: user.isActive ? Colors.green : Colors.red,
+              ),
+            ),
             if (user.stellarPublicKey != null) ...[
               const SizedBox(height: 8),
-              Text('Stellar Wallet: ${user.stellarPublicKey}', style: const TextStyle(color: AppTheme.primaryGold)),
+              Text(
+                'Stellar Wallet: ${user.stellarPublicKey}',
+                style: const TextStyle(color: AppTheme.primaryGold),
+              ),
             ],
-            if (user.totalMiningSessions != null)
-              Text('Mining Sessions: ${user.totalMiningSessions}', style: const TextStyle(color: AppTheme.white)),
-            if (user.totalEarnings != null)
-              Text('Total Earnings: ${user.totalEarnings}', style: const TextStyle(color: AppTheme.white)),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Close', style: TextStyle(color: AppTheme.primaryGold)),
+            child: const Text(
+              'Close',
+              style: TextStyle(color: AppTheme.primaryGold),
+            ),
           ),
         ],
       ),
     );
   }
-} 
+}

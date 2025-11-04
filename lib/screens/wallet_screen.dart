@@ -14,6 +14,7 @@ import '../widgets/quick_actions_row.dart';
 import '../widgets/transaction_list.dart';
 import '../widgets/stellar_wallet_prompt.dart';
 import '../widgets/friendly_bot_funding_dialog.dart';
+import '../screens/buy_crypto_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class WalletScreen extends StatefulWidget {
@@ -305,6 +306,7 @@ class _WalletScreenState extends State<WalletScreen>
           onReceive: () =>
               _showReceiveSheet(context, stellarProvider.publicKey),
           onBuy: () => _showBuyAkofaDialog(context),
+          onBuyCrypto: () => _showBuyCryptoScreen(context),
         ),
         const SizedBox(height: 32),
         Row(
@@ -389,6 +391,13 @@ class _WalletScreenState extends State<WalletScreen>
     showDialog(
       context: context,
       builder: (context) => EnhancedBuyAkofaDialog(),
+    );
+  }
+
+  void _showBuyCryptoScreen(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const BuyCryptoScreen()),
     );
   }
 

@@ -8,11 +8,18 @@ import '../theme/app_theme.dart';
 import '../widgets/enhanced_transaction_list.dart';
 import '../widgets/multi_asset_balance_display.dart';
 import '../widgets/mpesa_purchase_dialog.dart';
+import '../widgets/mpesa_sell_dialog.dart';
 import '../widgets/send_akofa_dialog.dart';
 import '../widgets/qr_code_display.dart';
+import '../widgets/token_sell_dialog.dart';
+import '../widgets/card_payment_dialog.dart';
+import '../widgets/bank_transfer_dialog.dart';
+import '../widgets/moonpay_purchase_dialog.dart';
+import '../widgets/moonpay_button.dart';
 import '../services/secure_wallet_service.dart';
 import '../services/akofa_tag_service.dart';
 import '../providers/auth_provider.dart' as local_auth;
+import 'package:firebase_auth/firebase_auth.dart';
 import 'secure_wallet_creation_screen.dart';
 
 class EnhancedWalletScreen extends StatefulWidget {
@@ -27,7 +34,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
   late TabController _tabController;
   bool _isRefreshing = false;
   String? _userAkofaTag;
-  bool _isLoadingTag = false;
+  bool _isLoadingAkofaTag = false;
 
   @override
   void initState() {
@@ -41,7 +48,11 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
         listen: false,
       );
       walletProvider.refreshWallet();
-      _loadUserAkofaTag();
+
+      // Load AKOFA tag if wallet exists
+      if (walletProvider.hasSecureWallet) {
+        _loadUserAkofaTag();
+      }
     });
   }
 
@@ -207,23 +218,6 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                   isRecommended: true,
                 ),
 
-                const SizedBox(height: 16),
-
-                // Standard Wallet Option
-                _buildWalletTypeOption(
-                  title: 'Standard Wallet',
-                  subtitle: 'Basic security for quick setup',
-                  icon: Icons.wallet,
-                  features: [
-                    'Basic encryption',
-                    'Password protection',
-                    'Standard security',
-                  ],
-                  onPressed: walletProvider.isLoading
-                      ? null
-                      : () => _createWallet(walletProvider),
-                ),
-
                 // Add extra space at bottom for better UX
                 const SizedBox(height: 40),
               ],
@@ -380,18 +374,15 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Multi-Asset Balance Display
-            const MultiAssetBalanceDisplay(),
+            // Wallet Assets Overview
+            _buildWalletAssetsOverview(walletProvider),
 
             const SizedBox(height: 24),
 
             // Akofa Tag Display
-            if (_userAkofaTag != null)
-              _buildAkofaTagSection()
-            else
-              _buildCreateTagPrompt(),
+            _buildAkofaTagSection(),
 
-            if (_userAkofaTag != null) const SizedBox(height: 24),
+            const SizedBox(height: 24),
 
             // Trustline Setup (only show if trustline is missing)
             if (!walletProvider.hasAkofaTrustline)
@@ -403,6 +394,9 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
             _buildQuickActions(walletProvider),
 
             const SizedBox(height: 24),
+
+            // Sell Tokens Section
+            _buildSellTokensSection(walletProvider),
 
             // Recent Transactions
             _buildRecentTransactions(walletProvider),
@@ -462,7 +456,6 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                   DropdownMenuItem(value: 'all', child: Text('All Types')),
                   DropdownMenuItem(value: 'send', child: Text('Sent')),
                   DropdownMenuItem(value: 'receive', child: Text('Received')),
-                  DropdownMenuItem(value: 'mining', child: Text('Mining')),
                 ],
                 onChanged: (value) {
                   // TODO: Implement filter functionality
@@ -586,12 +579,9 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
           children: [
             Expanded(
               child: _buildActionButton(
-                'Send AKOFA',
+                'Send Assets',
                 Icons.send,
-                walletProvider.hasAkofaTrustline
-                    ? () => _showSendAkofaDialog(walletProvider)
-                    : null,
-                disabled: !walletProvider.hasAkofaTrustline,
+                _showSendOptions,
               ),
             ),
             const SizedBox(width: 12),
@@ -609,6 +599,14 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
           children: [
             Expanded(
               child: _buildActionButton(
+                'Buy Crypto',
+                Icons.account_balance_wallet,
+                () => _showMoonPayPurchaseDialog(walletProvider),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildActionButton(
                 'Buy AKOFA',
                 Icons.shopping_cart,
                 walletProvider.hasAkofaTrustline
@@ -617,15 +615,14 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                 disabled: !walletProvider.hasAkofaTrustline,
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildActionButton(
-                'Transaction History',
-                Icons.history,
-                () => _tabController.animateTo(1),
-              ),
-            ),
           ],
+        ),
+        const SizedBox(height: 12),
+        _buildActionButton(
+          'Transaction History',
+          Icons.history,
+          () => _tabController.animateTo(1),
+          fullWidth: true,
         ),
       ],
     );
@@ -636,8 +633,9 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     IconData icon,
     VoidCallback? onTap, {
     bool disabled = false,
+    bool fullWidth = false,
   }) {
-    return GestureDetector(
+    final button = GestureDetector(
       onTap: disabled ? null : onTap,
       child: Container(
         padding: const EdgeInsets.all(16),
@@ -673,6 +671,8 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
         ),
       ),
     );
+
+    return fullWidth ? button : Expanded(child: button);
   }
 
   Widget _buildRecentTransactions(EnhancedWalletProvider walletProvider) {
@@ -768,6 +768,242 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     );
   }
 
+  Widget _buildSellTokensSection(EnhancedWalletProvider walletProvider) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Sell Tokens',
+          style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Convert your AKOFA tokens to cash instantly',
+          style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
+        ),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppTheme.darkGrey.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: AppTheme.primaryGold.withOpacity(0.3),
+              width: 1,
+            ),
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.currency_exchange,
+                    color: AppTheme.primaryGold,
+                    size: 24,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Sell AKOFA for M-Pesa',
+                          style: AppTheme.bodyLarge.copyWith(
+                            color: AppTheme.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '1 AKOFA = 100 KES',
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.primaryGold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ElevatedButton(
+                    onPressed: walletProvider.hasAkofaTrustline
+                        ? () => _showTokenSellDialog()
+                        : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryGold,
+                      foregroundColor: AppTheme.black,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: const Text(
+                      'Sell Now',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+              if (!walletProvider.hasAkofaTrustline) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.orange, size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Setup wallet first to enable selling',
+                          style: AppTheme.bodySmall.copyWith(
+                            color: Colors.orange,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWalletAssetsOverview(EnhancedWalletProvider walletProvider) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Your Assets',
+          style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
+        ),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppTheme.darkGrey.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: AppTheme.primaryGold.withOpacity(0.3),
+              width: 1,
+            ),
+          ),
+          child: Column(
+            children: [
+              // XLM Balance
+              _buildAssetRow(
+                'XLM',
+                'Stellar Lumens',
+                double.tryParse(
+                      walletProvider.xlmBalance,
+                    )?.toStringAsFixed(7) ??
+                    '0.0000000',
+                Icons.currency_exchange,
+                Colors.blue,
+              ),
+              const SizedBox(height: 12),
+
+              // AKOFA Balance
+              _buildAssetRow(
+                'AKOFA',
+                'AKOFA Ecosystem Token',
+                double.tryParse(
+                      walletProvider.akofaBalance,
+                    )?.toStringAsFixed(7) ??
+                    '0.0000000',
+                Icons.token,
+                Colors.orange,
+              ),
+              const SizedBox(height: 12),
+
+              // USDC Balance (if available)
+              if (double.tryParse(walletProvider.getAssetBalance('USDC')) !=
+                      null &&
+                  double.tryParse(walletProvider.getAssetBalance('USDC'))! > 0)
+                _buildAssetRow(
+                  'USDC',
+                  'USD Coin',
+                  double.tryParse(
+                    walletProvider.getAssetBalance('USDC'),
+                  )!.toStringAsFixed(7),
+                  Icons.attach_money,
+                  Colors.green,
+                ),
+
+              // EURC Balance (if available)
+              if (double.tryParse(walletProvider.getAssetBalance('EURC')) !=
+                      null &&
+                  double.tryParse(walletProvider.getAssetBalance('EURC'))! > 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: _buildAssetRow(
+                    'EURC',
+                    'Euro Coin',
+                    double.tryParse(
+                      walletProvider.getAssetBalance('EURC'),
+                    )!.toStringAsFixed(7),
+                    Icons.euro,
+                    Colors.teal,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAssetRow(
+    String symbol,
+    String name,
+    String balance,
+    IconData icon,
+    Color color,
+  ) {
+    return Row(
+      children: [
+        CircleAvatar(
+          backgroundColor: color.withOpacity(0.2),
+          child: Icon(icon, color: color, size: 20),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                symbol,
+                style: AppTheme.bodyLarge.copyWith(
+                  color: AppTheme.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                name,
+                style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+              ),
+            ],
+          ),
+        ),
+        Text(
+          balance,
+          style: AppTheme.bodyLarge.copyWith(
+            color: AppTheme.primaryGold,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildWalletStats(EnhancedWalletProvider walletProvider) {
     final stats = walletProvider.getTransactionStats();
 
@@ -838,6 +1074,78 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
   Widget _buildPurchaseOptions(EnhancedWalletProvider walletProvider) {
     return Column(
       children: [
+        // Payment Method Selection
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppTheme.darkGrey.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppTheme.primaryGold.withOpacity(0.3)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Choose Payment Method',
+                style: AppTheme.bodyLarge.copyWith(
+                  color: AppTheme.primaryGold,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildPaymentMethodButton(
+                      'M-Pesa',
+                      Icons.phone_android,
+                      () => _showMpesaPurchaseDialog(walletProvider),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildPaymentMethodButton(
+                      'MoonPay',
+                      Icons.account_balance_wallet,
+                      () => _showMoonPayPurchaseDialog(walletProvider),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildPaymentMethodButton(
+                      'Card',
+                      Icons.credit_card,
+                      () => _showCardPaymentDialog(walletProvider),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildPaymentMethodButton(
+                      'Bank Transfer',
+                      Icons.account_balance,
+                      () => _showBankTransferDialog(walletProvider),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+
+        // Quick Purchase Options (M-Pesa)
+        Text(
+          'Quick Purchase (M-Pesa)',
+          style: AppTheme.bodyLarge.copyWith(
+            color: AppTheme.primaryGold,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 16),
         _buildPurchaseOption(
           'KES 100',
           '1.0 AKOFA',
@@ -1003,49 +1311,83 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
       listen: false,
     );
     await walletProvider.refreshWallet();
-    await _loadUserAkofaTag();
+
+    // Load Akofa tag if wallet exists
+    if (walletProvider.hasSecureWallet) {
+      await _loadUserAkofaTag();
+    }
+
     setState(() => _isRefreshing = false);
   }
 
+  Future<void> _checkAndPromptForAkofaTag(
+    EnhancedWalletProvider walletProvider,
+  ) async {
+    final authProvider = Provider.of<local_auth.AuthProvider>(
+      context,
+      listen: false,
+    );
+
+    if (authProvider.user?.uid == null) return;
+
+    try {
+      // Check if user has an AKOFA tag
+      final tagCheck = await AkofaTagService.checkUserHasTag(
+        authProvider.user!.uid,
+      );
+
+      if (tagCheck['hasTag']) {
+        // User has a tag, load it
+        setState(() {
+          _userAkofaTag = tagCheck['tag'];
+        });
+      } else {
+        // User has wallet but no AKOFA tag - prompt to create one
+        // This now works for all wallet types (secure, imported, etc.)
+        _showAkofaTagCreationPrompt(walletProvider);
+      }
+    } catch (e) {
+      print('Error checking AKOFA tag: $e');
+      // If error, still try to load existing tag
+      _loadUserAkofaTag();
+    }
+  }
+
   Future<void> _loadUserAkofaTag() async {
+    setState(() => _isLoadingAkofaTag = true);
+
     final authProvider = Provider.of<local_auth.AuthProvider>(
       context,
       listen: false,
     );
 
     if (authProvider.user?.uid != null) {
-      setState(() => _isLoadingTag = true);
-
       try {
-        final tagResult = await AkofaTagService.getUserTag(
-          authProvider.user!.uid,
-        );
-        if (tagResult['success']) {
+        // Retrieve from USER collection field 'akofaTag'
+        final userDoc = await FirebaseFirestore.instance
+            .collection('USER')
+            .doc(authProvider.user!.uid)
+            .get();
+
+        if (userDoc.exists) {
+          final userData = userDoc.data();
+          final tag = userData?['akofaTag'] as String?;
           setState(() {
-            _userAkofaTag = tagResult['tag'];
-            _isLoadingTag = false;
+            _userAkofaTag = tag;
           });
         } else {
           setState(() {
             _userAkofaTag = null;
-            _isLoadingTag = false;
-          });
-          // Prompt user to create a tag if they don't have one
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            _showCreateTagPrompt();
           });
         }
       } catch (e) {
         setState(() {
           _userAkofaTag = null;
-          _isLoadingTag = false;
-        });
-        // Prompt user to create a tag if there's an error
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _showCreateTagPrompt();
         });
       }
     }
+
+    setState(() => _isLoadingAkofaTag = false);
   }
 
   Future<void> _createWallet(EnhancedWalletProvider walletProvider) async {
@@ -1185,6 +1527,25 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                 ); // AKOFA
               },
             ),
+            // Sell Tokens Option
+            ListTile(
+              leading: CircleAvatar(
+                backgroundColor: Colors.green,
+                child: const Icon(Icons.sell, color: Colors.white, size: 20),
+              ),
+              title: Text(
+                'Sell Tokens',
+                style: TextStyle(color: AppTheme.white),
+              ),
+              subtitle: Text(
+                'Convert tokens to cash',
+                style: TextStyle(color: AppTheme.grey, fontSize: 12),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _showTokenSellDialog();
+              },
+            ),
             // Stablecoins
             ...walletProvider.stablecoins.map(
               (stablecoin) => ListTile(
@@ -1219,13 +1580,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
   }
 
   void _showSendAkofaDialog(EnhancedWalletProvider walletProvider) {
-    showDialog(
-      context: context,
-      builder: (context) => SendAkofaDialog(
-        walletProvider: walletProvider,
-        useBiometrics: walletProvider.hasSecureWallet,
-      ),
-    );
+    showDialog(context: context, builder: (context) => SendAkofaDialog());
   }
 
   void _showSendAssetDialog(
@@ -1234,6 +1589,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
   ) {
     final recipientController = TextEditingController();
     final amountController = TextEditingController();
+    final memoController = TextEditingController();
     String resolvedAddress = '';
     bool isResolvingTag = false;
 
@@ -1246,121 +1602,141 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
             'Send ${asset.symbol}',
             style: TextStyle(color: AppTheme.primaryGold),
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Send ${asset.name} to another address or Akofa tag',
-                style: TextStyle(color: AppTheme.grey, fontSize: 14),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: recipientController,
-                style: TextStyle(color: AppTheme.white),
-                onChanged: (value) async {
-                  if (value.isNotEmpty) {
-                    // Check if input looks like a tag
-                    if (AkofaTagService.isValidTagFormat(value.trim())) {
-                      setState(() => isResolvingTag = true);
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Send ${asset.name} to another address or Akofa tag',
+                  style: TextStyle(color: AppTheme.grey, fontSize: 14),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: recipientController,
+                  style: TextStyle(color: AppTheme.white),
+                  onChanged: (value) async {
+                    if (value.isNotEmpty) {
+                      // Check if input looks like a tag
+                      if (AkofaTagService.isValidTagFormat(value.trim())) {
+                        setState(() => isResolvingTag = true);
 
-                      try {
-                        final tagResult = await AkofaTagService.resolveTag(
-                          value.trim(),
-                        );
-                        if (tagResult['success']) {
-                          setState(() {
-                            resolvedAddress = tagResult['publicKey'];
-                            isResolvingTag = false;
-                          });
-                        } else {
+                        try {
+                          final tagResult = await AkofaTagService.resolveTag(
+                            value.trim(),
+                          );
+                          if (tagResult['success']) {
+                            setState(() {
+                              resolvedAddress = tagResult['publicKey'];
+                              isResolvingTag = false;
+                            });
+                          } else {
+                            setState(() {
+                              resolvedAddress = '';
+                              isResolvingTag = false;
+                            });
+                          }
+                        } catch (e) {
                           setState(() {
                             resolvedAddress = '';
                             isResolvingTag = false;
                           });
                         }
-                      } catch (e) {
-                        setState(() {
-                          resolvedAddress = '';
-                          isResolvingTag = false;
-                        });
+                      } else if (value.startsWith('G') && value.length == 56) {
+                        // Valid Stellar address
+                        setState(() => resolvedAddress = value);
+                      } else {
+                        setState(() => resolvedAddress = '');
                       }
-                    } else if (value.startsWith('G') && value.length == 56) {
-                      // Valid Stellar address
-                      setState(() => resolvedAddress = value);
                     } else {
-                      setState(() => resolvedAddress = '');
+                      setState(() {
+                        resolvedAddress = '';
+                        isResolvingTag = false;
+                      });
                     }
-                  } else {
-                    setState(() {
-                      resolvedAddress = '';
-                      isResolvingTag = false;
-                    });
-                  }
-                },
-                decoration: InputDecoration(
-                  labelText: 'Recipient Address or Akofa Tag',
-                  labelStyle: TextStyle(color: AppTheme.primaryGold),
-                  hintText: 'G... or john1234',
-                  hintStyle: TextStyle(color: AppTheme.grey),
-                  enabledBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: AppTheme.primaryGold),
-                  ),
-                  focusedBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: AppTheme.primaryGold),
-                  ),
-                  suffixIcon: isResolvingTag
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.blue,
-                          ),
-                        )
-                      : resolvedAddress.isNotEmpty
-                      ? const Icon(
-                          Icons.check_circle,
-                          color: Colors.green,
-                          size: 20,
-                        )
-                      : null,
-                ),
-              ),
-              if (resolvedAddress.isNotEmpty && !isResolvingTag)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    'Resolved to: ${resolvedAddress.substring(0, 8)}...${resolvedAddress.substring(resolvedAddress.length - 8)}',
-                    style: TextStyle(color: Colors.green, fontSize: 12),
+                  },
+                  decoration: InputDecoration(
+                    labelText: 'Recipient Address or Akofa Tag',
+                    labelStyle: TextStyle(color: AppTheme.primaryGold),
+                    hintText: 'G... or john1234',
+                    hintStyle: TextStyle(color: AppTheme.grey),
+                    enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: AppTheme.primaryGold),
+                    ),
+                    focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: AppTheme.primaryGold),
+                    ),
+                    suffixIcon: isResolvingTag
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.blue,
+                            ),
+                          )
+                        : resolvedAddress.isNotEmpty
+                        ? const Icon(
+                            Icons.check_circle,
+                            color: Colors.green,
+                            size: 20,
+                          )
+                        : null,
                   ),
                 ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: amountController,
-                keyboardType: TextInputType.number,
-                style: TextStyle(color: AppTheme.white),
-                decoration: InputDecoration(
-                  labelText: 'Amount',
-                  labelStyle: TextStyle(color: AppTheme.primaryGold),
-                  hintText: '0.00',
-                  hintStyle: TextStyle(color: AppTheme.grey),
-                  suffixText: asset.symbol,
-                  suffixStyle: TextStyle(color: AppTheme.primaryGold),
-                  enabledBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: AppTheme.primaryGold),
+                if (resolvedAddress.isNotEmpty && !isResolvingTag)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      'Resolved to: ${resolvedAddress.substring(0, 8)}...${resolvedAddress.substring(resolvedAddress.length - 8)}',
+                      style: TextStyle(color: Colors.green, fontSize: 12),
+                    ),
                   ),
-                  focusedBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: AppTheme.primaryGold),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: amountController,
+                  keyboardType: TextInputType.number,
+                  style: TextStyle(color: AppTheme.white),
+                  decoration: InputDecoration(
+                    labelText: 'Amount',
+                    labelStyle: TextStyle(color: AppTheme.primaryGold),
+                    hintText: '0.00',
+                    hintStyle: TextStyle(color: AppTheme.grey),
+                    suffixText: asset.symbol,
+                    suffixStyle: TextStyle(color: AppTheme.primaryGold),
+                    enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: AppTheme.primaryGold),
+                    ),
+                    focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: AppTheme.primaryGold),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Available: ${walletProvider.getAssetBalance(asset.assetId)} ${asset.symbol}',
-                style: TextStyle(color: AppTheme.grey, fontSize: 12),
-              ),
-            ],
+                const SizedBox(height: 16),
+                TextField(
+                  controller: memoController,
+                  style: TextStyle(color: AppTheme.white),
+                  maxLength: 28, // Stellar memo limit
+                  decoration: InputDecoration(
+                    labelText: 'Memo (Required)',
+                    labelStyle: TextStyle(color: AppTheme.primaryGold),
+                    hintText: 'Transaction description',
+                    hintStyle: TextStyle(color: AppTheme.grey),
+                    enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: AppTheme.primaryGold),
+                    ),
+                    focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: AppTheme.primaryGold),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Available: ${walletProvider.getAssetBalance(asset.assetId)} ${asset.symbol}',
+                  style: TextStyle(color: AppTheme.grey, fontSize: 12),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -1368,10 +1744,14 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
               child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
             ),
             ElevatedButton(
-              onPressed: resolvedAddress.isEmpty || isResolvingTag
+              onPressed:
+                  resolvedAddress.isEmpty ||
+                      isResolvingTag ||
+                      memoController.text.trim().isEmpty
                   ? null
                   : () async {
                       final amountText = amountController.text.trim();
+                      final memoText = memoController.text.trim();
 
                       if (amountText.isEmpty) {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -1383,11 +1763,72 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                         return;
                       }
 
+                      if (memoText.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Memo is required for all transactions',
+                            ),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
                       final amount = double.tryParse(amountText);
                       if (amount == null || amount <= 0) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Please enter a valid amount'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      // Show password confirmation dialog
+                      final password = await _showTransactionPasswordDialog(
+                        asset.symbol,
+                        amount.toString(),
+                        recipientController.text,
+                      );
+                      if (password == null || password.isEmpty) {
+                        return; // User cancelled
+                      }
+
+                      // Verify password with Firebase Auth
+                      final authProvider = Provider.of<local_auth.AuthProvider>(
+                        context,
+                        listen: false,
+                      );
+                      final currentUser = authProvider.user;
+                      if (currentUser == null || currentUser.email == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Authentication required. Please log in again.',
+                            ),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      try {
+                        // Re-authenticate user with password
+                        final credential = EmailAuthProvider.credential(
+                          email: currentUser.email!,
+                          password: password,
+                        );
+                        await currentUser.reauthenticateWithCredential(
+                          credential,
+                        );
+                      } catch (e) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Invalid password. Please try again.',
+                            ),
                             backgroundColor: Colors.red,
                           ),
                         );
@@ -1409,6 +1850,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                           recipientAddress: resolvedAddress,
                           asset: asset,
                           amount: amount,
+                          memo: memoText,
                         );
 
                         if (result['success'] == true) {
@@ -1471,6 +1913,126 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     showDialog(
       context: context,
       builder: (context) => MpesaPurchaseDialog(walletProvider: walletProvider),
+    );
+  }
+
+  void _showTokenSellDialog() {
+    final walletProvider = Provider.of<EnhancedWalletProvider>(
+      context,
+      listen: false,
+    );
+    showDialog(
+      context: context,
+      builder: (context) => MpesaSellDialog(walletProvider: walletProvider),
+    );
+  }
+
+  Widget _buildPaymentMethodButton(
+    String label,
+    IconData icon,
+    VoidCallback onTap, {
+    bool fullWidth = false,
+  }) {
+    final button = GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.darkGrey.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: AppTheme.primaryGold.withOpacity(0.3),
+            width: 1,
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: AppTheme.primaryGold, size: 24),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.white,
+                fontWeight: FontWeight.w600,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    return fullWidth ? button : Expanded(child: button);
+  }
+
+  void _showMpesaPurchaseDialog(EnhancedWalletProvider walletProvider) {
+    showDialog(
+      context: context,
+      builder: (context) => MpesaPurchaseDialog(walletProvider: walletProvider),
+    );
+  }
+
+  void _showCardPaymentDialog(EnhancedWalletProvider walletProvider) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please sign in to continue'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Get user country (you might want to get this from user profile or location)
+    const defaultCountryCode =
+        'KE'; // Default to Kenya, you can make this dynamic
+
+    showDialog(
+      context: context,
+      builder: (context) => CardPaymentDialog(
+        akofaAmount: 1.0, // Default amount, user can change
+        userId: user.uid,
+        email: user.email ?? '',
+        phoneNumber: '', // You might want to get this from user profile
+        countryCode: defaultCountryCode,
+      ),
+    );
+  }
+
+  void _showBankTransferDialog(EnhancedWalletProvider walletProvider) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please sign in to continue'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Get user country
+    const defaultCountryCode =
+        'KE'; // Default to Kenya, you can make this dynamic
+
+    showDialog(
+      context: context,
+      builder: (context) => BankTransferDialog(
+        akofaAmount: 1.0, // Default amount, user can change
+        userId: user.uid,
+        email: user.email ?? '',
+        phoneNumber: '', // You might want to get this from user profile
+        countryCode: defaultCountryCode,
+      ),
+    );
+  }
+
+  void _showMoonPayPurchaseDialog(EnhancedWalletProvider walletProvider) {
+    showDialog(
+      context: context,
+      builder: (context) =>
+          MoonPayPurchaseDialog(walletProvider: walletProvider),
     );
   }
 
@@ -1851,53 +2413,109 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
             ],
           ),
           const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppTheme.black.withOpacity(0.3),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _userAkofaTag!,
-                    style: AppTheme.headingMedium.copyWith(
-                      color: AppTheme.primaryGold,
-                      fontFamily: 'monospace',
+          if (_userAkofaTag != null) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.black.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _userAkofaTag!,
+                      style: AppTheme.headingMedium.copyWith(
+                        color: AppTheme.primaryGold,
+                        fontFamily: 'monospace',
+                      ),
                     ),
                   ),
-                ),
-                IconButton(
-                  icon: Icon(Icons.copy, color: AppTheme.primaryGold, size: 20),
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: _userAkofaTag!));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Akofa tag copied to clipboard'),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  },
-                  tooltip: 'Copy Tag',
-                ),
-                IconButton(
-                  icon: Icon(
-                    Icons.share,
-                    color: AppTheme.primaryGold,
-                    size: 20,
+                  IconButton(
+                    icon: Icon(
+                      Icons.copy,
+                      color: AppTheme.primaryGold,
+                      size: 20,
+                    ),
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: _userAkofaTag!));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Akofa tag copied to clipboard'),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                    },
+                    tooltip: 'Copy Tag',
                   ),
-                  onPressed: () => _shareAkofaTag(),
-                  tooltip: 'Share Tag',
-                ),
-              ],
+                  IconButton(
+                    icon: Icon(
+                      Icons.share,
+                      color: AppTheme.primaryGold,
+                      size: 20,
+                    ),
+                    onPressed: () => _shareAkofaTag(),
+                    tooltip: 'Share Tag',
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Share this tag with others to receive payments easily',
-            style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
-          ),
+            const SizedBox(height: 8),
+            Text(
+              'Share this tag with others to receive payments easily',
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+            ),
+          ] else if (_isLoadingAkofaTag) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.black.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Center(
+                child: CircularProgressIndicator(color: AppTheme.primaryGold),
+              ),
+            ),
+          ] else ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.black.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Create your AKOFA tag to receive payments easily',
+                    style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _createAkofaTagFromOverview(
+                        Provider.of<EnhancedWalletProvider>(
+                          context,
+                          listen: false,
+                        ),
+                      ),
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Create AKOFA Tag'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryGold,
+                        foregroundColor: AppTheme.black,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1911,172 +2529,140 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     Share.share(shareText, subject: 'My Akofa Tag');
   }
 
-  Widget _buildCreateTagPrompt() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.darkGrey.withOpacity(0.3),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: AppTheme.primaryGold.withOpacity(0.5),
-          width: 1,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+  Future<String?> _showTransactionPasswordDialog(
+    String assetSymbol,
+    String amount,
+    String recipient,
+  ) async {
+    final controller = TextEditingController();
+    return await showDialog<String>(
+      context: context,
+      barrierDismissible: false, // Prevent dismissing by tapping outside
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppTheme.darkGrey,
+          title: Text(
+            'Confirm Transaction',
+            style: AppTheme.headingSmall.copyWith(color: AppTheme.primaryGold),
+            textAlign: TextAlign.center,
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.lightbulb_outline,
-                color: AppTheme.primaryGold,
-                size: 20,
-              ),
-              const SizedBox(width: 8),
               Text(
-                'Create Your Akofa Tag',
-                style: AppTheme.bodyLarge.copyWith(
-                  color: AppTheme.white,
-                  fontWeight: FontWeight.w600,
+                'Enter your password to sign and send $amount $assetSymbol to $recipient',
+                style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: controller,
+                obscureText: true,
+                decoration: InputDecoration(
+                  labelText: 'Password',
+                  labelStyle: TextStyle(color: AppTheme.grey),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: AppTheme.grey.withOpacity(0.3),
+                    ),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: AppTheme.grey.withOpacity(0.3),
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: AppTheme.primaryGold),
+                  ),
                 ),
+                style: const TextStyle(color: AppTheme.white),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Text(
-            'Get a simple, memorable tag that makes receiving payments easy. No more sharing long wallet addresses!',
-            style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppTheme.black.withOpacity(0.3),
-              borderRadius: BorderRadius.circular(8),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, null),
+              child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
             ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Example: john1234',
-                        style: AppTheme.bodyMedium.copyWith(
-                          color: AppTheme.primaryGold,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Easy to remember, easy to share',
-                        style: AppTheme.bodySmall.copyWith(
-                          color: AppTheme.grey,
-                        ),
-                      ),
-                    ],
-                  ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, controller.text),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryGold,
+                foregroundColor: AppTheme.black,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                ElevatedButton(
-                  onPressed: _createAkofaTag,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryGold,
-                    foregroundColor: AppTheme.black,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                  ),
-                  child: const Text(
-                    'Create Tag',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                  ),
-                ),
-              ],
+              ),
+              child: const Text('Confirm & Send'),
             ),
-          ),
-        ],
-      ),
+          ],
+        );
+      },
     );
   }
 
-  void _showCreateTagPrompt() {
+  void _showAkofaTagCreationPrompt(EnhancedWalletProvider walletProvider) {
     showDialog(
       context: context,
-      barrierDismissible: false, // User must respond
+      barrierDismissible: false, // Prevent dismissing without action
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.darkGrey,
-        title: Text(
-          'Create Your Akofa Tag',
-          style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
-          textAlign: TextAlign.center,
+        title: Row(
+          children: [
+            Icon(Icons.tag, color: AppTheme.primaryGold, size: 24),
+            const SizedBox(width: 12),
+            Text(
+              'Create Your AKOFA Tag',
+              style: AppTheme.headingMedium.copyWith(
+                color: AppTheme.primaryGold,
+              ),
+            ),
+          ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.tag, size: 48, color: AppTheme.primaryGold),
-            const SizedBox(height: 16),
             Text(
-              'An Akofa Tag makes it easy for others to send you payments. It\'s a simple, memorable identifier that replaces your complex wallet address.',
-              style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
-              textAlign: TextAlign.center,
+              'You have a secure wallet but no AKOFA tag. An AKOFA tag makes it easy for others to send you payments.',
+              style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
             ),
             const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppTheme.black.withOpacity(0.3),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: AppTheme.primaryGold.withOpacity(0.3),
-                ),
-              ),
-              child: Column(
-                children: [
-                  Text(
-                    'Example Tags:',
-                    style: AppTheme.bodySmall.copyWith(
-                      color: AppTheme.primaryGold,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'john1234 • sarah5678 • mike9876',
-                    style: AppTheme.bodySmall.copyWith(color: AppTheme.white),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
+            Text(
+              'Example: If your first name is "John", your tag could be "john1234"',
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Your tag will be automatically generated and linked to your wallet.',
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
             ),
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => Navigator.pop(context),
             child: Text('Skip for Now', style: TextStyle(color: AppTheme.grey)),
           ),
           ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _createAkofaTag();
-            },
+            onPressed: () => _createAkofaTag(walletProvider),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.primaryGold,
               foregroundColor: AppTheme.black,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
             ),
-            child: const Text(
-              'Create Tag',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
+            child: const Text('Create Tag'),
           ),
         ],
       ),
     );
   }
 
-  Future<void> _createAkofaTag() async {
+  Future<void> _createAkofaTag(EnhancedWalletProvider walletProvider) async {
+    Navigator.pop(context); // Close the prompt dialog
+
     final authProvider = Provider.of<local_auth.AuthProvider>(
       context,
       listen: false,
@@ -2104,7 +2690,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
             const CircularProgressIndicator(color: AppTheme.primaryGold),
             const SizedBox(height: 16),
             Text(
-              'Creating your Akofa Tag...',
+              'Creating your AKOFA tag...',
               style: TextStyle(color: AppTheme.white),
             ),
           ],
@@ -2113,51 +2699,33 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     );
 
     try {
-      // Get user's first name from auth provider or user data
-      String firstName = '';
+      // Get user's first name from Firebase Auth display name, with email fallback
+      final displayName = authProvider.user!.displayName ?? '';
+      final email = authProvider.user!.email ?? '';
 
-      // Try to get display name from Firebase Auth
-      if (authProvider.user?.displayName != null &&
-          authProvider.user!.displayName!.isNotEmpty) {
-        firstName = authProvider.user!.displayName!
-            .split(' ')
-            .first
-            .toLowerCase();
-      } else {
-        // Fallback: try to get from Firestore user document
-        try {
-          final userDoc = await FirebaseFirestore.instance
-              .collection('USER')
-              .doc(authProvider.user!.uid)
-              .get();
+      String firstName = displayName
+          .split(' ')
+          .firstWhere((name) => name.isNotEmpty, orElse: () => '');
 
-          if (userDoc.exists) {
-            final userData = userDoc.data();
-            if (userData?['displayName'] != null) {
-              firstName = userData!['displayName']
-                  .toString()
-                  .split(' ')
-                  .first
-                  .toLowerCase();
-            }
-          }
-        } catch (e) {
-          // Continue with empty firstName if we can't get it
-        }
+      // If no display name, use email prefix as fallback
+      if (firstName.isEmpty && email.isNotEmpty) {
+        firstName = email.split('@').first;
       }
 
-      // If we still don't have a first name, use a generic one
+      // Final fallback if nothing available
       if (firstName.isEmpty) {
         firstName = 'user';
       }
 
-      final result = await AkofaTagService.generateUniqueTag(
+      // Use ensureUserHasTag to create and link the tag
+      final result = await AkofaTagService.ensureUserHasTag(
         userId: authProvider.user!.uid,
         firstName: firstName,
+        email: email,
+        publicKey: walletProvider.publicKey,
       );
 
-      // Close loading dialog
-      Navigator.of(context).pop();
+      Navigator.pop(context); // Close loading dialog
 
       if (result['success']) {
         setState(() {
@@ -2166,28 +2734,105 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Akofa Tag created: ${result['tag']}'),
+            content: Text('AKOFA tag created: ${result['tag']}'),
             backgroundColor: Colors.green,
           ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to create tag: ${result['error']}'),
+            content: Text('Failed to create AKOFA tag: ${result['error']}'),
             backgroundColor: Colors.red,
           ),
         );
       }
     } catch (e) {
-      // Close loading dialog
-      Navigator.of(context).pop();
+      Navigator.pop(context); // Close loading dialog
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error creating tag: $e'),
+          content: Text('Error creating AKOFA tag: $e'),
           backgroundColor: Colors.red,
         ),
       );
+    }
+  }
+
+  Future<void> _createAkofaTagFromOverview(
+    EnhancedWalletProvider walletProvider,
+  ) async {
+    final authProvider = Provider.of<local_auth.AuthProvider>(
+      context,
+      listen: false,
+    );
+
+    if (authProvider.user?.uid == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('User not authenticated'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isLoadingAkofaTag = true);
+
+    try {
+      // Get user's first name from Firebase Auth display name, with email fallback
+      final displayName = authProvider.user!.displayName ?? '';
+      final email = authProvider.user!.email ?? '';
+
+      String firstName = displayName
+          .split(' ')
+          .firstWhere((name) => name.isNotEmpty, orElse: () => '');
+
+      // If no display name, use email prefix as fallback
+      if (firstName.isEmpty && email.isNotEmpty) {
+        firstName = email.split('@').first;
+      }
+
+      // Final fallback if nothing available
+      if (firstName.isEmpty) {
+        firstName = 'user';
+      }
+
+      // Use ensureUserHasTag to create and link the tag
+      final result = await AkofaTagService.ensureUserHasTag(
+        userId: authProvider.user!.uid,
+        firstName: firstName,
+        email: email,
+        publicKey: walletProvider.publicKey,
+      );
+
+      if (result['success']) {
+        setState(() {
+          _userAkofaTag = result['tag'];
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('AKOFA tag created: ${result['tag']}'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to create AKOFA tag: ${result['error']}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error creating AKOFA tag: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() => _isLoadingAkofaTag = false);
     }
   }
 

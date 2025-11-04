@@ -1,0 +1,8 @@
+/Users/apple/projects/AzixFlutter/soroban_contracts/raffle_contract/target/debug/deps/crate_git_revision-7914cb4674f807c0.d: /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crate-git-revision-0.0.6/src/lib.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crate-git-revision-0.0.6/src/test.rs
+
+/Users/apple/projects/AzixFlutter/soroban_contracts/raffle_contract/target/debug/deps/libcrate_git_revision-7914cb4674f807c0.rlib: /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crate-git-revision-0.0.6/src/lib.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crate-git-revision-0.0.6/src/test.rs
+
+/Users/apple/projects/AzixFlutter/soroban_contracts/raffle_contract/target/debug/deps/libcrate_git_revision-7914cb4674f807c0.rmeta: /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crate-git-revision-0.0.6/src/lib.rs /Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crate-git-revision-0.0.6/src/test.rs
+
+/Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crate-git-revision-0.0.6/src/lib.rs:
+/Users/apple/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crate-git-revision-0.0.6/src/test.rs:

@@ -42,14 +42,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       date: DateTime.now().subtract(const Duration(days: 180)),
     ),
     Achievement(
-      id: '2',
-      title: 'Mining Master',
-      description: 'Mined for 30 consecutive days',
-      icon: Icons.bolt,
-      color: Colors.orange,
-      date: DateTime.now().subtract(const Duration(days: 60)),
-    ),
-    Achievement(
       id: '3',
       title: 'Community Builder',
       description: 'Created a community with 100+ members',
@@ -698,7 +690,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     final user = authProvider.user;
     final referralCode = _userModel?.referralCode ?? '';
     final referralCount = _userModel?.referralCount ?? 0;
-    final miningRateBoosted = _userModel?.miningRateBoosted ?? false;
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 24.0),
       children: [
@@ -763,12 +754,8 @@ class _ProfileScreenState extends State<ProfileScreen>
               ),
               const SizedBox(height: 8),
               Text(
-                miningRateBoosted
-                    ? 'Mining Rate Boosted! 🎉'
-                    : 'Refer 6+ users to boost your mining rate.',
-                style: AppTheme.bodySmall.copyWith(
-                  color: miningRateBoosted ? Colors.green : AppTheme.grey,
-                ),
+                'Refer 6+ users to get rewards.',
+                style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
               ),
             ],
           ),
