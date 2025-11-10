@@ -3,7 +3,7 @@ import 'package:lottie/lottie.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../providers/stellar_provider.dart';
-import 'enhanced_wallet_screen.dart';
+import 'enhanced_wallet_screen.dart' as ews;
 
 class CreateWalletScreen extends StatefulWidget {
   const CreateWalletScreen({Key? key}) : super(key: key);
@@ -35,7 +35,9 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
     if (result) {
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (context) => const EnhancedWalletScreen()),
+        MaterialPageRoute(
+          builder: (context) => const ews.EnhancedWalletScreen(),
+        ),
         (route) => false,
       );
     }

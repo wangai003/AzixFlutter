@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../providers/auth_provider.dart';
 import '../providers/stellar_provider.dart';
+import '../providers/enhanced_wallet_provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/responsive_layout.dart';
 import '../widgets/send_dialog.dart';
@@ -227,6 +228,7 @@ class _WalletScreenState extends State<WalletScreen>
                     onReceive: () =>
                         _showReceiveSheet(context, stellarProvider.publicKey),
                     onBuy: () => _showBuyAkofaDialog(context),
+                    onBuyCrypto: () => _showBuyCryptoScreen(context),
                   ),
                 ],
               ),
@@ -395,10 +397,20 @@ class _WalletScreenState extends State<WalletScreen>
   }
 
   void _showBuyCryptoScreen(BuildContext context) {
-    Navigator.push(
+    // Get wallet address from provider
+    final walletProvider = Provider.of<EnhancedWalletProvider>(
       context,
-      MaterialPageRoute(builder: (_) => const BuyCryptoScreen()),
+      listen: false,
     );
+    if (walletProvider.publicKey != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              BuyCryptoScreen(walletAddress: walletProvider.publicKey!),
+        ),
+      );
+    }
   }
 
   void _showReceiveDialog(BuildContext context, String publicKey) async {

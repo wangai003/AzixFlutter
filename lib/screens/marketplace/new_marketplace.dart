@@ -372,6 +372,7 @@ class _WebViewPageState extends State<WebViewPage> {
                         try {
                           final tagResult = await AkofaTagService.resolveTag(
                             value.trim(),
+                            blockchain: 'stellar',
                           );
                           if (tagResult['success']) {
                             setState(() {

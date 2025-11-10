@@ -7,7 +7,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:stellar_flutter_sdk/stellar_flutter_sdk.dart' as stellar;
 import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
 import 'akofa_tag_service.dart';
+import 'biometric_service.dart';
 
 /// Secure Wallet Service implementing password-based AES-GCM encryption with optional biometric protection
 /// Similar to MetaMask, Phantom, and other popular wallet implementations
@@ -22,65 +24,7 @@ class SecureWalletService {
 
   /// Check if WebAuthn/biometric authentication is supported
   static Future<Map<String, dynamic>> checkBiometricSupport() async {
-    try {
-      // Check if we're running on web
-      bool isWeb = false;
-      try {
-        // This will work on web platforms
-        isWeb = true; // Assume web for now, we'll detect properly
-      } catch (e) {
-        isWeb = false;
-      }
-
-      if (isWeb) {
-        // Check WebAuthn support
-        _webauthnSupported = await _checkWebAuthnSupport();
-        _biometricsSupported = _webauthnSupported;
-      } else {
-        // Check platform biometric support
-        _biometricsSupported = await _checkPlatformBiometrics();
-        _webauthnSupported = false;
-      }
-
-      return {
-        'biometricsSupported': _biometricsSupported,
-        'webauthnSupported': _webauthnSupported,
-        'platform': isWeb ? 'web' : 'mobile',
-      };
-    } catch (e) {
-      return {
-        'biometricsSupported': false,
-        'webauthnSupported': false,
-        'error': e.toString(),
-      };
-    }
-  }
-
-  /// Check WebAuthn support on web platforms
-  static Future<bool> _checkWebAuthnSupport() async {
-    try {
-      // Check if WebAuthn is supported in the browser
-      if (identical(0, 0.0)) {
-        // This is a workaround for web platform detection
-        // In a real implementation, you would check:
-        // return navigator.credentials != null && window.PublicKeyCredential != null;
-        return true;
-      }
-      return false;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  /// Check platform biometric support
-  static Future<bool> _checkPlatformBiometrics() async {
-    try {
-      // This would use local_auth package for mobile platforms
-      // For now, return false as we focus on web implementation
-      return false;
-    } catch (e) {
-      return false;
-    }
+    return await BiometricService.checkBiometricSupport();
   }
 
   /// Setup biometric authentication for the wallet
@@ -89,44 +33,24 @@ class SecureWalletService {
     String password,
   ) async {
     try {
-      // Check if biometrics are supported
-      final supportCheck = await checkBiometricSupport();
-      if (!supportCheck['biometricsSupported']) {
-        return {
-          'success': false,
-          'error':
-              'Biometric authentication not supported on this device/browser',
-        };
+      final user = _auth.currentUser;
+      if (user == null) {
+        return {'success': false, 'error': 'User not authenticated'};
       }
 
-      // Create WebAuthn credential
-      final credentialResult = await _createWebAuthnCredential(
-        userId,
-        password,
+      return await BiometricService.setupBiometricAuthentication(
+        userId: userId,
+        userName: user.email ?? userId,
+        userDisplayName: user.displayName ?? user.email ?? userId,
+        rpName: 'Azix Flutter Wallet',
+        rpId: kIsWeb ? null : null, // Use default for web
       );
-
-      if (!credentialResult['success']) {
-        return {
-          'success': false,
-          'error':
-              'Failed to create WebAuthn credential: ${credentialResult['error']}',
-        };
-      }
-
-      return {
-        'success': true,
-        'data': {
-          'credentialId': credentialResult['credentialId'],
-          'publicKey': credentialResult['publicKey'],
-          'createdAt': FieldValue.serverTimestamp(),
-        },
-      };
     } catch (e) {
       return {'success': false, 'error': e.toString()};
     }
   }
 
-  /// Authenticate with biometrics (WebAuthn)
+  /// Authenticate with biometrics
   static Future<Map<String, dynamic>> _authenticateWithBiometrics(
     String userId,
   ) async {
@@ -149,28 +73,12 @@ class SecureWalletService {
         throw Exception('Biometric data not found for this wallet');
       }
 
-      final credentialId = biometricData['credentialId'] as String;
+      final credentialId = biometricData['credentialId'] as String?;
 
-      // In production, this would use WebAuthn API:
-      // const credential = await navigator.credentials.get({
-      //   publicKey: {
-      //     challenge: new Uint8Array(32),
-      //     allowCredentials: [{
-      //       type: 'public-key',
-      //       id: Uint8Array.from(atob(credentialId), c => c.charCodeAt(0))
-      //     }],
-      //     timeout: 60000,
-      //   }
-      // });
-
-      // For now, simulate successful biometric authentication
-      await Future.delayed(const Duration(seconds: 1));
-
-      return {
-        'success': true,
-        'message': 'Biometric authentication successful',
-        'credentialId': credentialId,
-      };
+      return await BiometricService.authenticateWithBiometrics(
+        localizedReason: 'Authenticate to access your secure wallet',
+        credentialId: credentialId,
+      );
     } catch (e) {
       return {'success': false, 'error': e.toString()};
     }
@@ -952,6 +860,7 @@ class SecureWalletService {
                 userId: userId,
                 tag: tagToLink,
                 publicKey: publicKey,
+                blockchain: 'stellar',
               );
 
               if (linkResult['success']) {
@@ -1006,198 +915,6 @@ class SecureWalletService {
         'message': 'Failed to create secure wallet',
       };
     }
-  }
-
-  /// Create WebAuthn credential for biometric protection
-  static Future<Map<String, dynamic>> _createWebAuthnCredential(
-    String userId,
-    String password,
-  ) async {
-    try {
-      // Check if we're on web platform
-      if (!identical(0, 0.0)) {
-        return {
-          'success': false,
-          'error': 'WebAuthn is only supported on web platforms',
-        };
-      }
-
-      // Generate cryptographically secure challenge
-      final challenge = Uint8List(32);
-      for (int i = 0; i < 32; i++) {
-        challenge[i] = Random.secure().nextInt(256);
-      }
-
-      // Create user handle (unique identifier for the user)
-      final userHandle = Uint8List(16);
-      for (int i = 0; i < 16; i++) {
-        userHandle[i] = Random.secure().nextInt(256);
-      }
-
-      // Use real WebAuthn API for web platforms
-      try {
-        // Access WebAuthn API through JavaScript interop
-        final credential = await _callWebAuthnCreateCredential(
-          challenge: challenge,
-          userId: userId,
-          userHandle: userHandle,
-        );
-
-        return {
-          'success': true,
-          'credentialId': credential['credentialId'],
-          'publicKey': credential['publicKey'],
-          'challenge': base64Encode(challenge),
-          'userHandle': base64Encode(userHandle),
-          'authenticatorData': credential['authenticatorData'],
-          'signature': credential['signature'],
-          'createdAt': FieldValue.serverTimestamp(),
-          'credentialType': 'WebAuthn',
-          'algorithm': credential['algorithm'] ?? 'ES256',
-        };
-      } catch (webauthnError) {
-        return {
-          'success': false,
-          'error': 'WebAuthn credential creation failed: $webauthnError',
-        };
-      }
-    } catch (e) {
-      return {'success': false, 'error': e.toString()};
-    }
-  }
-
-  /// Create authenticator data for WebAuthn
-  static Uint8List _createAuthenticatorData({
-    required Uint8List rpIdHash,
-    required Uint8List userHandle,
-    required Uint8List credentialId,
-  }) {
-    final data = BytesBuilder();
-
-    // RP ID Hash (32 bytes)
-    data.add(rpIdHash);
-
-    // Flags (1 byte) - user present (0x01) + user verified (0x04) = 0x05
-    data.addByte(0x05);
-
-    // Sign count (4 bytes) - set to 0 for new credentials
-    data.addByte(0);
-    data.addByte(0);
-    data.addByte(0);
-    data.addByte(0);
-
-    // AAGUID (16 bytes) - set to zeros for simplicity
-    data.add(Uint8List(16));
-
-    // Credential ID length (2 bytes)
-    final credIdLen = credentialId.length;
-    data.addByte(credIdLen >> 8);
-    data.addByte(credIdLen & 0xFF);
-
-    // Credential ID
-    data.add(credentialId);
-
-    // Credential public key (CBOR encoded, simplified)
-    // In a real implementation, this would be proper CBOR
-    final publicKeyCbor = _encodeCborPublicKey();
-    data.add(publicKeyCbor);
-
-    return data.toBytes();
-  }
-
-  /// Hash RP ID for WebAuthn
-  static Uint8List _hashRpId(String rpId) {
-    return crypto.sha256.convert(utf8.encode(rpId)).bytes as Uint8List;
-  }
-
-  /// Hash client data for WebAuthn
-  static Uint8List _hashClientData(Uint8List challenge) {
-    final clientData = {
-      'type': 'webauthn.create',
-      'challenge': base64Encode(challenge),
-      'origin': 'https://localhost', // In production: window.location.origin
-    };
-
-    final clientDataJson = json.encode(clientData);
-    return crypto.sha256.convert(utf8.encode(clientDataJson)).bytes
-        as Uint8List;
-  }
-
-  /// Create attestation signature (simplified)
-  static Uint8List _createAttestationSignature({
-    required Uint8List authenticatorData,
-    required Uint8List clientDataHash,
-  }) {
-    // Combine authenticator data and client data hash
-    final signatureBase = Uint8List.fromList([
-      ...authenticatorData,
-      ...clientDataHash,
-    ]);
-
-    // In a real implementation, this would be signed by the authenticator's private key
-    // For simulation, we'll create a deterministic signature
-    return crypto.sha256.convert(signatureBase).bytes as Uint8List;
-  }
-
-  /// Encode public key in CBOR format (simplified)
-  static Uint8List _encodeCborPublicKey() {
-    // Simplified CBOR encoding for ECDSA public key
-    // In a real implementation, this would use a proper CBOR library
-    final cbor = BytesBuilder();
-
-    // CBOR map header (major type 5, length 5)
-    cbor.addByte(0xA5);
-
-    // Key 1: kty (key type) - 2 (EC2)
-    cbor.addByte(0x01); // unsigned int 1
-    cbor.addByte(0x02); // unsigned int 2
-
-    // Key 3: alg (algorithm) - -7 (ES256)
-    cbor.addByte(0x03); // unsigned int 3
-    cbor.addByte(0x26); // negative int 6 (-7 = 0x26 in CBOR)
-
-    // Key -1: crv (curve) - 1 (P-256)
-    cbor.addByte(0x20); // negative int 1
-    cbor.addByte(0x01); // unsigned int 1
-
-    // Key -2: x coordinate (32 bytes)
-    cbor.addByte(0x21); // negative int 2
-    cbor.addByte(0x58); // byte string of length 32
-    cbor.addByte(0x20); // length
-    cbor.add(Uint8List(32)); // placeholder x coordinate
-
-    // Key -3: y coordinate (32 bytes)
-    cbor.addByte(0x22); // negative int 3
-    cbor.addByte(0x58); // byte string of length 32
-    cbor.addByte(0x20); // length
-    cbor.add(Uint8List(32)); // placeholder y coordinate
-
-    return cbor.toBytes();
-  }
-
-  /// Call WebAuthn create credential API (web platform only)
-  static Future<Map<String, dynamic>> _callWebAuthnCreateCredential({
-    required Uint8List challenge,
-    required String userId,
-    required Uint8List userHandle,
-  }) async {
-    // This would use JavaScript interop to call the WebAuthn API
-    // For now, throw an error indicating this needs to be implemented
-    throw Exception(
-      'WebAuthn create credential not implemented. Requires JavaScript interop for web platform.',
-    );
-  }
-
-  /// Call WebAuthn get credential API (web platform only)
-  static Future<Map<String, dynamic>> _callWebAuthnGetCredential({
-    required Uint8List challenge,
-    required String credentialId,
-  }) async {
-    // This would use JavaScript interop to call the WebAuthn API
-    // For now, throw an error indicating this needs to be implemented
-    throw Exception(
-      'WebAuthn get credential not implemented. Requires JavaScript interop for web platform.',
-    );
   }
 
   /// Authenticate with password (and optionally biometrics) and decrypt wallet
@@ -1312,76 +1029,6 @@ class SecureWalletService {
         'error': e.toString(),
         'message': 'Failed to authenticate and decrypt wallet',
       };
-    }
-  }
-
-  /// Authenticate with WebAuthn
-  static Future<Map<String, dynamic>> _authenticateWebAuthn(
-    String credentialId,
-    String userId,
-  ) async {
-    try {
-      // Check if we're on web platform
-      if (!identical(0, 0.0)) {
-        return {
-          'success': false,
-          'error': 'WebAuthn is only supported on web platforms',
-        };
-      }
-
-      // Get stored credential data
-      final walletDoc = await _firestore
-          .collection('secure_wallets')
-          .doc(userId)
-          .get();
-
-      if (!walletDoc.exists) {
-        throw Exception('Wallet data not found');
-      }
-
-      final walletData = walletDoc.data()!;
-      final biometricData =
-          walletData['biometricData'] as Map<String, dynamic>?;
-
-      if (biometricData == null) {
-        throw Exception('Biometric data not found for this wallet');
-      }
-
-      final storedCredentialId = biometricData['credentialId'] as String;
-      if (storedCredentialId != credentialId) {
-        throw Exception('Credential ID mismatch');
-      }
-
-      // Generate new challenge for authentication
-      final challenge = Uint8List(32);
-      for (int i = 0; i < 32; i++) {
-        challenge[i] = Random.secure().nextInt(256);
-      }
-
-      // Use real WebAuthn API for authentication
-      try {
-        final authResult = await _callWebAuthnGetCredential(
-          challenge: challenge,
-          credentialId: credentialId,
-        );
-
-        return {
-          'success': true,
-          'message': 'Biometric authentication successful',
-          'credentialId': credentialId,
-          'challenge': base64Encode(challenge),
-          'authenticatorData': authResult['authenticatorData'],
-          'signature': authResult['signature'],
-          'userHandle': authResult['userHandle'],
-        };
-      } catch (webauthnError) {
-        return {
-          'success': false,
-          'error': 'WebAuthn authentication failed: $webauthnError',
-        };
-      }
-    } catch (e) {
-      return {'success': false, 'error': e.toString()};
     }
   }
 
@@ -1638,21 +1285,104 @@ class SecureWalletService {
     required String assetCode,
     required String memo, // Memo is now required
   }) async {
+    return await _signTransaction(
+      userId: userId,
+      password: password,
+      recipientAddress: recipientAddress,
+      amount: amount,
+      assetCode: assetCode,
+      memo: memo,
+      useBiometrics: false,
+    );
+  }
+
+  /// Sign transaction with biometric authentication
+  static Future<Map<String, dynamic>> signTransactionWithBiometrics({
+    required String userId,
+    required String recipientAddress,
+    required double amount,
+    required String assetCode,
+    required String memo, // Memo is now required
+  }) async {
+    return await _signTransaction(
+      userId: userId,
+      password: '', // Not needed for biometric auth
+      recipientAddress: recipientAddress,
+      amount: amount,
+      assetCode: assetCode,
+      memo: memo,
+      useBiometrics: true,
+    );
+  }
+
+  /// Unified transaction signing method with biometric or password authentication
+  static Future<Map<String, dynamic>> _signTransaction({
+    required String userId,
+    required String password,
+    required String recipientAddress,
+    required double amount,
+    required String assetCode,
+    required String memo,
+    required bool useBiometrics,
+  }) async {
     try {
-      // Authenticate and decrypt wallet
-      final authResult = await authenticateAndDecryptWallet(userId, password);
+      String decryptedSecretKey;
+      String walletPublicKey;
 
-      if (!authResult['success']) {
-        throw Exception('Authentication failed: ${authResult['error']}');
+      if (useBiometrics) {
+        // Biometric authentication - check if biometrics are enabled
+        final walletDoc = await _firestore
+            .collection('secure_wallets')
+            .doc(userId)
+            .get();
+
+        if (!walletDoc.exists) {
+          throw Exception(
+            'Secure wallet not found. Please create a secure wallet first.',
+          );
+        }
+
+        final walletData = walletDoc.data()!;
+        final biometricsEnabled =
+            walletData['biometricsEnabled'] as bool? ?? false;
+
+        if (!biometricsEnabled) {
+          throw Exception(
+            'Biometric authentication not enabled for this wallet',
+          );
+        }
+
+        // Perform biometric authentication
+        final biometricResult = await _authenticateWithBiometrics(userId);
+        if (!biometricResult['success']) {
+          throw Exception(
+            'Biometric authentication failed: ${biometricResult['error']}',
+          );
+        }
+
+        // Decrypt wallet using password (biometrics just verify identity)
+        final authResult = await authenticateAndDecryptWallet(userId, password);
+        if (!authResult['success']) {
+          throw Exception('Wallet decryption failed: ${authResult['error']}');
+        }
+
+        decryptedSecretKey = authResult['secretKey'] as String;
+        walletPublicKey = authResult['publicKey'] as String;
+      } else {
+        // Password authentication
+        final authResult = await authenticateAndDecryptWallet(userId, password);
+        if (!authResult['success']) {
+          throw Exception('Authentication failed: ${authResult['error']}');
+        }
+
+        decryptedSecretKey = authResult['secretKey'] as String;
+        walletPublicKey = authResult['publicKey'] as String;
       }
-
-      final decryptedSecretKey = authResult['secretKey'] as String;
-      final walletPublicKey = authResult['publicKey'] as String;
 
       // Validate transaction limits and security checks
       final limitValidation = await _validateTransactionLimits(
         userId: userId,
-        publicKey: authResult['publicKey'] as String,
+        publicKey: walletPublicKey,
         amount: amount,
         assetCode: assetCode,
       );
@@ -1744,29 +1474,6 @@ class SecureWalletService {
     }
   }
 
-  /// Sign transaction with biometric authentication (legacy compatibility method)
-  static Future<Map<String, dynamic>> signTransactionWithBiometrics({
-    required String userId,
-    required String recipientAddress,
-    required double amount,
-    required String assetCode,
-    required String memo, // Memo is now required
-    String? password, // Now required for password-based auth
-  }) async {
-    if (password == null || password.isEmpty) {
-      throw Exception('Password is required for transaction signing');
-    }
-
-    return await signTransactionWithPassword(
-      userId: userId,
-      password: password,
-      recipientAddress: recipientAddress,
-      amount: amount,
-      assetCode: assetCode,
-      memo: memo,
-    );
-  }
-
   /// Record transaction for limits tracking
   static Future<void> _recordTransaction({
     required String userId,
@@ -1805,6 +1512,7 @@ class SecureWalletService {
           // Try to resolve recipient address to tag
           final resolveResult = await AkofaTagService.resolveTag(
             recipientAddress,
+            blockchain: 'stellar',
           );
           if (resolveResult['success']) {
             resolvedRecipientTag = resolveResult['tag'];

@@ -7,6 +7,7 @@ class AkofaTagPrompt extends StatefulWidget {
   final String userId;
   final String? firstName;
   final String? publicKey;
+  final String? blockchain; // 'stellar' or 'polygon'
   final VoidCallback? onTagCreated;
 
   const AkofaTagPrompt({
@@ -14,6 +15,8 @@ class AkofaTagPrompt extends StatefulWidget {
     required this.userId,
     this.firstName,
     this.publicKey,
+    this.blockchain =
+        'stellar', // Default to stellar for backward compatibility
     this.onTagCreated,
   });
 
@@ -274,6 +277,8 @@ Future<String?> showAkofaTagPrompt({
   required String userId,
   String? firstName,
   String? publicKey,
+  String? blockchain =
+      'stellar', // Default to stellar for backward compatibility
   VoidCallback? onTagCreated,
 }) async {
   return showDialog<String>(
@@ -283,6 +288,7 @@ Future<String?> showAkofaTagPrompt({
       userId: userId,
       firstName: firstName,
       publicKey: publicKey,
+      blockchain: blockchain,
       onTagCreated: onTagCreated,
     ),
   );

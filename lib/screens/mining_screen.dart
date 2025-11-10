@@ -26,6 +26,7 @@ class _MiningScreenState extends State<MiningScreen> {
   String? _currentSessionId;
   List<Map<String, dynamic>> _unpaidSessions = [];
   bool _isLoadingUnpaidSessions = false;
+  Set<String> _claimingSessionIds = {}; // Track which sessions are being claimed
 
   @override
   void initState() {
@@ -83,6 +84,7 @@ class _MiningScreenState extends State<MiningScreen> {
           userId: user.uid,
           tag: tagCheck['tag'],
           publicKey: _userWalletAddress!,
+          blockchain: 'stellar',
         );
 
         if (linkResult['success']) {
@@ -129,36 +131,117 @@ class _MiningScreenState extends State<MiningScreen> {
   }
 
   Future<void> _claimSession(String sessionId) async {
+    // Prevent double-clicking
+    if (_claimingSessionIds.contains(sessionId)) {
+      return;
+    }
+
+    setState(() {
+      _claimingSessionIds.add(sessionId);
+    });
+
     try {
+      // Show loading message
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Processing claim... Please wait'),
+          duration: Duration(seconds: 2),
+          backgroundColor: Colors.blue,
+        ),
+      );
+
       final result = await _legacyMiningService.claimSpecificUnpaidSession(
         sessionId,
       );
 
       if (result['success']) {
+        final txHash = result['txHash'] as String?;
+        double? amount;
+        try {
+          final session = _unpaidSessions.firstWhere(
+            (s) => s['id'] == sessionId,
+            orElse: () => <String, dynamic>{},
+          );
+          amount = session['minedTokens'] as double?;
+        } catch (e) {
+          print("⚠️ Could not find session in list: $e");
+        }
+        
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Successfully claimed mining rewards!'),
+          SnackBar(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '✅ Successfully claimed mining rewards!',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                if (amount != null) ...[
+                  const SizedBox(height: 4),
+                  Text('Amount: ${amount.toStringAsFixed(6)} AKOFA'),
+                ],
+                if (txHash != null && txHash.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Transaction: ${txHash.length > 8 ? txHash.substring(0, 8) + "..." : txHash}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
             backgroundColor: Colors.green,
+            duration: const Duration(seconds: 5),
           ),
         );
+        
         // Refresh the unpaid sessions list
         await _loadUnpaidSessions();
       } else {
+        final errorMessage = result['message'] ?? 'Unknown error occurred';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to claim rewards: ${result['message']}'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '❌ Failed to claim rewards',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Text(errorMessage),
+              ],
+            ),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
           ),
         );
       }
     } catch (e) {
-      print("Error claiming session: $e");
+      print("❌ Error claiming session: $e");
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Error claiming rewards'),
+        SnackBar(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '❌ Error claiming rewards',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              Text(e.toString()),
+            ],
+          ),
           backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
         ),
       );
+    } finally {
+      setState(() {
+        _claimingSessionIds.remove(sessionId);
+      });
     }
   }
 
@@ -809,12 +892,29 @@ class _MiningScreenState extends State<MiningScreen> {
                                           SizedBox(
                                             width: double.infinity,
                                             child: ElevatedButton(
-                                              onPressed: () =>
-                                                  _claimSession(session['id']),
+                                              onPressed: _claimingSessionIds
+                                                      .contains(session['id'])
+                                                  ? null
+                                                  : () => _claimSession(
+                                                        session['id'],
+                                                      ),
                                               style: ElevatedButton.styleFrom(
                                                 backgroundColor:
-                                                    AppTheme.primaryGold,
-                                                foregroundColor: AppTheme.black,
+                                                    _claimingSessionIds.contains(
+                                                            session['id'])
+                                                        ? AppTheme.grey
+                                                            .withOpacity(0.3)
+                                                        : AppTheme.primaryGold,
+                                                foregroundColor:
+                                                    _claimingSessionIds.contains(
+                                                            session['id'])
+                                                        ? AppTheme.grey
+                                                        : AppTheme.black,
+                                                disabledBackgroundColor:
+                                                    AppTheme.grey
+                                                        .withOpacity(0.3),
+                                                disabledForegroundColor:
+                                                    AppTheme.grey,
                                                 textStyle:
                                                     AppTheme.buttonMedium,
                                                 shape: RoundedRectangleBorder(
@@ -827,9 +927,33 @@ class _MiningScreenState extends State<MiningScreen> {
                                                       vertical: 12,
                                                     ),
                                               ),
-                                              child: const Text(
-                                                'Claim Rewards',
-                                              ),
+                                              child: _claimingSessionIds
+                                                      .contains(session['id'])
+                                                  ? const Row(
+                                                      mainAxisAlignment:
+                                                          MainAxisAlignment
+                                                              .center,
+                                                      children: [
+                                                        SizedBox(
+                                                          width: 16,
+                                                          height: 16,
+                                                          child:
+                                                              CircularProgressIndicator(
+                                                            strokeWidth: 2,
+                                                            valueColor:
+                                                                AlwaysStoppedAnimation<
+                                                                        Color>(
+                                                                    Colors
+                                                                        .white),
+                                                          ),
+                                                        ),
+                                                        SizedBox(width: 8),
+                                                        Text('Claiming...'),
+                                                      ],
+                                                    )
+                                                  : const Text(
+                                                      'Claim Rewards',
+                                                    ),
                                             ),
                                           ),
                                         ],

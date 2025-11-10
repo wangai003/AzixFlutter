@@ -26,7 +26,10 @@ class _TagResolverScreenState extends State<TagResolverScreen> {
         options: DefaultFirebaseOptions.currentPlatform,
       );
 
-      final result = await AkofaTagService.resolveTag('david9736');
+      final result = await AkofaTagService.resolveTag(
+        'david9736',
+        blockchain: 'stellar',
+      );
 
       if (result['success'] == true) {
         setState(() {

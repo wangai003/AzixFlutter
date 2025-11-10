@@ -4,9 +4,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 /// Service for managing Akofa tags - simplified wallet identifiers
 /// Tags are created from user's first name + 4 random digits (e.g., "david2356")
+/// Supports multiple blockchain addresses per tag
 class AkofaTagService {
   static final FirebaseAuth _auth = FirebaseAuth.instance;
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  /// Supported blockchains
+  static const List<String> supportedBlockchains = ['stellar', 'polygon'];
 
   /// Generate a unique Akofa tag for a user
   static Future<Map<String, dynamic>> generateUniqueTag({
@@ -51,11 +55,11 @@ class AkofaTagService {
       final tagData = {
         'userId': userId,
         'tag': tag,
-        'publicKey': null, // Will be set when wallet is created
+        'addresses': <String, dynamic>{}, // Multi-blockchain addresses
         'firstName': cleanFirstName,
         'createdAt': FieldValue.serverTimestamp(),
         'isActive': true,
-        'version': '1.0',
+        'version': '2.0',
       };
 
       // Store in akofaTag collection (as specified)
@@ -78,8 +82,25 @@ class AkofaTagService {
     required String userId,
     required String tag,
     required String publicKey,
+    required String blockchain, // 'stellar' or 'polygon'
   }) async {
     try {
+      // Validate blockchain
+      if (!supportedBlockchains.contains(blockchain)) {
+        return {
+          'success': false,
+          'error': 'Unsupported blockchain: $blockchain',
+        };
+      }
+
+      // Validate address format
+      if (!isValidAddress(publicKey, blockchain)) {
+        return {
+          'success': false,
+          'error': 'Invalid $blockchain address format',
+        };
+      }
+
       final tagDoc = await _firestore.collection('akofaTag').doc(tag).get();
 
       if (!tagDoc.exists) {
@@ -91,9 +112,16 @@ class AkofaTagService {
         return {'success': false, 'error': 'Tag does not belong to this user'};
       }
 
-      // Update the tag with wallet address in akofaTag collection
+      // Update the tag with blockchain-specific address
+      final addresses = Map<String, dynamic>.from(tagData['addresses'] ?? {});
+      addresses[blockchain] = {
+        'address': publicKey,
+        'linkedAt': FieldValue.serverTimestamp(),
+        'isActive': true,
+      };
+
       await _firestore.collection('akofaTag').doc(tag).update({
-        'publicKey': publicKey,
+        'addresses': addresses,
         'linkedAt': FieldValue.serverTimestamp(),
         'isActive': true,
       });
@@ -123,7 +151,10 @@ class AkofaTagService {
   }
 
   /// Resolve an Akofa tag to a wallet address (optimized for instant resolution)
-  static Future<Map<String, dynamic>> resolveTag(String tag) async {
+  static Future<Map<String, dynamic>> resolveTag(
+    String tag, {
+    required String blockchain,
+  }) async {
     try {
       // Clean and validate input tag
       final cleanTag = tag.toLowerCase().trim();
@@ -146,25 +177,44 @@ class AkofaTagService {
         return {'success': false, 'error': 'Tag is inactive'};
       }
 
-      final publicKey = tagData['publicKey'];
-      if (publicKey == null || publicKey.isEmpty) {
-        return {'success': false, 'error': 'Tag is not linked to a wallet'};
+      // Get addresses map (support both old and new format)
+      final addresses = tagData['addresses'] as Map<String, dynamic>? ?? {};
+
+      // For backward compatibility, check old format
+      if (addresses.isEmpty && tagData['publicKey'] != null) {
+        final oldAddress = tagData['publicKey'];
+        if (isValidAddress(oldAddress, 'stellar')) {
+          addresses['stellar'] = {
+            'address': oldAddress,
+            'linkedAt': tagData['linkedAt'] ?? FieldValue.serverTimestamp(),
+            'isActive': true,
+          };
+        }
       }
 
-      // Verify the public key format (basic Stellar address validation)
-      if (!publicKey.startsWith('G') || publicKey.length != 56) {
+      final blockchainData = addresses[blockchain];
+      if (blockchainData == null || !blockchainData['isActive']) {
         return {
           'success': false,
-          'error': 'Invalid wallet address linked to tag',
+          'error': 'No $blockchain address linked to this tag',
+        };
+      }
+
+      final address = blockchainData['address'];
+      if (address == null || address.isEmpty) {
+        return {
+          'success': false,
+          'error': 'Tag is not linked to a $blockchain wallet',
         };
       }
 
       return {
         'success': true,
-        'publicKey': publicKey,
+        'address': address,
         'userId': tagData['userId'],
         'firstName': tagData['firstName'],
         'tag': cleanTag,
+        'blockchain': blockchain,
         'resolvedAt': FieldValue.serverTimestamp(),
       };
     } catch (e) {
@@ -237,10 +287,17 @@ class AkofaTagService {
       }
 
       final tagData = querySnapshot.docs.first.data();
+      final addresses = tagData['addresses'] as Map<String, dynamic>? ?? {};
+
+      // For backward compatibility
+      final stellarAddress =
+          addresses['stellar']?['address'] ?? tagData['publicKey'];
+
       return {
         'success': true,
-        'tag': tagData['tag'],
-        'publicKey': tagData['publicKey'],
+        'tag': tagData['tag'] ?? querySnapshot.docs.first.id,
+        'addresses': addresses,
+        'stellarAddress': stellarAddress,
         'firstName': tagData['firstName'],
         'createdAt': tagData['createdAt'],
       };
@@ -254,6 +311,20 @@ class AkofaTagService {
     // Tag should be lowercase letters followed by exactly 4 digits
     final regex = RegExp(r'^[a-z]+\d{4}$');
     return regex.hasMatch(tag) && tag.length >= 5 && tag.length <= 20;
+  }
+
+  /// Validate blockchain address format
+  static bool isValidAddress(String address, String blockchain) {
+    switch (blockchain) {
+      case 'stellar':
+        return address.startsWith('G') && address.length == 56;
+      case 'polygon':
+        return address.startsWith('0x') &&
+            address.length == 42 &&
+            RegExp(r'^0x[a-fA-F0-9]{40}$').hasMatch(address);
+      default:
+        return false;
+    }
   }
 
   /// Clean and normalize name for tag generation
@@ -303,8 +374,19 @@ class AkofaTagService {
       final tagData = querySnapshot.docs.first.data();
       final tag = querySnapshot.docs.first.id;
       final hasTag = true;
-      final isLinked =
+
+      // Check if any blockchain address is linked
+      final addresses = tagData['addresses'] as Map<String, dynamic>? ?? {};
+      final hasNewFormatLinks = addresses.values.any(
+        (addr) =>
+            addr is Map && addr['isActive'] == true && addr['address'] != null,
+      );
+
+      // For backward compatibility
+      final hasOldFormatLink =
           tagData['publicKey'] != null && tagData['publicKey'].isNotEmpty;
+
+      final isLinked = hasNewFormatLinks || hasOldFormatLink;
 
       return {'hasTag': hasTag, 'isLinked': isLinked, 'tag': tag};
     } catch (e) {
@@ -330,11 +412,12 @@ class AkofaTagService {
       if (check['hasTag']) {
         // Already has tag
         if (publicKey != null && !check['isLinked']) {
-          // Link it
+          // Link it (default to stellar for backward compatibility)
           final linkResult = await linkTagToWallet(
             userId: userId,
             tag: check['tag'],
             publicKey: publicKey,
+            blockchain: 'stellar', // Default blockchain
           );
 
           if (linkResult['success']) {
@@ -372,11 +455,12 @@ class AkofaTagService {
         final tag = generateResult['tag'];
 
         if (publicKey != null) {
-          // Link the new tag
+          // Link the new tag (default to stellar for backward compatibility)
           final linkResult = await linkTagToWallet(
             userId: userId,
             tag: tag,
             publicKey: publicKey,
+            blockchain: 'stellar', // Default blockchain
           );
 
           if (!linkResult['success']) {

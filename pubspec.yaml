@@ -86,7 +86,7 @@ dependencies:
   url_launcher: ^6.3.1
   device_info_plus: ^11.5.0
   file_picker: ^10.2.0
-  #web_auth: ^0.2.0
+  js: ^0.6.7
   flutter_swiper_null_safety: ^1.0.2
   webview_flutter: ^4.7.0
   webview_flutter_web: ^0.2.2

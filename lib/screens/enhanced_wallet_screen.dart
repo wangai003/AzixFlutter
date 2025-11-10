@@ -16,11 +16,13 @@ import '../widgets/card_payment_dialog.dart';
 import '../widgets/bank_transfer_dialog.dart';
 import '../widgets/moonpay_purchase_dialog.dart';
 import '../widgets/moonpay_button.dart';
+import 'buy_crypto_screen.dart';
 import '../services/secure_wallet_service.dart';
 import '../services/akofa_tag_service.dart';
 import '../providers/auth_provider.dart' as local_auth;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'secure_wallet_creation_screen.dart';
+import '../models/transaction.dart' as app_transaction;
 
 class EnhancedWalletScreen extends StatefulWidget {
   const EnhancedWalletScreen({super.key});
@@ -80,8 +82,8 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
           ),
           IconButton(
             icon: const Icon(Icons.qr_code, color: AppTheme.primaryGold),
-            onPressed: _showReceiveQR,
-            tooltip: 'Receive Address',
+            onPressed: _showReceiveOptions,
+            tooltip: 'Receive Assets',
           ),
           Consumer<EnhancedWalletProvider>(
             builder: (context, walletProvider, child) {
@@ -467,9 +469,49 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
 
         // Transaction List
         Expanded(
-          child: EnhancedTransactionList(
-            transactions: walletProvider.transactions,
-            onRefresh: _refreshWallet,
+          child: FutureBuilder<List<app_transaction.Transaction>>(
+            future: walletProvider.getCombinedBlockchainTransactionHistory(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(color: AppTheme.primaryGold),
+                );
+              }
+
+              if (snapshot.hasError) {
+                return Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.error_outline, size: 48, color: AppTheme.grey),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Failed to load transactions',
+                        style: AppTheme.bodyMedium.copyWith(
+                          color: AppTheme.grey,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ElevatedButton(
+                        onPressed: _refreshWallet,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primaryGold,
+                          foregroundColor: AppTheme.black,
+                        ),
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              final allTransactions =
+                  snapshot.data ?? walletProvider.transactions;
+              return EnhancedTransactionList(
+                transactions: allTransactions,
+                onRefresh: _refreshWallet,
+              );
+            },
           ),
         ),
       ],
@@ -589,7 +631,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
               child: _buildActionButton(
                 'Receive',
                 Icons.qr_code,
-                _showReceiveQR,
+                _showReceiveOptions,
               ),
             ),
           ],
@@ -601,7 +643,14 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
               child: _buildActionButton(
                 'Buy Crypto',
                 Icons.account_balance_wallet,
-                () => _showMoonPayPurchaseDialog(walletProvider),
+                () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => BuyCryptoScreen(
+                      walletAddress: walletProvider.publicKey!,
+                    ),
+                  ),
+                ),
               ),
             ),
             const SizedBox(width: 12),
@@ -954,6 +1003,57 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                     Colors.teal,
                   ),
                 ),
+
+              // Polygon Network Assets (if available) - no network distinction
+              if (walletProvider.hasPolygonWallet)
+                ...walletProvider.polygonTokens.entries
+                    .where((entry) => (entry.value['balance'] as double) > 0)
+                    .map((entry) {
+                      final token = entry.value;
+                      final symbol = token['symbol'] as String;
+                      final name = token['name'] as String;
+                      final balance = token['formattedBalance'] as String;
+
+                      // Choose appropriate icon based on token
+                      IconData icon;
+                      Color color;
+                      switch (symbol) {
+                        case 'MATIC':
+                          icon = Icons.hexagon;
+                          color = Colors.purple;
+                          break;
+                        case 'USDT':
+                          icon = Icons.currency_exchange;
+                          color = Colors.green;
+                          break;
+                        case 'USDC':
+                          icon = Icons.attach_money;
+                          color = Colors.blue;
+                          break;
+                        case 'DAI':
+                          icon = Icons.account_balance_wallet;
+                          color = Colors.orange;
+                          break;
+                        case 'WETH':
+                          icon = Icons.currency_bitcoin;
+                          color = Colors.teal;
+                          break;
+                        default:
+                          icon = Icons.token;
+                          color = Colors.grey;
+                      }
+
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: _buildAssetRow(
+                          symbol,
+                          name,
+                          balance,
+                          icon,
+                          color,
+                        ),
+                      );
+                    }),
             ],
           ),
         ),
@@ -1454,126 +1554,199 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.darkGrey,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) => Container(
         padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Send Assets',
-              style: AppTheme.headingMedium.copyWith(
-                color: AppTheme.primaryGold,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Choose an asset to send',
-              style: TextStyle(color: AppTheme.grey, fontSize: 14),
-            ),
-            const SizedBox(height: 24),
-            // XLM Option
-            ListTile(
-              leading: CircleAvatar(
-                backgroundColor: Colors.blue,
-                child: const Text(
-                  'X',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Add close button at the top
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.close, color: AppTheme.grey),
+                    onPressed: () => Navigator.pop(context),
+                    tooltip: 'Close',
                   ),
+                ],
+              ),
+              Text(
+                'Send Assets',
+                style: AppTheme.headingMedium.copyWith(
+                  color: AppTheme.primaryGold,
                 ),
               ),
-              title: Text('Send XLM', style: TextStyle(color: AppTheme.white)),
-              subtitle: Text(
-                'Native Stellar cryptocurrency',
-                style: TextStyle(color: AppTheme.grey, fontSize: 12),
+              const SizedBox(height: 8),
+              Text(
+                'Choose an asset to send',
+                style: TextStyle(color: AppTheme.grey, fontSize: 14),
               ),
-              onTap: () {
-                Navigator.pop(context);
-                _showSendAssetDialog(
-                  walletProvider,
-                  walletProvider.supportedAssets[0],
-                ); // XLM
-              },
-            ),
-            // AKOFA Option
-            ListTile(
-              leading: CircleAvatar(
-                backgroundColor: Colors.orange,
-                child: const Text(
-                  'A',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
+              const SizedBox(height: 24),
+              // Stellar Network Assets
+              Text(
+                'Stellar Network',
+                style: AppTheme.bodyLarge.copyWith(
+                  color: AppTheme.primaryGold,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-              title: Text(
-                'Send AKOFA',
-                style: TextStyle(color: AppTheme.white),
-              ),
-              subtitle: Text(
-                'AKOFA ecosystem token',
-                style: TextStyle(color: AppTheme.grey, fontSize: 12),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                _showSendAssetDialog(
-                  walletProvider,
-                  walletProvider.supportedAssets[1],
-                ); // AKOFA
-              },
-            ),
-            // Sell Tokens Option
-            ListTile(
-              leading: CircleAvatar(
-                backgroundColor: Colors.green,
-                child: const Icon(Icons.sell, color: Colors.white, size: 20),
-              ),
-              title: Text(
-                'Sell Tokens',
-                style: TextStyle(color: AppTheme.white),
-              ),
-              subtitle: Text(
-                'Convert tokens to cash',
-                style: TextStyle(color: AppTheme.grey, fontSize: 12),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                _showTokenSellDialog();
-              },
-            ),
-            // Stablecoins
-            ...walletProvider.stablecoins.map(
-              (stablecoin) => ListTile(
+              const SizedBox(height: 12),
+              // XLM Option
+              ListTile(
                 leading: CircleAvatar(
-                  backgroundColor: Colors.green,
-                  child: Text(
-                    stablecoin.symbol.substring(0, 1),
-                    style: const TextStyle(
+                  backgroundColor: Colors.blue,
+                  child: const Text(
+                    'X',
+                    style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
                 title: Text(
-                  'Send ${stablecoin.symbol}',
+                  'Send XLM',
                   style: TextStyle(color: AppTheme.white),
                 ),
                 subtitle: Text(
-                  '${stablecoin.name} (${stablecoin.peggedCurrency ?? 'Stablecoin'})',
+                  'Native Stellar cryptocurrency',
                   style: TextStyle(color: AppTheme.grey, fontSize: 12),
                 ),
                 onTap: () {
                   Navigator.pop(context);
-                  _showSendAssetDialog(walletProvider, stablecoin);
+                  _showSendAssetDialog(
+                    walletProvider,
+                    walletProvider.supportedAssets[0],
+                  ); // XLM
                 },
               ),
-            ),
-          ],
+              // AKOFA Option
+              ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: Colors.orange,
+                  child: const Text(
+                    'A',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                title: Text(
+                  'Send AKOFA',
+                  style: TextStyle(color: AppTheme.white),
+                ),
+                subtitle: Text(
+                  'AKOFA ecosystem token',
+                  style: TextStyle(color: AppTheme.grey, fontSize: 12),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showSendAssetDialog(
+                    walletProvider,
+                    walletProvider.supportedAssets[1],
+                  ); // AKOFA
+                },
+              ),
+              // Polygon Network Assets
+              if (walletProvider.hasPolygonWallet) ...[
+                const SizedBox(height: 24),
+                Divider(color: AppTheme.primaryGold.withOpacity(0.3)),
+                const SizedBox(height: 12),
+                Text(
+                  'Polygon Network',
+                  style: AppTheme.bodyLarge.copyWith(
+                    color: AppTheme.primaryGold,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // Polygon tokens with balances > 0
+                ...walletProvider.polygonTokens.entries
+                    .where((entry) => (entry.value['balance'] as double) > 0)
+                    .map((entry) {
+                      final token = entry.value;
+                      final symbol = token['symbol'] as String;
+                      final name = token['name'] as String;
+                      final balance = token['formattedBalance'] as String;
+
+                      // Choose appropriate icon based on token
+                      IconData icon;
+                      Color color;
+                      switch (symbol) {
+                        case 'MATIC':
+                          icon = Icons.hexagon;
+                          color = Colors.purple;
+                          break;
+                        case 'USDT':
+                          icon = Icons.currency_exchange;
+                          color = Colors.green;
+                          break;
+                        case 'USDC':
+                          icon = Icons.attach_money;
+                          color = Colors.blue;
+                          break;
+                        case 'DAI':
+                          icon = Icons.account_balance_wallet;
+                          color = Colors.orange;
+                          break;
+                        case 'WETH':
+                          icon = Icons.currency_bitcoin;
+                          color = Colors.teal;
+                          break;
+                        default:
+                          icon = Icons.token;
+                          color = Colors.grey;
+                      }
+
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: color.withOpacity(0.2),
+                          child: Icon(icon, color: color, size: 20),
+                        ),
+                        title: Text(
+                          'Send $symbol',
+                          style: TextStyle(color: AppTheme.white),
+                        ),
+                        subtitle: Text(
+                          '$name • Balance: $balance',
+                          style: TextStyle(color: AppTheme.grey, fontSize: 12),
+                        ),
+                        onTap: () {
+                          Navigator.pop(context);
+                          _showSendPolygonAssetDialog(walletProvider, token);
+                        },
+                      );
+                    }),
+              ],
+              // Sell Tokens Option
+              const SizedBox(height: 24),
+              Divider(color: AppTheme.primaryGold.withOpacity(0.3)),
+              const SizedBox(height: 12),
+              ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: Colors.green,
+                  child: const Icon(Icons.sell, color: Colors.white, size: 20),
+                ),
+                title: Text(
+                  'Sell Tokens',
+                  style: TextStyle(color: AppTheme.white),
+                ),
+                subtitle: Text(
+                  'Convert tokens to cash',
+                  style: TextStyle(color: AppTheme.grey, fontSize: 12),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showTokenSellDialog();
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1624,10 +1797,11 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                         try {
                           final tagResult = await AkofaTagService.resolveTag(
                             value.trim(),
+                            blockchain: 'stellar',
                           );
                           if (tagResult['success']) {
                             setState(() {
-                              resolvedAddress = tagResult['publicKey'];
+                              resolvedAddress = tagResult['address'];
                               isResolvingTag = false;
                             });
                           } else {
@@ -1643,7 +1817,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                           });
                         }
                       } else if (value.startsWith('G') && value.length == 56) {
-                        // Valid Stellar address
+                        // Valid Stellar address - clear any previous tag resolution
                         setState(() => resolvedAddress = value);
                       } else {
                         setState(() => resolvedAddress = '');
@@ -1672,7 +1846,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                             height: 20,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              color: Colors.blue,
+                              color: AppTheme.primaryGold,
                             ),
                           )
                         : resolvedAddress.isNotEmpty
@@ -1687,9 +1861,34 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                 if (resolvedAddress.isNotEmpty && !isResolvingTag)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
-                    child: Text(
-                      'Resolved to: ${resolvedAddress.substring(0, 8)}...${resolvedAddress.substring(resolvedAddress.length - 8)}',
-                      style: TextStyle(color: Colors.green, fontSize: 12),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: Colors.green.withOpacity(0.3),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.check_circle,
+                            color: Colors.green,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Resolved to: ${resolvedAddress.substring(0, 8)}...${resolvedAddress.substring(resolvedAddress.length - 8)}',
+                              style: TextStyle(
+                                color: Colors.green,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 const SizedBox(height: 16),
@@ -1893,20 +2092,356 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     );
   }
 
-  void _showReceiveQR() {
+  void _showSendPolygonAssetDialog(
+    EnhancedWalletProvider walletProvider,
+    Map<String, dynamic> token,
+  ) {
+    final recipientController = TextEditingController();
+    final amountController = TextEditingController();
+    final passwordController = TextEditingController();
+    bool obscurePassword = true;
+
+    final symbol = token['symbol'] as String;
+    final name = token['name'] as String;
+    final balance = token['formattedBalance'] as String;
+    final isNative = token['isNative'] as bool;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          backgroundColor: AppTheme.darkGrey,
+          title: Text(
+            'Send $symbol',
+            style: TextStyle(color: AppTheme.primaryGold),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Send $name to a Polygon address',
+                  style: TextStyle(color: AppTheme.grey, fontSize: 14),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: recipientController,
+                  style: TextStyle(color: AppTheme.white),
+                  decoration: InputDecoration(
+                    labelText: 'Recipient Polygon Address',
+                    labelStyle: TextStyle(color: AppTheme.primaryGold),
+                    hintText: '0x...',
+                    hintStyle: TextStyle(color: AppTheme.grey),
+                    enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: AppTheme.primaryGold),
+                    ),
+                    focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: AppTheme.primaryGold),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: amountController,
+                  keyboardType: TextInputType.number,
+                  style: TextStyle(color: AppTheme.white),
+                  decoration: InputDecoration(
+                    labelText: 'Amount',
+                    labelStyle: TextStyle(color: AppTheme.primaryGold),
+                    hintText: '0.00',
+                    hintStyle: TextStyle(color: AppTheme.grey),
+                    suffixText: symbol,
+                    suffixStyle: TextStyle(color: AppTheme.primaryGold),
+                    enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: AppTheme.primaryGold),
+                    ),
+                    focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: AppTheme.primaryGold),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: passwordController,
+                  obscureText: obscurePassword,
+                  style: TextStyle(color: AppTheme.white),
+                  decoration: InputDecoration(
+                    labelText: 'Wallet Password',
+                    labelStyle: TextStyle(color: AppTheme.primaryGold),
+                    hintText: 'Enter your wallet password',
+                    hintStyle: TextStyle(color: AppTheme.grey),
+                    enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: AppTheme.primaryGold),
+                    ),
+                    focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: AppTheme.primaryGold),
+                    ),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        obscurePassword
+                            ? Icons.visibility_off
+                            : Icons.visibility,
+                        color: AppTheme.grey,
+                      ),
+                      onPressed: () {
+                        setState(() => obscurePassword = !obscurePassword);
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Available: $balance $symbol',
+                  style: TextStyle(color: AppTheme.grey, fontSize: 12),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                  ),
+                  child: Text(
+                    '⚠️ Polygon transactions require gas fees in MATIC',
+                    style: TextStyle(color: Colors.blue, fontSize: 12),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
+            ),
+            ElevatedButton(
+              onPressed:
+                  recipientController.text.trim().isEmpty ||
+                      amountController.text.trim().isEmpty ||
+                      passwordController.text.trim().isEmpty
+                  ? null
+                  : () async {
+                      final recipientAddress = recipientController.text.trim();
+                      final amountText = amountController.text.trim();
+                      final password = passwordController.text.trim();
+
+                      // Validate Polygon address format
+                      if (!recipientAddress.startsWith('0x') ||
+                          recipientAddress.length != 42) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Please enter a valid Polygon address',
+                            ),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      final amount = double.tryParse(amountText);
+                      if (amount == null || amount <= 0) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Please enter a valid amount'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      // Check if amount exceeds balance
+                      final currentBalance = token['balance'] as double;
+                      if (amount > currentBalance) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Insufficient balance'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      Navigator.of(context).pop();
+
+                      // Show loading
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Sending $amount $symbol...'),
+                          backgroundColor: Colors.blue,
+                        ),
+                      );
+
+                      try {
+                        final result = isNative
+                            ? await walletProvider.sendMatic(
+                                recipientAddress: recipientAddress,
+                                amount: amount,
+                                password: password,
+                              )
+                            : await _sendPolygonToken(
+                                walletProvider,
+                                token,
+                                recipientAddress,
+                                amount,
+                                password,
+                              );
+
+                        if (result['success'] == true) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('$symbol sent successfully!'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+
+                          // Refresh balances
+                          await walletProvider.loadPolygonBalances();
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Failed to send $symbol: ${result['error']}',
+                              ),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Error sending $symbol: $e'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryGold,
+                foregroundColor: AppTheme.black,
+              ),
+              child: const Text('Send'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>> _sendPolygonToken(
+    EnhancedWalletProvider walletProvider,
+    Map<String, dynamic> token,
+    String recipientAddress,
+    double amount,
+    String password,
+  ) async {
+    // For now, only MATIC is supported for sending
+    // ERC-20 token sending would require additional implementation
+    return {
+      'success': false,
+      'error':
+          'ERC-20 token sending not yet implemented. Only MATIC transfers are supported.',
+    };
+  }
+
+  void _showReceiveOptions() {
     final walletProvider = Provider.of<EnhancedWalletProvider>(
       context,
       listen: false,
     );
-    if (walletProvider.publicKey != null) {
-      showDialog(
-        context: context,
-        builder: (context) => QRCodeDisplay(
-          address: walletProvider.publicKey!,
-          title: 'Receive Assets',
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.darkGrey,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Receive Assets',
+              style: AppTheme.headingMedium.copyWith(
+                color: AppTheme.primaryGold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Choose network to receive assets',
+              style: TextStyle(color: AppTheme.grey, fontSize: 14),
+            ),
+            const SizedBox(height: 24),
+            // Stellar Network Option
+            ListTile(
+              leading: CircleAvatar(
+                backgroundColor: Colors.blue,
+                child: const Text(
+                  'S',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              title: Text(
+                'Stellar Network',
+                style: TextStyle(color: AppTheme.white),
+              ),
+              subtitle: Text(
+                'Receive XLM, AKOFA, USDC, EURC',
+                style: TextStyle(color: AppTheme.grey, fontSize: 12),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _showReceiveQR(walletProvider.publicKey!, 'Stellar Network');
+              },
+            ),
+            // Polygon Network Option
+            if (walletProvider.hasPolygonWallet)
+              ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: Colors.purple,
+                  child: const Text(
+                    'P',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                title: Text(
+                  'Polygon Network',
+                  style: TextStyle(color: AppTheme.white),
+                ),
+                subtitle: Text(
+                  'Receive MATIC, USDT, USDC, DAI',
+                  style: TextStyle(color: AppTheme.grey, fontSize: 12),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showReceiveQR(
+                    walletProvider.polygonAddress!,
+                    'Polygon Network',
+                  );
+                },
+              ),
+          ],
         ),
-      );
-    }
+      ),
+    );
+  }
+
+  void _showReceiveQR(String address, String network) {
+    showDialog(
+      context: context,
+      builder: (context) =>
+          QRCodeDisplay(address: address, title: 'Receive on $network'),
+    );
   }
 
   void _showPurchaseDialog(EnhancedWalletProvider walletProvider) {

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../utils/responsive_layout.dart';
 import '../widgets/enhanced_buy_akofa_dialog.dart';
 import '../screens/buy_crypto_screen.dart';
+import '../providers/enhanced_wallet_provider.dart';
 
 class QuickActionsRow extends StatelessWidget {
   final VoidCallback onSend;
@@ -38,10 +40,20 @@ class QuickActionsRow extends StatelessWidget {
       if (onBuyCrypto != null) {
         onBuyCrypto!();
       } else {
-        Navigator.push(
+        // Get wallet address from provider
+        final walletProvider = Provider.of<EnhancedWalletProvider>(
           context,
-          MaterialPageRoute(builder: (_) => const BuyCryptoScreen()),
+          listen: false,
         );
+        if (walletProvider.publicKey != null) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) =>
+                  BuyCryptoScreen(walletAddress: walletProvider.publicKey!),
+            ),
+          );
+        }
       }
     }
 

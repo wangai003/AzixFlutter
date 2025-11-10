@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/secure_wallet_service.dart';
 import '../services/akofa_tag_service.dart';
+import '../services/polygon_wallet_service.dart';
 import '../theme/app_theme.dart';
 import '../providers/auth_provider.dart' as local_auth;
 
@@ -646,19 +647,48 @@ class _SecureWalletCreationScreenState
       }
 
       // Create secure wallet with password and biometric settings
-      final result = await SecureWalletService.createSecureWallet(
+      final stellarResult = await SecureWalletService.createSecureWallet(
         userId: user.uid,
         password: password,
         recoveryPhrase: null, // Could be generated separately
         enableBiometrics: _enableBiometrics,
       );
 
+      // Create Polygon wallet if Stellar wallet creation was successful
+      Map<String, dynamic>? polygonResult;
+      if (stellarResult['success'] == true) {
+        print('🔑 Creating Polygon wallet...');
+        polygonResult = await PolygonWalletService.createSecurePolygonWallet(
+          userId: user.uid,
+          password: password,
+          recoveryPhrase: null,
+        );
+
+        if (polygonResult['success'] == true) {
+          print('✅ Polygon wallet created successfully');
+        } else {
+          print('⚠️ Polygon wallet creation failed: ${polygonResult['error']}');
+          // Don't fail the entire process for Polygon wallet issues
+        }
+      }
+
+      final result = stellarResult; // Use Stellar result as primary
+
       if (result['success'] == true) {
         // Check AKOFA tag creation and linking
         await _verifyAkofaTagCreation(user.uid);
 
+        // Update success message to include both wallets
+        String successMsg = result['message'];
+        if (polygonResult != null && polygonResult['success'] == true) {
+          successMsg +=
+              ' Both Stellar and Polygon wallets created successfully!';
+        } else {
+          successMsg += ' Stellar wallet created successfully!';
+        }
+
         setState(() {
-          _successMessage = result['message'];
+          _successMessage = successMsg;
         });
 
         // Clear password fields for security
@@ -699,7 +729,10 @@ class _SecureWalletCreationScreenState
         print('✅ AKOFA tag verified: $tag linked to wallet $publicKey');
 
         // Additional verification: check if tag resolves correctly
-        final resolveResult = await AkofaTagService.resolveTag(tag);
+        final resolveResult = await AkofaTagService.resolveTag(
+          tag,
+          blockchain: 'stellar',
+        );
 
         if (resolveResult['success'] == true &&
             resolveResult['publicKey'] == publicKey) {
@@ -737,14 +770,8 @@ class _SecureWalletCreationScreenState
                 Icon(Icons.fingerprint, size: 48, color: AppTheme.primaryGold),
                 const SizedBox(height: 16),
                 Text(
-                  'Your wallet will be protected by biometric authentication. Please setup fingerprint or Face ID on your device.',
+                  'Your wallet will be protected by biometric authentication. This will use real biometric hardware on your device.',
                   style: TextStyle(color: AppTheme.grey),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Note: This is a simulation. In production, this would use actual WebAuthn API.',
-                  style: TextStyle(color: Colors.orange, fontSize: 12),
                   textAlign: TextAlign.center,
                 ),
               ],

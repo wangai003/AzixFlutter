@@ -32,7 +32,7 @@ void main(List<String> args) async {
     print('');
 
     // Run migration
-    final result = await AkofaTagMigrationService.runMigration(
+    final result = await AkofaTagMigrationService.runMultiBlockchainMigration(
       dryRun: dryRun,
       backupFilePath: backupFile,
     );

@@ -151,7 +151,10 @@ class TransactionService {
     if (recipientAkofaTag != null && recipientAkofaTag.isNotEmpty) {
       // If recipient tag is provided, resolve it to address
       try {
-        final tagResult = await AkofaTagService.resolveTag(recipientAkofaTag);
+        final tagResult = await AkofaTagService.resolveTag(
+          recipientAkofaTag,
+          blockchain: 'stellar',
+        );
         if (tagResult['success']) {
           resolvedRecipientAddress = tagResult['publicKey'];
         }
@@ -223,7 +226,10 @@ class TransactionService {
     if (senderAkofaTag != null && senderAkofaTag.isNotEmpty) {
       // If sender tag is provided, resolve it to address
       try {
-        final tagResult = await AkofaTagService.resolveTag(senderAkofaTag);
+        final tagResult = await AkofaTagService.resolveTag(
+          senderAkofaTag,
+          blockchain: 'stellar',
+        );
         if (tagResult['success']) {
           resolvedSenderAddress = tagResult['publicKey'];
         }

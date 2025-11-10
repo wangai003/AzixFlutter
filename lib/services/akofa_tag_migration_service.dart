@@ -4,18 +4,20 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'akofa_tag_service.dart';
 
-/// Migration service to move from old AKOFA tag system to new simplified one-tag-per-user system
+/// Migration service to move from old AKOFA tag system to new multi-blockchain system
 class AkofaTagMigrationService {
   static final FirebaseAuth _auth = FirebaseAuth.instance;
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  /// Run the complete migration process
-  static Future<Map<String, dynamic>> runMigration({
+  /// Run the complete migration process to multi-blockchain support
+  static Future<Map<String, dynamic>> runMultiBlockchainMigration({
     bool dryRun = true,
     String? backupFilePath,
   }) async {
     try {
-      print('🚀 Starting AKOFA tag migration (dryRun: $dryRun)...');
+      print(
+        '🚀 Starting AKOFA tag multi-blockchain migration (dryRun: $dryRun)...',
+      );
 
       // Step 1: Create backup if requested
       Map<String, dynamic>? backupData;
@@ -53,10 +55,12 @@ class AkofaTagMigrationService {
         'timestamp': FieldValue.serverTimestamp(),
       };
 
-      print('✅ Migration ${dryRun ? 'dry run' : 'completed'} successfully!');
+      print(
+        '✅ Multi-blockchain migration ${dryRun ? 'dry run' : 'completed'} successfully!',
+      );
       print(
         '📈 Summary: ${results['processedUsers']} users processed, '
-        '${results['tagsKept']} tags kept, ${results['tagsGenerated']} tags generated',
+        '${results['tagsMigrated']} tags migrated to multi-blockchain format',
       );
 
       return summary;
@@ -161,9 +165,7 @@ class AkofaTagMigrationService {
     final akofaTagsSnapshot = await _firestore.collection('akofaTag').get();
 
     int processedUsers = 0;
-    int tagsKept = 0;
-    int tagsGenerated = 0;
-    int tagsRemoved = 0;
+    int tagsMigrated = 0;
     final errors = <String>[];
 
     // Group tags by userId
@@ -175,124 +177,85 @@ class AkofaTagMigrationService {
       }
     }
 
-    for (final userDoc in usersSnapshot.docs) {
+    for (final tagDoc in akofaTagsSnapshot.docs) {
       try {
-        final userId = userDoc.id;
-        final userData = userDoc.data();
-        final firstName =
-            userData['displayName'] ?? userData['firstName'] ?? '';
+        final tagData = tagDoc.data() as Map<String, dynamic>;
+        final tagId = tagDoc.id;
 
-        final userTags = tagsByUser[userId] ?? [];
+        // Check if already migrated (has addresses field)
+        if (tagData['addresses'] != null) {
+          continue; // Already migrated
+        }
 
-        if (userTags.length > 1) {
-          // Multiple tags: keep the most recent one
-          final sortedTags =
-              userTags
-                  .where(
-                    (tag) =>
-                        (tag.data() as Map<String, dynamic>)['isActive'] ==
-                        true,
-                  )
-                  .toList()
-                ..sort((a, b) {
-                  final aTime =
-                      (a.data() as Map<String, dynamic>)['createdAt']
-                          as Timestamp?;
-                  final bTime =
-                      (b.data() as Map<String, dynamic>)['createdAt']
-                          as Timestamp?;
-                  if (aTime == null && bTime == null) return 0;
-                  if (aTime == null) return 1;
-                  if (bTime == null) return -1;
-                  return bTime.compareTo(aTime); // Most recent first
-                });
+        // Migrate old format to new multi-blockchain format
+        final oldPublicKey = tagData['publicKey'];
+        if (oldPublicKey != null && oldPublicKey.isNotEmpty) {
+          // Validate it's a Stellar address
+          if (AkofaTagService.isValidAddress(oldPublicKey, 'stellar')) {
+            final addresses = {
+              'stellar': {
+                'address': oldPublicKey,
+                'linkedAt':
+                    tagData['linkedAt'] ??
+                    tagData['createdAt'] ??
+                    FieldValue.serverTimestamp(),
+                'isActive': true,
+              },
+            };
 
-          final tagToKeep = sortedTags.first;
-          final tagsToRemove = sortedTags.skip(1);
-
-          if (!dryRun) {
-            // Mark extra tags as inactive
-            for (final tagDoc in tagsToRemove) {
-              await _firestore.collection('akofaTag').doc(tagDoc.id).update({
-                'isActive': false,
-                'deactivatedAt': FieldValue.serverTimestamp(),
-                'deactivationReason': 'migration_cleanup',
+            if (!dryRun) {
+              await _firestore.collection('akofaTag').doc(tagId).update({
+                'addresses': addresses,
+                'version': '2.0',
+                'migratedAt': FieldValue.serverTimestamp(),
               });
             }
-          }
 
-          tagsKept++;
-          tagsRemoved += tagsToRemove.length;
-
-          // Update user with the kept tag
-          if (!dryRun) {
-            await _updateUserWithTag(
-              userId,
-              tagToKeep.id,
-              (tagToKeep.data() as Map<String, dynamic>)['publicKey'],
-            );
-          }
-        } else if (userTags.isEmpty) {
-          // No tags: generate new one
-          if (!dryRun) {
-            final tagResult = await AkofaTagService.generateUniqueTag(
-              userId: userId,
-              firstName: firstName,
-            );
-
-            if (tagResult['success'] == true) {
-              tagsGenerated++;
-            } else {
-              errors.add(
-                'Failed to generate tag for user $userId: ${tagResult['error']}',
-              );
-            }
+            tagsMigrated++;
+            print('✅ Migrated tag $tagId with Stellar address $oldPublicKey');
           } else {
-            tagsGenerated++;
+            errors.add(
+              'Invalid Stellar address format for tag $tagId: $oldPublicKey',
+            );
           }
         } else {
-          // Single tag: ensure it's properly linked
-          final tagDoc = userTags.first;
-          final tagData = tagDoc.data();
-
+          // Tag without address - just update version
           if (!dryRun) {
-            await _updateUserWithTag(
-              userId,
-              tagDoc.id,
-              (tagData as Map<String, dynamic>)['publicKey'],
-            );
+            await _firestore.collection('akofaTag').doc(tagId).update({
+              'addresses': <String, dynamic>{},
+              'version': '2.0',
+              'migratedAt': FieldValue.serverTimestamp(),
+            });
           }
-          tagsKept++;
+          tagsMigrated++;
         }
 
         processedUsers++;
       } catch (e) {
-        errors.add('Error processing user ${userDoc.id}: $e');
+        errors.add('Error migrating tag ${tagDoc.id}: $e');
       }
     }
 
     return {
       'processedUsers': processedUsers,
-      'tagsKept': tagsKept,
-      'tagsGenerated': tagsGenerated,
-      'tagsRemoved': tagsRemoved,
+      'tagsMigrated': tagsMigrated,
       'errors': errors,
     };
   }
 
-  /// Update user with tag information across all collections
+  /// Update user with tag information across all collections (for multi-blockchain)
   static Future<void> _updateUserWithTag(
     String userId,
     String tag,
-    String? publicKey,
+    Map<String, dynamic> addresses,
   ) async {
     final batch = _firestore.batch();
 
     // Update USER collection
     batch.update(_firestore.collection('USER').doc(userId), {
       'akofaTag': tag,
-      'tagLinked': publicKey != null,
-      'tagLinkedAt': publicKey != null ? FieldValue.serverTimestamp() : null,
+      'tagLinked': addresses.isNotEmpty,
+      'tagLinkedAt': addresses.isNotEmpty ? FieldValue.serverTimestamp() : null,
     });
 
     // Update secure_wallets collection if wallet exists
@@ -301,8 +264,10 @@ class AkofaTagMigrationService {
     if (secureWalletDoc.exists) {
       batch.update(secureWalletRef, {
         'akofaTag': tag,
-        'tagLinked': publicKey != null,
-        'tagLinkedAt': publicKey != null ? FieldValue.serverTimestamp() : null,
+        'tagLinked': addresses.isNotEmpty,
+        'tagLinkedAt': addresses.isNotEmpty
+            ? FieldValue.serverTimestamp()
+            : null,
       });
     }
 

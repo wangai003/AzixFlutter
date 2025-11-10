@@ -28,6 +28,13 @@ import 'services/stellar_service.dart';
 import 'services/notification_service.dart';
 import 'theme/app_theme.dart';
 
+// Import models to avoid conflicts
+import 'models/asset_config.dart';
+import 'models/order.dart';
+import 'models/search_filter.dart';
+import 'models/marketplace/listing.dart';
+import 'models/marketplace/messaging.dart';
+
 import 'wrapper.dart';
 import 'screens/all_transactions_screen.dart';
 import 'screens/admin/admin_dashboard_screen.dart';

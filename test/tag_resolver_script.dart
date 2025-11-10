@@ -9,7 +9,10 @@ void main() async {
   print('🔍 Resolving Akofa Tag: david9736');
 
   try {
-    final result = await AkofaTagService.resolveTag('david9736');
+    final result = await AkofaTagService.resolveTag(
+      'david9736',
+      blockchain: 'stellar',
+    );
 
     if (result['success'] == true) {
       print('✅ Tag resolved successfully!');

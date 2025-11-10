@@ -71,11 +71,14 @@ class _SendAkofaDialogState extends State<SendAkofaDialog> {
         });
       } else {
         // Try to resolve as AKOFA tag
-        final result = await AkofaTagService.resolveTag(input);
+        final result = await AkofaTagService.resolveTag(
+          input,
+          blockchain: 'stellar',
+        );
 
         if (result['success']) {
           setState(() {
-            _resolvedAddress = result['publicKey'];
+            _resolvedAddress = result['address'];
             _resolvedName = result['firstName'];
             _error = null;
             _isValidInput = true;

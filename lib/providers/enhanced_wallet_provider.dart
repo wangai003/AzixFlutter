@@ -8,6 +8,7 @@ import '../services/payment_webhook_service.dart';
 import '../services/payment_security_service.dart';
 import '../services/moonpay_service.dart';
 import '../services/moonpay_callback_service.dart';
+import '../services/polygon_wallet_service.dart';
 import '../models/transaction.dart' as app_transaction;
 import '../models/asset_config.dart';
 
@@ -46,6 +47,14 @@ class EnhancedWalletProvider extends ChangeNotifier {
   bool _isBiometricAuthenticating = false;
   String? _secureWalletPublicKey;
 
+  // Polygon wallet state
+  bool _hasPolygonWallet = false;
+  String? _polygonAddress;
+  Map<String, dynamic> _polygonBalances = {};
+  Map<String, Map<String, dynamic>> _polygonTokens = {};
+  bool _isProcessingPolygonTransaction = false;
+  List<Map<String, dynamic>> _polygonTransactions = [];
+
   // Getters
   bool get isLoading => _isLoading;
   String? get error => _error;
@@ -69,6 +78,15 @@ class EnhancedWalletProvider extends ChangeNotifier {
   bool get hasSecureWallet => _hasSecureWallet;
   bool get isBiometricAuthenticating => _isBiometricAuthenticating;
   String? get secureWalletPublicKey => _secureWalletPublicKey;
+
+  // Polygon wallet getters
+  bool get hasPolygonWallet => _hasPolygonWallet;
+  String? get polygonAddress => _polygonAddress;
+  Map<String, dynamic> get polygonBalances => _polygonBalances;
+  Map<String, Map<String, dynamic>> get polygonTokens => _polygonTokens;
+  bool get isProcessingPolygonTransaction => _isProcessingPolygonTransaction;
+  String get polygonBalance => _polygonBalances['matic'] ?? '0';
+  List<Map<String, dynamic>> get polygonTransactions => _polygonTransactions;
 
   // Computed getters
   String get xlmBalance => _balances['xlm'] ?? '0';
@@ -101,6 +119,27 @@ class EnhancedWalletProvider extends ChangeNotifier {
     });
   }
 
+  /// Check Polygon wallet status
+  Future<void> checkPolygonWalletStatus() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return;
+
+      _hasPolygonWallet = await PolygonWalletService.hasPolygonWallet(user.uid);
+      if (_hasPolygonWallet) {
+        _polygonAddress = await PolygonWalletService.getPolygonWalletAddress(
+          user.uid,
+        );
+        if (_polygonAddress != null) {
+          await loadPolygonBalances();
+        }
+      }
+      notifyListeners();
+    } catch (e) {
+      print('Error checking Polygon wallet status: $e');
+    }
+  }
+
   // ==================== WALLET MANAGEMENT ====================
 
   /// Check wallet status and initialize if needed
@@ -131,9 +170,17 @@ class EnhancedWalletProvider extends ChangeNotifier {
         }
       }
 
+      // Check Polygon wallet status
+      await checkPolygonWalletStatus();
+
       if (_hasWallet) {
         // Load initial data
         await Future.wait([loadBalances(), loadTransactions()]);
+
+        // Load Polygon transactions if wallet exists
+        if (_hasPolygonWallet && _polygonAddress != null) {
+          await loadPolygonTransactions();
+        }
 
         // Automatically setup wallet (fund with XLM and create AKOFA trustline if needed)
         if (_publicKey != null) {
@@ -172,6 +219,46 @@ class EnhancedWalletProvider extends ChangeNotifier {
       _setError('Failed to create wallet: $e');
       _setLoading(false);
       return false;
+    }
+  }
+
+  /// Create a Polygon wallet alongside the Stellar wallet
+  Future<Map<String, dynamic>> createPolygonWallet({
+    required String password,
+    String? recoveryPhrase,
+  }) async {
+    _setLoading(true);
+    _setError(null);
+
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        throw Exception('User not authenticated');
+      }
+
+      final result = await PolygonWalletService.createSecurePolygonWallet(
+        userId: user.uid,
+        password: password,
+        recoveryPhrase: recoveryPhrase,
+      );
+
+      if (result['success'] == true) {
+        // Update local state
+        _hasPolygonWallet = true;
+        _polygonAddress = result['address'];
+
+        // Load initial balances
+        await loadPolygonBalances();
+
+        _setLoading(false);
+        return result;
+      } else {
+        throw Exception(result['error'] ?? 'Failed to create Polygon wallet');
+      }
+    } catch (e) {
+      _setError('Failed to create Polygon wallet: $e');
+      _setLoading(false);
+      return {'success': false, 'error': e.toString()};
     }
   }
 
@@ -226,6 +313,19 @@ class EnhancedWalletProvider extends ChangeNotifier {
 
         // Integrate MoonPay transactions with existing monitoring
         await _syncMoonPayTransactionsWithStellar();
+
+        // Also create Polygon wallet if not exists
+        if (!_hasPolygonWallet) {
+          try {
+            await createPolygonWallet(
+              password: password,
+              recoveryPhrase: recoveryPhrase,
+            );
+          } catch (e) {
+            // Polygon wallet creation is optional, don't fail the whole process
+            print('Warning: Polygon wallet creation failed: $e');
+          }
+        }
       }
 
       _setLoading(false);
@@ -278,6 +378,52 @@ class EnhancedWalletProvider extends ChangeNotifier {
     } catch (e) {}
   }
 
+  /// Load Polygon wallet balances
+  Future<void> loadPolygonBalances() async {
+    if (_polygonAddress == null) return;
+
+    try {
+      final balanceResult =
+          await PolygonWalletService.getAllPolygonTokenBalances(
+            _polygonAddress!,
+          );
+      if (balanceResult['success'] == true) {
+        final tokens = balanceResult['tokens'] as Map<String, dynamic>;
+        _polygonTokens = Map<String, Map<String, dynamic>>.from(tokens);
+
+        // Update legacy single balance for backward compatibility
+        if (_polygonTokens.containsKey('MATIC')) {
+          _polygonBalances = {
+            'matic': _polygonTokens['MATIC']!['balance'].toString(),
+            'symbol': _polygonTokens['MATIC']!['symbol'],
+            'network': balanceResult['network'],
+          };
+        }
+      }
+      notifyListeners();
+    } catch (e) {
+      print('Error loading Polygon balances: $e');
+    }
+  }
+
+  /// Load Polygon transaction history
+  Future<void> loadPolygonTransactions() async {
+    if (_polygonAddress == null) return;
+
+    try {
+      _polygonTransactions =
+          await PolygonWalletService.getPolygonTransactionHistory(
+            _polygonAddress!,
+            limit: 50,
+          );
+      notifyListeners();
+    } catch (e) {
+      print('Error loading Polygon transactions: $e');
+      _polygonTransactions = [];
+      notifyListeners();
+    }
+  }
+
   /// Refresh all wallet data
   Future<void> refreshWallet() async {
     _setLoading(true);
@@ -285,6 +431,11 @@ class EnhancedWalletProvider extends ChangeNotifier {
 
     try {
       await Future.wait([loadBalances(), loadTransactions(forceRefresh: true)]);
+
+      // Also refresh Polygon data if available
+      if (_hasPolygonWallet && _polygonAddress != null) {
+        await Future.wait([loadPolygonBalances(), loadPolygonTransactions()]);
+      }
     } catch (e) {
       _setError('Failed to refresh wallet: $e');
     }
@@ -506,7 +657,6 @@ class EnhancedWalletProvider extends ChangeNotifier {
         amount: amount,
         assetCode: 'XLM',
         memo: memo,
-        password: '', // This will be handled by the UI to prompt for password
       );
 
       if (result['success'] == true) {
@@ -600,6 +750,44 @@ class EnhancedWalletProvider extends ChangeNotifier {
     } catch (e) {
       _setError('Failed to send ${asset.symbol}: $e');
       _setLoading(false);
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// Send MATIC tokens
+  Future<Map<String, dynamic>> sendMatic({
+    required String recipientAddress,
+    required double amount,
+    required String password,
+  }) async {
+    if (!_hasPolygonWallet) {
+      return {'success': false, 'error': 'No Polygon wallet found'};
+    }
+
+    _isProcessingPolygonTransaction = true;
+    _setError(null);
+    notifyListeners();
+
+    try {
+      final result = await PolygonWalletService.sendMaticTransaction(
+        userId: _auth.currentUser!.uid,
+        password: password,
+        toAddress: recipientAddress,
+        amountMatic: amount,
+      );
+
+      if (result['success'] == true) {
+        // Refresh balances and transactions after successful transaction
+        await Future.wait([loadPolygonBalances(), loadPolygonTransactions()]);
+      }
+
+      _isProcessingPolygonTransaction = false;
+      notifyListeners();
+      return result;
+    } catch (e) {
+      _setError('Failed to send MATIC: $e');
+      _isProcessingPolygonTransaction = false;
+      notifyListeners();
       return {'success': false, 'error': e.toString()};
     }
   }
@@ -1443,20 +1631,51 @@ class EnhancedWalletProvider extends ChangeNotifier {
     }
   }
 
-  /// Get combined transaction history (Stellar + MoonPay)
+  /// Get combined blockchain transaction history (Stellar + Polygon + MoonPay)
   Future<List<app_transaction.Transaction>>
-  getCombinedTransactionHistory() async {
+  getCombinedBlockchainTransactionHistory() async {
     try {
       // Get Stellar transactions
-      final stellarTxs = await loadTransactions();
+      await loadTransactions();
+      final stellarTxs = _transactions;
 
-      // Get MoonPay transactions and convert to Transaction objects
       final user = _auth.currentUser;
+      final allTransactions = <app_transaction.Transaction>[...stellarTxs];
+
       if (user != null) {
+        // Get Polygon transactions and convert to Transaction format
+        if (_hasPolygonWallet && _polygonTransactions.isNotEmpty) {
+          final polygonTransactions = _polygonTransactions.map((polyTx) {
+            return app_transaction.Transaction(
+              id: 'polygon_${polyTx['hash']}',
+              userId: user.uid,
+              type: polyTx['type'] == 'receive' ? 'receive' : 'send',
+              status: polyTx['status'] == 'success' ? 'completed' : 'pending',
+              amount: polyTx['value'] as double,
+              assetCode: polyTx['asset'] as String,
+              timestamp: polyTx['timestamp'] as DateTime,
+              description: _getPolygonTransactionDescription(polyTx),
+              memo: 'Polygon transaction',
+              transactionHash: polyTx['hash'],
+              senderAddress: polyTx['from'],
+              recipientAddress: polyTx['to'],
+              metadata: {
+                'network': polyTx['network'],
+                'gasUsed': polyTx['gasUsed'],
+                'gasPrice': polyTx['gasPrice'],
+                'confirmations': polyTx['confirmations'],
+                'provider': 'polygon',
+              },
+            );
+          }).toList();
+
+          allTransactions.addAll(polygonTransactions);
+        }
+
+        // Get MoonPay transactions and convert to Transaction format
         final moonPayTxs = await _moonPayCallbackService
             .getUserMoonPayTransactions(user.uid);
 
-        // Convert MoonPay transactions to Transaction format
         final moonPayTransactions = moonPayTxs.map((mpTx) {
           final currencyCode = mpTx['currency']?['code'] ?? 'XLM';
           final amount = mpTx['quoteCurrencyAmount']?.toDouble() ?? 0.0;
@@ -1488,20 +1707,35 @@ class EnhancedWalletProvider extends ChangeNotifier {
           );
         }).toList();
 
-        // Combine and sort by timestamp
-        final allTransactions = <app_transaction.Transaction>[
-          ...stellarTxs,
-          ...moonPayTransactions,
-        ];
-        allTransactions.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-
-        return allTransactions;
+        allTransactions.addAll(moonPayTransactions);
       }
 
-      return stellarTxs;
+      // Sort by timestamp (newest first)
+      allTransactions.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
+      return allTransactions;
     } catch (e) {
       debugPrint('Error getting combined transaction history: $e');
       return _transactions; // Fallback to Stellar transactions
+    }
+  }
+
+  /// Get description for Polygon transaction
+  String _getPolygonTransactionDescription(Map<String, dynamic> polyTx) {
+    final type = polyTx['type'];
+    final asset = polyTx['asset'];
+
+    switch (type) {
+      case 'receive':
+        return 'Received $asset';
+      case 'send':
+        return 'Sent $asset';
+      case 'contract_creation':
+        return 'Contract Creation';
+      case 'self':
+        return 'Self Transfer ($asset)';
+      default:
+        return '$asset Transaction';
     }
   }
 
@@ -1589,6 +1823,15 @@ class EnhancedWalletProvider extends ChangeNotifier {
     _moonPayTransactionHistory = [];
     _isMonitoringMoonPayTransactions = false;
     _hasAkofaTrustline = false;
+
+    // Reset Polygon wallet state
+    _hasPolygonWallet = false;
+    _polygonAddress = null;
+    _polygonBalances = {};
+    _polygonTokens = {};
+    _polygonTransactions = [];
+    _isProcessingPolygonTransaction = false;
+
     _error = null;
     notifyListeners();
   }

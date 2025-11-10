@@ -334,9 +334,10 @@ class MiningService {
         .collection('active_mining_sessions')
         .doc(sessionId);
 
-    Map<String, dynamic>? result;
+    double? amountToSend;
 
     try {
+      // Step 1: Use transaction to validate and mark as processing (atomic)
       await _firestore.runTransaction((transaction) async {
         final sessionDoc = await transaction.get(sessionRef);
         if (!sessionDoc.exists) {
@@ -363,26 +364,53 @@ class MiningService {
           throw Exception('Invalid mined tokens amount');
         }
 
-        // Mark as processing to prevent double claiming
+        // Store amount to send outside transaction
+        amountToSend = amount;
+
+        // Mark as processing to prevent double claiming (atomic update)
         transaction.update(sessionRef, {
           'payoutStatus': 'processing',
           'claimedAt': Timestamp.now(),
         });
-
-        // Send tokens outside transaction for safety
-        result = await _sendTokens(amount);
-
-        // Update final status based on transaction result
-        transaction.update(sessionRef, {
-          'payoutStatus': result!['success'] ? 'success' : 'failed',
-          'txHash': result!['txHash'],
-          'txMessage': result!['message'],
-        });
       });
 
-      return result!;
+      // Step 2: Send tokens OUTSIDE transaction (network call can take time)
+      if (amountToSend == null) {
+        throw Exception('Amount not set after transaction');
+      }
+
+      print("💰 Sending ${amountToSend} AKOFA tokens to user wallet...");
+      final result = await _sendTokens(amountToSend!);
+
+      // Step 3: Update final status OUTSIDE transaction
+      await sessionRef.update({
+        'payoutStatus': result['success'] ? 'success' : 'failed',
+        'txHash': result['txHash'],
+        'txMessage': result['message'],
+        'completedAt': Timestamp.now(),
+      });
+
+      if (result['success']) {
+        print("✅ Successfully claimed ${amountToSend} AKOFA tokens");
+      } else {
+        print("❌ Failed to send tokens: ${result['message']}");
+      }
+
+      return result;
     } catch (e) {
       print("❌ Error claiming specific unpaid session: $e");
+      
+      // Mark as failed if we got past the transaction
+      try {
+        await sessionRef.update({
+          'payoutStatus': 'failed',
+          'txMessage': e.toString(),
+          'completedAt': Timestamp.now(),
+        });
+      } catch (updateError) {
+        print("❌ Error updating failed status: $updateError");
+      }
+
       return {'success': false, 'message': e.toString()};
     }
   }
