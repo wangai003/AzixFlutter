@@ -23,6 +23,7 @@ import 'providers/marketplace/marketplace_provider.dart';
 import 'providers/enhanced_wallet_provider.dart';
 import 'wallet/providers/wallet_provider.dart';
 import 'wallet/providers/wallet_auth_provider.dart';
+import 'bridge/providers/bridge_provider.dart';
 import 'services/app_initialization_service.dart';
 import 'services/stellar_service.dart';
 import 'services/notification_service.dart';
@@ -176,6 +177,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => WalletAuthProvider()),
         // Enhanced wallet provider with real-time monitoring
         ChangeNotifierProvider(create: (_) => EnhancedWalletProvider()),
+        ChangeNotifierProvider(create: (_) => BridgeProvider()),
         // Enhanced marketplace provider with Stellar integration
         ChangeNotifierProxyProvider<
           StellarProvider,

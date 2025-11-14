@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../services/secure_wallet_service.dart';
 import '../services/akofa_tag_service.dart';
 import '../services/polygon_wallet_service.dart';
+import '../services/biometric_service.dart';
 import '../theme/app_theme.dart';
 import '../providers/auth_provider.dart' as local_auth;
 
@@ -20,7 +21,11 @@ class _SecureWalletCreationScreenState
   String? _error;
   String? _successMessage;
   bool _acceptTerms = false;
-  bool _enableBiometrics = false;
+  bool _enableBiometrics = true; // Preferred, but not mandatory
+  int _currentStep = 0; // Step-by-step progress: 0=password, 1=biometric, 2=creating
+  bool _biometricsSupported = false;
+  bool _biometricsChecked = false;
+  String? _biometricSupportError;
 
   // Password fields
   final TextEditingController _passwordController = TextEditingController();
@@ -38,6 +43,21 @@ class _SecureWalletCreationScreenState
     // Add listeners to scroll when keyboard appears
     _passwordController.addListener(_scrollToFocusedField);
     _confirmPasswordController.addListener(_scrollToFocusedField);
+    // Check biometric support early
+    _checkBiometricSupport();
+  }
+
+  Future<void> _checkBiometricSupport() async {
+    final supportCheck = await BiometricService.checkBiometricSupport();
+    setState(() {
+      _biometricsSupported = supportCheck['biometricsSupported'] == true;
+      _biometricsChecked = true;
+      _biometricSupportError = supportCheck['error'] as String?;
+      // If biometrics not supported, disable by default
+      if (!_biometricsSupported) {
+        _enableBiometrics = false;
+      }
+    });
   }
 
   @override
@@ -96,6 +116,11 @@ class _SecureWalletCreationScreenState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Step-by-step Progress Indicator
+                  _buildStepIndicator(),
+
+                  const SizedBox(height: 24),
+
                   // Security Features
                   _buildSecurityFeatures(),
 
@@ -133,6 +158,111 @@ class _SecureWalletCreationScreenState
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildStepIndicator() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.darkGrey.withOpacity(0.3),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.primaryGold.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Wallet Creation Steps',
+            style: AppTheme.headingMedium.copyWith(
+              color: AppTheme.primaryGold,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _buildStepItem(
+            step: 1,
+            title: 'Set Password',
+            description: 'Create a strong password (min 8 characters)',
+            isActive: _currentStep == 0,
+            isCompleted: _currentStep > 0,
+          ),
+          const SizedBox(height: 12),
+          _buildStepItem(
+            step: 2,
+            title: 'Setup Biometrics',
+            description: 'Enable fingerprint or Face ID authentication',
+            isActive: _currentStep == 1,
+            isCompleted: _currentStep > 1,
+          ),
+          const SizedBox(height: 12),
+          _buildStepItem(
+            step: 3,
+            title: 'Create Wallet',
+            description: 'Generate keys, fund wallet, and setup trustlines',
+            isActive: _currentStep == 2,
+            isCompleted: _currentStep > 2,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStepItem({
+    required int step,
+    required String title,
+    required String description,
+    required bool isActive,
+    required bool isCompleted,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: isCompleted
+                ? Colors.green
+                : isActive
+                    ? AppTheme.primaryGold
+                    : AppTheme.grey.withOpacity(0.3),
+          ),
+          child: Center(
+            child: isCompleted
+                ? const Icon(Icons.check, color: Colors.white, size: 20)
+                : Text(
+                    '$step',
+                    style: TextStyle(
+                      color: isActive ? AppTheme.black : AppTheme.grey,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: AppTheme.bodyMedium.copyWith(
+                  color: isActive ? AppTheme.primaryGold : AppTheme.white,
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                description,
+                style: AppTheme.bodySmall.copyWith(
+                  color: AppTheme.grey,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -348,6 +478,20 @@ class _SecureWalletCreationScreenState
   }
 
   Widget _buildBiometricOptions() {
+    if (!_biometricsChecked) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: AppTheme.darkGrey.withOpacity(0.3),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppTheme.primaryGold.withOpacity(0.3)),
+        ),
+        child: const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -368,84 +512,256 @@ class _SecureWalletCreationScreenState
                   color: AppTheme.primaryGold,
                 ),
               ),
+              const SizedBox(width: 8),
+              if (_biometricsSupported)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: Colors.green),
+                  ),
+                  child: Text(
+                    'AVAILABLE',
+                    style: AppTheme.bodySmall.copyWith(
+                      color: Colors.green,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 10,
+                    ),
+                  ),
+                )
+              else
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: Colors.orange),
+                  ),
+                  child: Text(
+                    'NOT AVAILABLE',
+                    style: AppTheme.bodySmall.copyWith(
+                      color: Colors.orange,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 10,
+                    ),
+                  ),
+                ),
             ],
           ),
           const SizedBox(height: 16),
-          Text(
-            'Enable biometric authentication for faster, more secure access to your wallet.',
-            style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
-          ),
-          const SizedBox(height: 16),
-
-          // Biometric Toggle
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppTheme.darkGrey.withOpacity(0.5),
-              borderRadius: BorderRadius.circular(12),
+          if (_biometricsSupported) ...[
+            Text(
+              'Biometric authentication is strongly recommended for maximum security. Your wallet will be protected by both password and biometric authentication.',
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
             ),
-            child: Row(
-              children: [
-                Icon(
-                  _enableBiometrics
-                      ? Icons.fingerprint
-                      : Icons.fingerprint_outlined,
-                  color: _enableBiometrics
-                      ? AppTheme.primaryGold
-                      : AppTheme.grey,
-                  size: 24,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Enable Biometric Login',
-                        style: AppTheme.bodyMedium.copyWith(
-                          color: AppTheme.white,
-                          fontWeight: FontWeight.w600,
+            const SizedBox(height: 16),
+            // Biometric Toggle
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.darkGrey.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _enableBiometrics
+                        ? Icons.fingerprint
+                        : Icons.fingerprint_outlined,
+                    color: _enableBiometrics
+                        ? AppTheme.primaryGold
+                        : AppTheme.grey,
+                    size: 24,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Enable Biometric Protection',
+                          style: AppTheme.bodyMedium.copyWith(
+                            color: AppTheme.white,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Use fingerprint or Face ID for wallet access',
+                          style: AppTheme.bodySmall.copyWith(
+                            color: AppTheme.grey,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch(
+                    value: _enableBiometrics,
+                    onChanged: (value) {
+                      setState(() => _enableBiometrics = value);
+                    },
+                    activeColor: AppTheme.primaryGold,
+                    activeTrackColor: AppTheme.primaryGold.withOpacity(0.3),
+                  ),
+                ],
+              ),
+            ),
+            if (_enableBiometrics) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.blue, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'You will be prompted to set up biometric authentication during wallet creation.',
+                        style: AppTheme.bodySmall.copyWith(color: Colors.blue),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Use fingerprint or Face ID for wallet access',
-                        style: AppTheme.bodySmall.copyWith(
-                          color: AppTheme.grey,
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.red.withOpacity(0.5), width: 2),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.warning, color: Colors.red, size: 24),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Security Warning',
+                            style: AppTheme.bodyMedium.copyWith(
+                              color: Colors.red,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'You have disabled biometric authentication. This significantly reduces your wallet security.',
+                      style: AppTheme.bodySmall.copyWith(
+                        color: Colors.red.shade200,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _buildSecurityRiskItem(
+                      'Password-only wallets are more vulnerable to unauthorized access',
+                    ),
+                    _buildSecurityRiskItem(
+                      'If someone gains access to your password, they can access your funds',
+                    ),
+                    _buildSecurityRiskItem(
+                      'Biometric authentication adds an extra layer of protection',
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.orange.withOpacity(0.4)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.lightbulb_outline, color: Colors.orange, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Recommendation: Enable biometrics for maximum security. Your fingerprint or Face ID cannot be stolen or guessed.',
+                              style: AppTheme.bodySmall.copyWith(
+                                color: Colors.orange.shade200,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ] else ...[
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.orange.withOpacity(0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.warning_amber, color: Colors.orange, size: 24),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Biometric Authentication Not Available',
+                          style: AppTheme.bodyMedium.copyWith(
+                            color: Colors.orange,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ],
                   ),
-                ),
-                Switch(
-                  value: _enableBiometrics,
-                  onChanged: (value) {
-                    setState(() => _enableBiometrics = value);
-                  },
-                  activeColor: AppTheme.primaryGold,
-                  activeTrackColor: AppTheme.primaryGold.withOpacity(0.3),
-                ),
-              ],
-            ),
-          ),
-
-          if (_enableBiometrics) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange.withOpacity(0.3)),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline, color: Colors.orange, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Biometric authentication will be required for all wallet operations.',
-                      style: AppTheme.bodySmall.copyWith(color: Colors.orange),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Your device or browser does not support biometric authentication. Your wallet will be created with password-only protection.',
+                    style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+                  ),
+                  if (_biometricSupportError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Reason: $_biometricSupportError',
+                      style: AppTheme.bodySmall.copyWith(
+                        color: Colors.orange,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline, color: Colors.blue, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'You can add biometric protection later from wallet settings if you enable it on your device.',
+                            style: AppTheme.bodySmall.copyWith(color: Colors.blue),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -523,6 +839,28 @@ class _SecureWalletCreationScreenState
             child: Text(
               text,
               style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSecurityRiskItem(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.error_outline, color: Colors.red.shade300, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: AppTheme.bodySmall.copyWith(
+                color: Colors.red.shade200,
+                fontSize: 11,
+              ),
             ),
           ),
         ],
@@ -637,21 +975,43 @@ class _SecureWalletCreationScreenState
         throw Exception('Passwords do not match');
       }
 
-      // Show biometric setup dialog if biometrics are enabled
-      if (_enableBiometrics) {
+      // Try to setup biometrics if supported and enabled
+      bool biometricSetupSuccess = false;
+      if (_biometricsSupported && _enableBiometrics) {
+        setState(() => _currentStep = 1);
         final biometricResult = await _showBiometricSetupDialog();
-        if (!biometricResult) {
-          setState(() => _isCreating = false);
+        if (biometricResult) {
+          biometricSetupSuccess = true;
+        } else {
+          // User cancelled or setup failed - ask if they want to continue without biometrics
+          final continueWithout = await _showContinueWithoutBiometricsDialog();
+          if (!continueWithout) {
+            setState(() {
+              _isCreating = false;
+              _currentStep = 0;
+            });
+            return;
+          }
+        }
+      } else if (!_biometricsSupported) {
+        // Biometrics not available - show explanation and continue
+        final continueWithout = await _showBiometricNotAvailableDialog();
+        if (!continueWithout) {
+          setState(() {
+            _isCreating = false;
+            _currentStep = 0;
+          });
           return;
         }
       }
 
-      // Create secure wallet with password and biometric settings
+      // Create secure wallet with biometric settings (if available and enabled)
+      setState(() => _currentStep = 2);
       final stellarResult = await SecureWalletService.createSecureWallet(
         userId: user.uid,
         password: password,
         recoveryPhrase: null, // Could be generated separately
-        enableBiometrics: _enableBiometrics,
+        enableBiometrics: _biometricsSupported && _enableBiometrics && biometricSetupSuccess,
       );
 
       // Create Polygon wallet if Stellar wallet creation was successful
@@ -762,19 +1122,292 @@ class _SecureWalletCreationScreenState
             backgroundColor: AppTheme.darkGrey,
             title: Text(
               'Setup Biometric Authentication',
-              style: TextStyle(color: AppTheme.white),
+              style: TextStyle(color: AppTheme.primaryGold),
+              textAlign: TextAlign.center,
             ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.fingerprint, size: 48, color: AppTheme.primaryGold),
+                Icon(Icons.fingerprint, size: 64, color: AppTheme.primaryGold),
                 const SizedBox(height: 16),
                 Text(
-                  'Your wallet will be protected by biometric authentication. This will use real biometric hardware on your device.',
+                  'Step 2: Setup Biometrics',
+                  style: TextStyle(
+                    color: AppTheme.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Biometric authentication provides maximum security. Please authenticate using your fingerprint or Face ID.',
                   style: TextStyle(color: AppTheme.grey),
                   textAlign: TextAlign.center,
                 ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.blue, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'This step is recommended for enhanced security. You can skip if needed.',
+                          style: TextStyle(color: Colors.blue, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text('Skip', style: TextStyle(color: AppTheme.grey)),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  Navigator.of(context).pop(true);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryGold,
+                  foregroundColor: AppTheme.black,
+                ),
+                child: const Text('Setup Biometrics'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<bool> _showContinueWithoutBiometricsDialog() async {
+    return await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            backgroundColor: AppTheme.darkGrey,
+            title: Text(
+              'Security Risk Warning',
+              style: TextStyle(color: Colors.red),
+              textAlign: TextAlign.center,
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.warning, size: 64, color: Colors.red),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Biometric setup was skipped or failed.',
+                    style: TextStyle(
+                      color: AppTheme.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.red.withOpacity(0.5), width: 2),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '⚠️ Security Risks of Password-Only Protection:',
+                          style: TextStyle(
+                            color: Colors.red,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _buildRiskItem('Passwords can be stolen through phishing or keyloggers'),
+                        _buildRiskItem('Passwords can be guessed or brute-forced'),
+                        _buildRiskItem('If your device is compromised, your password may be exposed'),
+                        _buildRiskItem('No additional verification layer for transactions'),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.lock_outline, color: Colors.orange, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Biometric authentication uses your unique fingerprint or face, which cannot be stolen or replicated.',
+                            style: TextStyle(color: Colors.orange, fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline, color: Colors.blue, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'You can add biometric protection later from wallet settings.',
+                            style: TextStyle(color: Colors.blue, fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(
+                  'Go Back',
+                  style: TextStyle(color: AppTheme.grey, fontWeight: FontWeight.bold),
+                ),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: AppTheme.white,
+                ),
+                child: const Text('I Understand the Risks - Continue'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Widget _buildRiskItem(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.close, color: Colors.red.shade300, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(color: Colors.red.shade200, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool> _showBiometricNotAvailableDialog() async {
+    return await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            backgroundColor: AppTheme.darkGrey,
+            title: Text(
+              'Biometrics Not Available',
+              style: TextStyle(color: Colors.orange),
+              textAlign: TextAlign.center,
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.info_outline, size: 64, color: Colors.orange),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Your device or browser does not support biometric authentication.',
+                    style: TextStyle(
+                      color: AppTheme.white,
+                      fontSize: 16,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.orange.withOpacity(0.5)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '⚠️ Password-Only Protection Limitations:',
+                          style: TextStyle(
+                            color: Colors.orange,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _buildRiskItem('More vulnerable to unauthorized access'),
+                        _buildRiskItem('Passwords can be stolen or compromised'),
+                        _buildRiskItem('No additional verification for transactions'),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.lightbulb_outline, color: Colors.blue, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Tip: Use a strong, unique password and never share it. Consider enabling biometrics on your device if possible.',
+                            style: TextStyle(color: Colors.blue, fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Your wallet will be created with password-only protection. You can add biometric protection later if you enable it on your device.',
+                    style: TextStyle(color: AppTheme.grey, fontSize: 12),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
             ),
             actions: [
               TextButton(
@@ -787,7 +1420,7 @@ class _SecureWalletCreationScreenState
                   backgroundColor: AppTheme.primaryGold,
                   foregroundColor: AppTheme.black,
                 ),
-                child: const Text('Setup Biometrics'),
+                child: const Text('Continue with Password Only'),
               ),
             ],
           ),

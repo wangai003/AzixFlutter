@@ -199,22 +199,29 @@ class _MiningScreenState extends State<MiningScreen> {
         await _loadUnpaidSessions();
       } else {
         final errorMessage = result['message'] ?? 'Unknown error occurred';
+        final isTrustlineError = errorMessage.toLowerCase().contains('trustline');
+        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  '❌ Failed to claim rewards',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                Text(
+                  isTrustlineError 
+                    ? '⚠️ Wallet Setup Required' 
+                    : '❌ Failed to claim rewards',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
-                Text(errorMessage),
+                Text(
+                  errorMessage,
+                  style: TextStyle(fontSize: isTrustlineError ? 13 : 12),
+                ),
               ],
             ),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
+            backgroundColor: isTrustlineError ? Colors.orange : Colors.red,
+            duration: Duration(seconds: isTrustlineError ? 8 : 5),
           ),
         );
       }

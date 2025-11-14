@@ -679,16 +679,27 @@ class SecureWalletService {
   }
 
   /// Create a new secure wallet with automatic funding and trustline setup
+  /// Biometrics are strongly recommended but optional - allows password-only wallets
   static Future<Map<String, dynamic>> createSecureWallet({
     required String userId,
     required String password,
     String? recoveryPhrase,
-    bool enableBiometrics = false,
+    bool enableBiometrics = false, // Optional - check support first
   }) async {
     try {
       // Validate password strength
       if (password.length < 8) {
         throw Exception('Password must be at least 8 characters long');
+      }
+
+      // Check if biometrics are actually supported before requiring them
+      final biometricSupport = await checkBiometricSupport();
+      final biometricsSupported = biometricSupport['biometricsSupported'] == true;
+      
+      // If user wants biometrics but they're not supported, warn but continue
+      if (enableBiometrics && !biometricsSupported) {
+        print('⚠️ Biometrics requested but not supported on this device/browser');
+        enableBiometrics = false; // Disable since not supported
       }
 
       print('🔑 Generating new Stellar wallet...');
@@ -760,9 +771,9 @@ class SecureWalletService {
         );
       }
 
-      // Setup biometric authentication if requested
+      // Setup biometric authentication (optional but preferred)
       Map<String, dynamic>? biometricData;
-      String securityLevel = 'password';
+      String securityLevel = 'password'; // Default to password-only
 
       if (enableBiometrics) {
         print('🔐 Setting up biometric authentication...');
@@ -776,10 +787,11 @@ class SecureWalletService {
           securityLevel = 'password+biometric';
           print('✅ Biometric authentication setup successfully');
         } else {
-          print(
-            '⚠️ Biometric setup failed, continuing with password-only: ${biometricResult['error']}',
-          );
+          print('⚠️ Biometric setup failed: ${biometricResult['error']}. Continuing with password-only protection.');
+          // Don't throw - allow wallet creation with password-only
         }
+      } else {
+        print('ℹ️ Creating wallet with password-only protection (biometrics not enabled)');
       }
 
       // Store encrypted wallet data in Firestore
@@ -1276,7 +1288,8 @@ class SecureWalletService {
     }
   }
 
-  /// Sign transaction with password authentication (new method)
+  /// Sign transaction with password and optional biometric authentication
+  /// If biometrics are enabled, both are required. Otherwise, password-only with additional verification.
   static Future<Map<String, dynamic>> signTransactionWithPassword({
     required String userId,
     required String password,
@@ -1285,6 +1298,18 @@ class SecureWalletService {
     required String assetCode,
     required String memo, // Memo is now required
   }) async {
+    // Check if wallet has biometrics enabled
+    final walletDoc = await _firestore
+        .collection('secure_wallets')
+        .doc(userId)
+        .get();
+    
+    bool useBiometrics = false;
+    if (walletDoc.exists) {
+      final walletData = walletDoc.data()!;
+      useBiometrics = walletData['biometricsEnabled'] as bool? ?? false;
+    }
+
     return await _signTransaction(
       userId: userId,
       password: password,
@@ -1292,7 +1317,7 @@ class SecureWalletService {
       amount: amount,
       assetCode: assetCode,
       memo: memo,
-      useBiometrics: false,
+      useBiometrics: useBiometrics, // Use biometrics if enabled
     );
   }
 
@@ -1329,55 +1354,43 @@ class SecureWalletService {
       String decryptedSecretKey;
       String walletPublicKey;
 
-      if (useBiometrics) {
-        // Biometric authentication - check if biometrics are enabled
-        final walletDoc = await _firestore
-            .collection('secure_wallets')
-            .doc(userId)
-            .get();
+      // Step 1: Get wallet data to check biometric status
+      final walletDoc = await _firestore
+          .collection('secure_wallets')
+          .doc(userId)
+          .get();
 
-        if (!walletDoc.exists) {
-          throw Exception(
-            'Secure wallet not found. Please create a secure wallet first.',
-          );
-        }
+      if (!walletDoc.exists) {
+        throw Exception(
+          'Secure wallet not found. Please create a secure wallet first.',
+        );
+      }
 
-        final walletData = walletDoc.data()!;
-        final biometricsEnabled =
-            walletData['biometricsEnabled'] as bool? ?? false;
+      final walletData = walletDoc.data()!;
+      final biometricsEnabled =
+          walletData['biometricsEnabled'] as bool? ?? false;
 
-        if (!biometricsEnabled) {
-          throw Exception(
-            'Biometric authentication not enabled for this wallet',
-          );
-        }
+      // Step 2: Authenticate with password first (always required)
+      final authResult = await authenticateAndDecryptWallet(userId, password);
+      if (!authResult['success']) {
+        throw Exception('Password authentication failed: ${authResult['error']}');
+      }
 
-        // Perform biometric authentication
+      // Step 3: Perform biometric authentication if enabled
+      if (useBiometrics && biometricsEnabled) {
         final biometricResult = await _authenticateWithBiometrics(userId);
         if (!biometricResult['success']) {
           throw Exception(
-            'Biometric authentication failed: ${biometricResult['error']}',
+            'Biometric authentication failed: ${biometricResult['error']}. Please try again or use password-only authentication.',
           );
         }
-
-        // Decrypt wallet using password (biometrics just verify identity)
-        final authResult = await authenticateAndDecryptWallet(userId, password);
-        if (!authResult['success']) {
-          throw Exception('Wallet decryption failed: ${authResult['error']}');
-        }
-
-        decryptedSecretKey = authResult['secretKey'] as String;
-        walletPublicKey = authResult['publicKey'] as String;
-      } else {
-        // Password authentication
-        final authResult = await authenticateAndDecryptWallet(userId, password);
-        if (!authResult['success']) {
-          throw Exception('Authentication failed: ${authResult['error']}');
-        }
-
-        decryptedSecretKey = authResult['secretKey'] as String;
-        walletPublicKey = authResult['publicKey'] as String;
+      } else if (useBiometrics && !biometricsEnabled) {
+        // Biometrics requested but not enabled - this shouldn't happen, but handle gracefully
+        print('⚠️ Biometrics requested but not enabled for this wallet');
       }
+
+      decryptedSecretKey = authResult['secretKey'] as String;
+      walletPublicKey = authResult['publicKey'] as String;
 
       // Validate transaction limits and security checks
       final limitValidation = await _validateTransactionLimits(

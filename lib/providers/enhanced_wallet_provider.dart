@@ -9,6 +9,7 @@ import '../services/payment_security_service.dart';
 import '../services/moonpay_service.dart';
 import '../services/moonpay_callback_service.dart';
 import '../services/polygon_wallet_service.dart';
+import '../services/blockchain_transaction_service.dart';
 import '../models/transaction.dart' as app_transaction;
 import '../models/asset_config.dart';
 
@@ -370,12 +371,53 @@ class EnhancedWalletProvider extends ChangeNotifier {
 
   /// Load transactions
   Future<void> loadTransactions({bool forceRefresh = false}) async {
+    if (_isLoading && !forceRefresh) {
+      debugPrint('⏸️ Already loading transactions, skipping...');
+      return;
+    }
+    
     try {
-      _transactions = await _stellarService.getUserTransactionsFromBlockchain(
-        forceRefresh: forceRefresh,
-      );
+      _isLoading = true;
       notifyListeners();
-    } catch (e) {}
+      
+      debugPrint('🔄 Loading transactions... Public key: $_publicKey');
+      
+      // If we have a public key, use it directly with blockchain service
+      if (_publicKey != null && _publicKey!.isNotEmpty) {
+        debugPrint('✅ Using public key from provider: $_publicKey');
+        // Use blockchain transaction service with the public key directly
+        final transactions = await BlockchainTransactionService.getTransactionsForPublicKey(
+          _publicKey!,
+        );
+        _transactions = transactions;
+        debugPrint('✅ Loaded ${transactions.length} transactions from blockchain');
+      } else {
+        debugPrint('⚠️ No public key in provider, trying blockchain service lookup...');
+        // Fallback to blockchain service which will look up the public key
+        final transactions = await BlockchainTransactionService.getUserTransactionsFromBlockchain();
+        _transactions = transactions;
+        debugPrint('✅ Loaded ${transactions.length} transactions from blockchain service');
+        
+        // If still no transactions, try enhanced service as last resort
+        if (_transactions.isEmpty) {
+          debugPrint('⚠️ No transactions from blockchain service, trying enhanced service...');
+          _transactions = await _stellarService.getUserTransactionsFromBlockchain(
+            forceRefresh: forceRefresh,
+          );
+          debugPrint('✅ Loaded ${_transactions.length} transactions from enhanced service');
+        }
+      }
+      
+      _isLoading = false;
+      notifyListeners();
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error loading transactions: $e');
+      debugPrint('Stack trace: $stackTrace');
+      // Set empty list on error instead of keeping old data
+      _transactions = [];
+      _isLoading = false;
+      notifyListeners();
+    }
   }
 
   /// Load Polygon wallet balances
@@ -725,11 +767,60 @@ class EnhancedWalletProvider extends ChangeNotifier {
     required AssetConfig asset,
     required double amount,
     String? memo,
+    String? password, // Optional password for secure wallets
   }) async {
     _setLoading(true);
     _setError(null);
 
     try {
+      debugPrint('🔄 Sending ${asset.symbol} - Has secure wallet: $_hasSecureWallet, Password provided: ${password != null && password.isNotEmpty}');
+      
+      // Check if user has a secure wallet and password is provided
+      if (_hasSecureWallet && password != null && password.isNotEmpty) {
+        debugPrint('✅ Using secure wallet flow for ${asset.code}');
+        // For secure wallets, use SecureWalletService for supported assets
+        if (asset.code == 'XLM' || asset.code == 'AKOFA') {
+          final user = _auth.currentUser;
+          if (user == null) {
+            throw Exception('User not authenticated');
+          }
+
+          debugPrint('🔐 Signing transaction with SecureWalletService...');
+          final result = await SecureWalletService.signTransactionWithPassword(
+            userId: user.uid,
+            password: password,
+            recipientAddress: recipientAddress,
+            amount: amount,
+            assetCode: asset.code,
+            memo: memo ?? '',
+          );
+
+          debugPrint('📊 Transaction result: ${result['success']}, Error: ${result['error']}');
+
+          if (result['success'] == true) {
+            // Refresh data after successful transaction
+            await Future.wait([
+              loadBalances(),
+              loadTransactions(forceRefresh: true),
+            ]);
+            debugPrint('✅ Transaction successful, balances refreshed');
+          }
+
+          _setLoading(false);
+          return result;
+        } else {
+          // For other assets with secure wallets, we need to decrypt the secret key
+          // and use it with the enhanced stellar service
+          // This is a fallback for assets not directly supported by SecureWalletService
+          debugPrint('⚠️ Asset ${asset.code} not directly supported by SecureWalletService');
+          _setError('Secure wallet transactions for ${asset.symbol} require direct secret key access. Please use a regular wallet for this asset.');
+          _setLoading(false);
+          return {'success': false, 'error': 'Asset not supported with secure wallet'};
+        }
+      }
+
+      // Regular wallet flow - use enhanced stellar service
+      debugPrint('🔄 Using regular wallet flow (enhanced stellar service)');
       final result = await _stellarService.sendAsset(
         recipientAddress: recipientAddress,
         asset: asset,
@@ -737,17 +828,22 @@ class EnhancedWalletProvider extends ChangeNotifier {
         memo: memo,
       );
 
+      debugPrint('📊 Regular wallet transaction result: ${result['success']}, Error: ${result['error']}');
+
       if (result['success'] == true) {
         // Refresh data after successful transaction
         await Future.wait([
           loadBalances(),
           loadTransactions(forceRefresh: true),
         ]);
+        debugPrint('✅ Transaction successful, balances refreshed');
       }
 
       _setLoading(false);
       return result;
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error sending ${asset.symbol}: $e');
+      debugPrint('Stack trace: $stackTrace');
       _setError('Failed to send ${asset.symbol}: $e');
       _setLoading(false);
       return {'success': false, 'error': e.toString()};
@@ -1635,9 +1731,25 @@ class EnhancedWalletProvider extends ChangeNotifier {
   Future<List<app_transaction.Transaction>>
   getCombinedBlockchainTransactionHistory() async {
     try {
-      // Get Stellar transactions
-      await loadTransactions();
+      debugPrint('🔄 Getting combined transaction history...');
+      debugPrint('   Public key: $_publicKey');
+      debugPrint('   Has wallet: $_hasWallet');
+      
+      // Get Stellar transactions with timeout
+      try {
+        await loadTransactions().timeout(
+          const Duration(seconds: 30),
+          onTimeout: () {
+            debugPrint('⚠️ Transaction loading timed out after 30 seconds');
+          },
+        );
+      } catch (e) {
+        debugPrint('❌ Error loading transactions: $e');
+        // Continue with empty list if loading fails
+      }
+      
       final stellarTxs = _transactions;
+      debugPrint('   Stellar transactions loaded: ${stellarTxs.length}');
 
       final user = _auth.currentUser;
       final allTransactions = <app_transaction.Transaction>[...stellarTxs];
@@ -1713,9 +1825,11 @@ class EnhancedWalletProvider extends ChangeNotifier {
       // Sort by timestamp (newest first)
       allTransactions.sort((a, b) => b.timestamp.compareTo(a.timestamp));
 
+      debugPrint('✅ Returning ${allTransactions.length} total transactions');
       return allTransactions;
-    } catch (e) {
-      debugPrint('Error getting combined transaction history: $e');
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error getting combined transaction history: $e');
+      debugPrint('Stack trace: $stackTrace');
       return _transactions; // Fallback to Stellar transactions
     }
   }

@@ -18,6 +18,7 @@ import 'tag_resolver_screen.dart';
 import 'mining_screen.dart';
 import 'raffle/raffle_hub_screen.dart';
 import 'raffle/my_raffles_screen.dart';
+import 'bridge_screen.dart';
 import '../widgets/app_logo.dart';
 import '../providers/admin_provider.dart';
 
@@ -80,6 +81,7 @@ class _MainNavigationState extends State<MainNavigation> {
               const WebViewPage(),
               if (isVendor) const FunctionalVendorDashboard(),
               const EnhancedWalletScreen(),
+              const BridgeScreen(),
               const ReferralScreen(),
               const RaffleHubScreen(),
               if (isAdmin) const MyRafflesScreen(),
@@ -95,8 +97,9 @@ class _MainNavigationState extends State<MainNavigation> {
             final int marketIndex = 2;
             final int vendorIndex = isVendor ? 3 : -1;
             final int walletIndex = isVendor ? 4 : 3;
-            final int referralIndex = isVendor ? 5 : 4;
-            final int raffleHubIndex = isVendor ? 6 : 5;
+            final int bridgeIndex = isVendor ? 5 : 4;
+            final int referralIndex = isVendor ? 6 : 5;
+            final int raffleHubIndex = isVendor ? 7 : 6;
             final int myRafflesIndex = isAdmin ? (isVendor ? 7 : 6) : -1;
             final int communityIndex = isAdmin
                 ? (isVendor ? 8 : 7)
@@ -123,6 +126,7 @@ class _MainNavigationState extends State<MainNavigation> {
                   marketIndex,
                   vendorIndex,
                   walletIndex,
+                  bridgeIndex,
                   referralIndex,
                   raffleHubIndex,
                   myRafflesIndex,
@@ -149,6 +153,7 @@ class _MainNavigationState extends State<MainNavigation> {
     int marketIndex,
     int vendorIndex,
     int walletIndex,
+    int bridgeIndex,
     int referralIndex,
     int raffleHubIndex,
     int myRafflesIndex,
@@ -170,6 +175,7 @@ class _MainNavigationState extends State<MainNavigation> {
             marketIndex,
             vendorIndex,
             walletIndex,
+            bridgeIndex,
             referralIndex,
             raffleHubIndex,
             myRafflesIndex,
@@ -243,6 +249,7 @@ class _MainNavigationState extends State<MainNavigation> {
     int marketIndex,
     int vendorIndex,
     int walletIndex,
+    int bridgeIndex,
     int referralIndex,
     int raffleHubIndex,
     int myRafflesIndex,
@@ -291,6 +298,11 @@ class _MainNavigationState extends State<MainNavigation> {
                     'Wallet',
                     walletIndex,
                   ),
+                  _buildDrawerItem(
+                    Icons.swap_horiz,
+                    'Bridge',
+                    bridgeIndex,
+                  ),
                   _buildDrawerItem(Icons.share, 'Referrals', referralIndex),
                   _buildDrawerItem(
                     Icons.local_activity,
@@ -329,6 +341,7 @@ class _MainNavigationState extends State<MainNavigation> {
     int marketIndex,
     int vendorIndex,
     int walletIndex,
+    int bridgeIndex,
     int referralIndex,
     int raffleHubIndex,
     int myRafflesIndex,
@@ -392,6 +405,11 @@ class _MainNavigationState extends State<MainNavigation> {
                   Icons.account_balance_wallet,
                   'Wallet',
                   walletIndex,
+                ),
+                _buildCollapsibleNavItem(
+                  Icons.swap_horiz,
+                  'Bridge',
+                  bridgeIndex,
                 ),
                 _buildCollapsibleNavItem(
                   Icons.share,

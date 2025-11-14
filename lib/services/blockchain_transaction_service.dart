@@ -47,6 +47,18 @@ class BlockchainTransactionService {
         stellarPublicKey = walletData['publicKey'] as String?;
       } else {}
 
+      // Try secureWallets collection for secure wallets
+      if (stellarPublicKey == null || stellarPublicKey.isEmpty) {
+        final secureWalletDoc = await _firestore
+            .collection('secureWallets')
+            .doc(user.uid)
+            .get();
+        if (secureWalletDoc.exists) {
+          final secureWalletData = secureWalletDoc.data()!;
+          stellarPublicKey = secureWalletData['publicKey'] as String?;
+        }
+      }
+
       // Fallback to USER collection
       if (stellarPublicKey == null || stellarPublicKey.isEmpty) {
         final userDoc = await _firestore.collection('USER').doc(user.uid).get();
@@ -89,6 +101,88 @@ class BlockchainTransactionService {
 
       return transactions;
     } catch (e) {
+      return [];
+    }
+  }
+
+  // Get transactions for a specific public key (bypasses Firestore lookup)
+  static Future<List<app_transaction.Transaction>>
+  getTransactionsForPublicKey(
+    String publicKey, {
+    String? userId,
+    String? akofaTag,
+  }) async {
+    try {
+      // Validate the public key format
+      if (publicKey.isEmpty ||
+          !publicKey.startsWith('G') ||
+          publicKey.length != 56) {
+        debugPrint('❌ Invalid public key format: $publicKey');
+        return [];
+      }
+
+      // Test Stellar SDK connection first
+      final connectionTest = await testStellarConnection();
+      if (!connectionTest) {
+        debugPrint('❌ Stellar connection test failed');
+        return [];
+      }
+
+      // Get userId if not provided
+      String? finalUserId = userId;
+      if (finalUserId == null) {
+        final user = _auth.currentUser;
+        if (user != null) {
+          finalUserId = user.uid;
+        }
+      }
+
+      if (finalUserId == null) {
+        debugPrint('❌ No user ID available');
+        return [];
+      }
+
+      // Check cache first
+      if (_isCacheValid(publicKey)) {
+        debugPrint('✅ Using cached transactions for $publicKey');
+        return _transactionCache[publicKey] ?? [];
+      }
+
+      // Get akofaTag if not provided
+      String? finalAkofaTag = akofaTag;
+      if (finalAkofaTag == null) {
+        try {
+          final user = _auth.currentUser;
+          if (user != null) {
+            final userDoc =
+                await _firestore.collection('USER').doc(user.uid).get();
+            if (userDoc.exists) {
+              final userData = userDoc.data()!;
+              finalAkofaTag = userData['akofaTag'] as String?;
+            }
+          }
+        } catch (e) {
+          // Ignore errors when fetching akofaTag
+        }
+      }
+
+      debugPrint('🔄 Fetching transactions for public key: $publicKey');
+
+      // Fetch real transactions from Stellar blockchain
+      final transactions = await _fetchTransactionsFromBlockchain(
+        publicKey,
+        finalUserId,
+        finalAkofaTag,
+      );
+
+      // Update cache
+      _updateCache(publicKey, transactions);
+
+      debugPrint('✅ Loaded ${transactions.length} transactions for $publicKey');
+      return transactions;
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error getting transactions for public key: $e');
+      debugPrint('Stack trace: $stackTrace');
       return [];
     }
   }

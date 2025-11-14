@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:stellar_flutter_sdk/stellar_flutter_sdk.dart';
+import 'package:stellar_flutter_sdk/stellar_flutter_sdk.dart' as stellar;
 
 class MiningService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -140,6 +140,70 @@ class MiningService {
     }
   }
 
+  /// Check if user has AKOFA trustline
+  Future<bool> _hasAkofaTrustline(String publicKey) async {
+    try {
+      const issuerPublicKey =
+          "GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW";
+      final sdk = stellar.StellarSDK.TESTNET;
+      
+      try {
+        final account = await sdk.accounts.account(publicKey);
+        
+        if (account.balances == null || account.balances!.isEmpty) {
+          return false;
+        }
+        
+        for (var balance in account.balances!) {
+          if (balance.assetType != 'native' &&
+              balance.assetCode == 'AKOFA' &&
+              balance.assetIssuer == issuerPublicKey) {
+            return true;
+          }
+        }
+        return false;
+      } catch (accountError) {
+        print("❌ Error fetching account for trustline check: $accountError");
+        // If account doesn't exist or network error, assume no trustline
+        return false;
+      }
+    } catch (e) {
+      print("❌ Error checking trustline: $e");
+      // Return false on any error to be safe - we'll show error message in _sendTokens
+      return false;
+    }
+  }
+
+  /// Decode Stellar transaction error from XDR
+  String _decodeTransactionError(String? resultXdr) {
+    if (resultXdr == null || resultXdr.isEmpty) {
+      return 'Transaction failed with unknown error';
+    }
+
+    // Check for common error patterns
+    if (resultXdr.contains('op_no_trust') || 
+        resultXdr.contains('NO_TRUST') ||
+        resultXdr.contains('PAYMENT_NO_TRUST')) {
+      return 'Missing AKOFA trustline. Please set up your wallet to receive AKOFA tokens. Go to your wallet screen and ensure the AKOFA trustline is created.';
+    } else if (resultXdr.contains('op_underfunded') ||
+               resultXdr.contains('UNDERFUNDED') ||
+               resultXdr.contains('INSUFFICIENT_BALANCE')) {
+      return 'Insufficient balance in distributor account. Please contact support.';
+    } else if (resultXdr.contains('op_bad_auth') ||
+               resultXdr.contains('BAD_AUTH')) {
+      return 'Transaction authentication failed. Please contact support.';
+    } else if (resultXdr.contains('op_no_destination') ||
+               resultXdr.contains('NO_ACCOUNT')) {
+      return 'Recipient account not found. Please ensure your wallet is properly set up.';
+    } else if (resultXdr.contains('op_line_full') ||
+               resultXdr.contains('LINE_FULL')) {
+      return 'Trustline limit reached. Please contact support.';
+    } else {
+      // Try to provide a more readable error message
+      return 'Transaction failed. Error code: ${resultXdr.substring(0, resultXdr.length > 50 ? 50 : resultXdr.length)}...';
+    }
+  }
+
   /// Send mined tokens to user's Stellar wallet
   Future<Map<String, dynamic>> _sendTokens(double amount) async {
     try {
@@ -149,9 +213,30 @@ class MiningService {
         return {
           'success': false,
           'txHash': null,
-          'message': 'User wallet not found',
+          'message': 'User wallet not found. Please set up your wallet first.',
         };
       }
+
+      // Check if user has AKOFA trustline before attempting to send
+      print("🔍 Checking if user has AKOFA trustline...");
+      bool hasTrustline = false;
+      try {
+        hasTrustline = await _hasAkofaTrustline(userPublicKey);
+      } catch (trustlineCheckError) {
+        print("❌ Error checking trustline: $trustlineCheckError");
+        // Continue anyway - we'll get a better error from the transaction
+      }
+      
+      if (!hasTrustline) {
+        print("❌ User does not have AKOFA trustline");
+        return {
+          'success': false,
+          'txHash': null,
+          'message': 'Missing AKOFA trustline. Please go to your wallet screen and set up the AKOFA trustline to receive mining rewards. You need to create a trustline for the AKOFA asset before you can receive tokens.',
+        };
+      }
+
+      print("✅ User has AKOFA trustline, proceeding with payment...");
 
       // ⚠️ Temporarily keep this here for testing (will move to Cloud Function)
       const distributorSecret =
@@ -159,27 +244,80 @@ class MiningService {
       const issuerPublicKey =
           "GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW";
 
-      final sdk = StellarSDK.TESTNET;
-      final distributorKeyPair = KeyPair.fromSecretSeed(distributorSecret);
-      final distributorAccount = await sdk.accounts.account(
-        distributorKeyPair.accountId,
-      );
+      final sdk = stellar.StellarSDK.TESTNET;
+      final distributorKeyPair = stellar.KeyPair.fromSecretSeed(distributorSecret);
+      
+      stellar.AccountResponse distributorAccount;
+      try {
+        distributorAccount = await sdk.accounts.account(
+          distributorKeyPair.accountId,
+        );
+      } catch (accountError) {
+        print("❌ Error fetching distributor account: $accountError");
+        return {
+          'success': false,
+          'txHash': null,
+          'message': 'Network error: Could not connect to Stellar network. Please check your internet connection and try again.',
+        };
+      }
 
-      final akofaAsset = AssetTypeCreditAlphaNum12('AKOFA', issuerPublicKey);
+      final akofaAsset = stellar.AssetTypeCreditAlphaNum12('AKOFA', issuerPublicKey);
 
-      final transaction = TransactionBuilder(distributorAccount)
-          .addOperation(
-            PaymentOperationBuilder(
-              userPublicKey,
-              akofaAsset,
-              amount.toStringAsFixed(6),
-            ).build(),
-          )
-          .addMemo(Memo.text('AKOFA Mining Reward'))
-          .build();
+      stellar.Transaction transaction;
+      try {
+        transaction = stellar.TransactionBuilder(distributorAccount)
+            .addOperation(
+              stellar.PaymentOperationBuilder(
+                userPublicKey,
+                akofaAsset,
+                amount.toStringAsFixed(6),
+              ).build(),
+            )
+            .addMemo(stellar.Memo.text('AKOFA Mining Reward'))
+            .build();
+      } catch (buildError) {
+        print("❌ Error building transaction: $buildError");
+        return {
+          'success': false,
+          'txHash': null,
+          'message': 'Error building transaction. Please try again.',
+        };
+      }
 
-      transaction.sign(distributorKeyPair, Network.TESTNET);
-      final response = await sdk.submitTransaction(transaction);
+      try {
+        transaction.sign(distributorKeyPair, stellar.Network.TESTNET);
+      } catch (signError) {
+        print("❌ Error signing transaction: $signError");
+        return {
+          'success': false,
+          'txHash': null,
+          'message': 'Error signing transaction. Please contact support.',
+        };
+      }
+
+      stellar.SubmitTransactionResponse response;
+      try {
+        response = await sdk.submitTransaction(transaction);
+      } catch (submitError) {
+        print("❌ Error submitting transaction: $submitError");
+        String errorMessage = submitError.toString();
+        
+        // Check for common error patterns
+        if (errorMessage.contains('Dart exception thrown from converted Future') ||
+            errorMessage.contains('network') ||
+            errorMessage.contains('connection')) {
+          errorMessage = 'Network error occurred. Please check your internet connection and try again.';
+        } else if (errorMessage.contains('trustline') || 
+                   errorMessage.contains('NO_TRUST')) {
+          errorMessage = 'Missing AKOFA trustline. Please set up your wallet to receive AKOFA tokens.';
+        }
+        
+        return {
+          'success': false,
+          'txHash': null,
+          'message': errorMessage,
+        };
+      }
 
       if (response.success) {
         print("✅ Sent $amount AKOFA to $userPublicKey");
@@ -189,16 +327,37 @@ class MiningService {
           'message': 'Transaction successful',
         };
       } else {
+        final errorMessage = _decodeTransactionError(response.resultXdr);
         print("❌ Transaction failed: ${response.resultXdr}");
+        print("❌ Decoded error: $errorMessage");
         return {
           'success': false,
           'txHash': response.hash,
-          'message': 'Transaction failed: ${response.resultXdr}',
+          'message': errorMessage,
         };
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
       print("❌ Error sending tokens: $e");
-      return {'success': false, 'txHash': null, 'message': e.toString()};
+      print("❌ Stack trace: $stackTrace");
+      
+      String errorMessage = e.toString();
+      
+      // Check if it's a trustline-related error
+      if (errorMessage.contains('trustline') || 
+          errorMessage.contains('NO_TRUST') ||
+          errorMessage.contains('op_no_trust')) {
+        errorMessage = 'Missing AKOFA trustline. Please set up your wallet to receive AKOFA tokens. Go to your wallet screen and ensure the AKOFA trustline is created.';
+      } else if (errorMessage.contains('Dart exception thrown from converted Future') ||
+                 errorMessage.contains('network') ||
+                 errorMessage.contains('connection')) {
+        errorMessage = 'Network error occurred. Please check your internet connection and try again.';
+      }
+      
+      return {
+        'success': false,
+        'txHash': null,
+        'message': errorMessage,
+      };
     }
   }
 
@@ -338,6 +497,7 @@ class MiningService {
 
     try {
       // Step 1: Use transaction to validate and mark as processing (atomic)
+      try {
       await _firestore.runTransaction((transaction) async {
         final sessionDoc = await transaction.get(sessionRef);
         if (!sessionDoc.exists) {
@@ -373,22 +533,71 @@ class MiningService {
           'claimedAt': Timestamp.now(),
         });
       });
+      } catch (transactionError) {
+        print("❌ Transaction error: $transactionError");
+        // Extract error message from exception
+        String errorMessage = transactionError.toString();
+        if (transactionError is Exception) {
+          errorMessage = transactionError.toString().replaceFirst('Exception: ', '');
+        }
+        return {
+          'success': false,
+          'message': errorMessage,
+        };
+      }
 
       // Step 2: Send tokens OUTSIDE transaction (network call can take time)
       if (amountToSend == null) {
-        throw Exception('Amount not set after transaction');
+        return {
+          'success': false,
+          'message': 'Amount not set after transaction. Please try again.',
+        };
       }
 
       print("💰 Sending ${amountToSend} AKOFA tokens to user wallet...");
-      final result = await _sendTokens(amountToSend!);
+      
+      Map<String, dynamic> result;
+      try {
+        result = await _sendTokens(amountToSend!);
+      } catch (sendError) {
+        print("❌ Error in _sendTokens: $sendError");
+        String errorMessage = sendError.toString();
+        
+        // Check if it's a trustline error
+        if (errorMessage.toLowerCase().contains('trustline') ||
+            errorMessage.toLowerCase().contains('no_trust')) {
+          errorMessage = 'Missing AKOFA trustline. Please set up your wallet to receive AKOFA tokens. Go to your wallet screen and ensure the AKOFA trustline is created.';
+        }
+        
+        // Update status to failed
+        try {
+          await sessionRef.update({
+            'payoutStatus': 'failed',
+            'txMessage': errorMessage,
+            'completedAt': Timestamp.now(),
+          });
+        } catch (updateError) {
+          print("❌ Error updating failed status: $updateError");
+        }
+        
+        return {
+          'success': false,
+          'message': errorMessage,
+        };
+      }
 
       // Step 3: Update final status OUTSIDE transaction
+      try {
       await sessionRef.update({
         'payoutStatus': result['success'] ? 'success' : 'failed',
         'txHash': result['txHash'],
         'txMessage': result['message'],
         'completedAt': Timestamp.now(),
       });
+      } catch (updateError) {
+        print("❌ Error updating final status: $updateError");
+        // Don't fail the whole operation if update fails, but log it
+      }
 
       if (result['success']) {
         print("✅ Successfully claimed ${amountToSend} AKOFA tokens");
@@ -397,21 +606,38 @@ class MiningService {
       }
 
       return result;
-    } catch (e) {
+    } catch (e, stackTrace) {
       print("❌ Error claiming specific unpaid session: $e");
+      print("❌ Stack trace: $stackTrace");
+      
+      // Extract meaningful error message
+      String errorMessage = e.toString();
+      if (e is Exception) {
+        errorMessage = e.toString().replaceFirst('Exception: ', '');
+      }
+      
+      // Check for common error patterns
+      if (errorMessage.contains('Dart exception thrown from converted Future')) {
+        errorMessage = 'Network error occurred. Please check your internet connection and try again.';
+      } else if (errorMessage.toLowerCase().contains('trustline')) {
+        errorMessage = 'Missing AKOFA trustline. Please set up your wallet to receive AKOFA tokens.';
+      } else if (errorMessage.toLowerCase().contains('network') ||
+                 errorMessage.toLowerCase().contains('connection')) {
+        errorMessage = 'Network error. Please check your connection and try again.';
+      }
       
       // Mark as failed if we got past the transaction
       try {
         await sessionRef.update({
           'payoutStatus': 'failed',
-          'txMessage': e.toString(),
+          'txMessage': errorMessage,
           'completedAt': Timestamp.now(),
         });
       } catch (updateError) {
         print("❌ Error updating failed status: $updateError");
       }
 
-      return {'success': false, 'message': e.toString()};
+      return {'success': false, 'message': errorMessage};
     }
   }
 

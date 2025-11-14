@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -19,6 +20,7 @@ import '../widgets/moonpay_button.dart';
 import 'buy_crypto_screen.dart';
 import '../services/secure_wallet_service.dart';
 import '../services/akofa_tag_service.dart';
+import '../services/biometric_service.dart';
 import '../providers/auth_provider.dart' as local_auth;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'secure_wallet_creation_screen.dart';
@@ -42,6 +44,21 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+
+    // Listen to tab changes to load transactions when transactions tab is selected
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging && _tabController.index == 1) {
+        // Transactions tab is selected (index 1)
+        final walletProvider = Provider.of<EnhancedWalletProvider>(
+          context,
+          listen: false,
+        );
+        if (walletProvider.hasWallet) {
+          // Load transactions when tab is opened
+          walletProvider.loadTransactions(forceRefresh: false);
+        }
+      }
+    });
 
     // Refresh wallet data when screen loads
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -469,47 +486,69 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
 
         // Transaction List
         Expanded(
-          child: FutureBuilder<List<app_transaction.Transaction>>(
-            future: walletProvider.getCombinedBlockchainTransactionHistory(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
+          child: Consumer<EnhancedWalletProvider>(
+            builder: (context, provider, child) {
+              // Load transactions if not already loaded or if we have a wallet but no transactions
+              if (provider.hasWallet && provider.transactions.isEmpty && !provider.isLoading) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  debugPrint('🔄 Auto-loading transactions for transactions tab...');
+                  provider.loadTransactions();
+                });
+              }
+              
+              debugPrint('📊 Consumer rebuild - transactions: ${provider.transactions.length}');
+              debugPrint('📊 Is loading: ${provider.isLoading}');
+              debugPrint('📊 Has wallet: ${provider.hasWallet}');
+              debugPrint('📊 Public key: ${provider.publicKey}');
+              
+              // Show loading indicator while loading
+              if (provider.isLoading && provider.transactions.isEmpty) {
                 return const Center(
                   child: CircularProgressIndicator(color: AppTheme.primaryGold),
                 );
               }
-
-              if (snapshot.hasError) {
+              
+              // Show empty state if no transactions
+              if (provider.transactions.isEmpty) {
                 return Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.error_outline, size: 48, color: AppTheme.grey),
+                      Icon(Icons.receipt_long, size: 48, color: AppTheme.grey),
                       const SizedBox(height: 16),
                       Text(
-                        'Failed to load transactions',
+                        'No transactions found',
                         style: AppTheme.bodyMedium.copyWith(
                           color: AppTheme.grey,
                         ),
                       ),
                       const SizedBox(height: 8),
+                      Text(
+                        'Your transaction history will appear here',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.grey,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
                       ElevatedButton(
-                        onPressed: _refreshWallet,
+                        onPressed: () {
+                          provider.loadTransactions(forceRefresh: true);
+                        },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppTheme.primaryGold,
                           foregroundColor: AppTheme.black,
                         ),
-                        child: const Text('Retry'),
+                        child: const Text('Refresh'),
                       ),
                     ],
                   ),
                 );
               }
-
-              final allTransactions =
-                  snapshot.data ?? walletProvider.transactions;
+              
+              debugPrint('📊 Rendering transaction list with ${provider.transactions.length} items');
               return EnhancedTransactionList(
-                transactions: allTransactions,
-                onRefresh: _refreshWallet,
+                transactions: provider.transactions,
+                onRefresh: () => provider.loadTransactions(forceRefresh: true),
               );
             },
           ),
@@ -1896,6 +1935,9 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                   controller: amountController,
                   keyboardType: TextInputType.number,
                   style: TextStyle(color: AppTheme.white),
+                  onChanged: (value) {
+                    setState(() {}); // Trigger rebuild to update button state
+                  },
                   decoration: InputDecoration(
                     labelText: 'Amount',
                     labelStyle: TextStyle(color: AppTheme.primaryGold),
@@ -1916,6 +1958,9 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                   controller: memoController,
                   style: TextStyle(color: AppTheme.white),
                   maxLength: 28, // Stellar memo limit
+                  onChanged: (value) {
+                    setState(() {}); // Trigger rebuild to update button state
+                  },
                   decoration: InputDecoration(
                     labelText: 'Memo (Required)',
                     labelStyle: TextStyle(color: AppTheme.primaryGold),
@@ -1946,7 +1991,8 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
               onPressed:
                   resolvedAddress.isEmpty ||
                       isResolvingTag ||
-                      memoController.text.trim().isEmpty
+                      memoController.text.trim().isEmpty ||
+                      amountController.text.trim().isEmpty
                   ? null
                   : () async {
                       final amountText = amountController.text.trim();
@@ -1985,15 +2031,20 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                         return;
                       }
 
-                      // Show password confirmation dialog
-                      final password = await _showTransactionPasswordDialog(
+                      // Show step-by-step transaction authentication dialog
+                      final authResult = await _showTransactionAuthDialog(
                         asset.symbol,
                         amount.toString(),
                         recipientController.text,
                       );
-                      if (password == null || password.isEmpty) {
+                      if (authResult == null || authResult['password'] == null) {
                         return; // User cancelled
                       }
+
+                      final password = authResult['password'] as String;
+                      // Biometric verification is optional - if wallet has biometrics, it's required
+                      // If wallet doesn't have biometrics, password-only is fine
+                      // The service will handle this automatically
 
                       // Verify password with Firebase Auth
                       final authProvider = Provider.of<local_auth.AuthProvider>(
@@ -2036,11 +2087,38 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
 
                       Navigator.of(context).pop();
 
-                      // Show loading
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Sending ${amount} ${asset.symbol}...'),
-                          backgroundColor: Colors.blue,
+                      // Show loading dialog
+                      showDialog(
+                        context: context,
+                        barrierDismissible: false,
+                        builder: (context) => AlertDialog(
+                          backgroundColor: AppTheme.darkGrey,
+                          content: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const CircularProgressIndicator(
+                                color: AppTheme.primaryGold,
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'Sending ${amount} ${asset.symbol}...',
+                                style: TextStyle(
+                                  color: AppTheme.white,
+                                  fontSize: 16,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Please wait while we process your transaction',
+                                style: TextStyle(
+                                  color: AppTheme.grey,
+                                  fontSize: 12,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ),
                         ),
                       );
 
@@ -2050,33 +2128,42 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                           asset: asset,
                           amount: amount,
                           memo: memoText,
+                          password: password, // Pass the password for secure wallets
                         );
 
+                        // Close loading dialog
+                        Navigator.of(context).pop();
+
                         if (result['success'] == true) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                '${asset.symbol} sent successfully!',
-                              ),
-                              backgroundColor: Colors.green,
-                            ),
+                          // Show success dialog
+                          _showTransactionSuccessDialog(
+                            context,
+                            asset: asset,
+                            amount: amount,
+                            recipientAddress: resolvedAddress,
+                            transactionHash: result['hash'],
+                            memo: memoText,
                           );
                         } else {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                'Failed to send ${asset.symbol}: ${result['error']}',
-                              ),
-                              backgroundColor: Colors.red,
-                            ),
+                          // Show error dialog
+                          _showTransactionErrorDialog(
+                            context,
+                            asset: asset,
+                            error: result['error'] ?? 'Transaction failed',
+                            errorDetails: result['message'],
                           );
                         }
                       } catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Error sending ${asset.symbol}: $e'),
-                            backgroundColor: Colors.red,
-                          ),
+                        // Close loading dialog
+                        if (Navigator.of(context).canPop()) {
+                          Navigator.of(context).pop();
+                        }
+                        // Show error dialog
+                        _showTransactionErrorDialog(
+                          context,
+                          asset: asset,
+                          error: 'Transaction Error',
+                          errorDetails: e.toString(),
                         );
                       }
                     },
@@ -3064,6 +3151,22 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     Share.share(shareText, subject: 'My Akofa Tag');
   }
 
+  Future<Map<String, dynamic>?> _showTransactionAuthDialog(
+    String assetSymbol,
+    String amount,
+    String recipient,
+  ) async {
+    return await showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _TransactionAuthDialog(
+        assetSymbol: assetSymbol,
+        amount: amount,
+        recipient: recipient,
+      ),
+    );
+  }
+
   Future<String?> _showTransactionPasswordDialog(
     String assetSymbol,
     String amount,
@@ -3136,6 +3239,406 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
           ],
         );
       },
+    );
+  }
+
+  /// Show success dialog for successful transactions
+  void _showTransactionSuccessDialog(
+    BuildContext context, {
+    required dynamic asset,
+    required double amount,
+    required String recipientAddress,
+    String? transactionHash,
+    String? memo,
+  }) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.darkGrey,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: Colors.green.withOpacity(0.3),
+            width: 2,
+          ),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.green.withOpacity(0.2),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.check_circle,
+                color: Colors.green,
+                size: 32,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Transaction Successful!',
+                style: AppTheme.headingMedium.copyWith(
+                  color: Colors.green,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Colors.green.withOpacity(0.3),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.send,
+                          color: AppTheme.primaryGold,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Amount Sent',
+                          style: TextStyle(
+                            color: AppTheme.grey,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${amount.toStringAsFixed(7)} ${asset.symbol}',
+                      style: TextStyle(
+                        color: AppTheme.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              _buildTransactionDetailRow(
+                icon: Icons.person,
+                label: 'Recipient',
+                value: recipientAddress.length > 20
+                    ? '${recipientAddress.substring(0, 10)}...${recipientAddress.substring(recipientAddress.length - 10)}'
+                    : recipientAddress,
+              ),
+              if (memo != null && memo.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                _buildTransactionDetailRow(
+                  icon: Icons.note,
+                  label: 'Memo',
+                  value: memo,
+                ),
+              ],
+              if (transactionHash != null && transactionHash.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                _buildTransactionDetailRow(
+                  icon: Icons.receipt_long,
+                  label: 'Transaction Hash',
+                  value: transactionHash.length > 20
+                      ? '${transactionHash.substring(0, 10)}...${transactionHash.substring(transactionHash.length - 10)}'
+                      : transactionHash,
+                  onTap: () {
+                    // Copy to clipboard
+                    Clipboard.setData(ClipboardData(text: transactionHash));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: const Text('Transaction hash copied to clipboard'),
+                        backgroundColor: AppTheme.primaryGold,
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                ),
+              ],
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      color: Colors.green,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Your transaction has been successfully submitted to the blockchain.',
+                        style: TextStyle(
+                          color: Colors.green,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: AppTheme.white,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 12,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Show error dialog for failed transactions
+  void _showTransactionErrorDialog(
+    BuildContext context, {
+    required dynamic asset,
+    required String error,
+    String? errorDetails,
+  }) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.darkGrey,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: Colors.red.withOpacity(0.3),
+            width: 2,
+          ),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.2),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.error_outline,
+                color: Colors.red,
+                size: 32,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Transaction Failed',
+                style: AppTheme.headingMedium.copyWith(
+                  color: Colors.red,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Colors.red.withOpacity(0.3),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.warning_amber_rounded,
+                          color: Colors.red,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Error Message',
+                          style: TextStyle(
+                            color: AppTheme.grey,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      error,
+                      style: TextStyle(
+                        color: AppTheme.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    if (errorDetails != null && errorDetails.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        errorDetails,
+                        style: TextStyle(
+                          color: AppTheme.grey,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      color: Colors.orange,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Your ${asset.symbol} was not sent. Please check the error message and try again.',
+                        style: TextStyle(
+                          color: Colors.orange,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: AppTheme.grey),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              // Optionally retry the transaction
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: AppTheme.white,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 12,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Helper method to build transaction detail rows
+  Widget _buildTransactionDetailRow({
+    required IconData icon,
+    required String label,
+    required String value,
+    VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppTheme.darkGrey.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: AppTheme.primaryGold, size: 18),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: AppTheme.grey,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    value,
+                    style: TextStyle(
+                      color: AppTheme.white,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (onTap != null)
+              Icon(
+                Icons.copy,
+                color: AppTheme.primaryGold,
+                size: 16,
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -3441,6 +3944,678 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
           ),
         );
       }
+    }
+  }
+}
+
+/// Step-by-step transaction authentication dialog
+/// Guides users through password input and biometric authentication
+class _TransactionAuthDialog extends StatefulWidget {
+  final String assetSymbol;
+  final String amount;
+  final String recipient;
+
+  const _TransactionAuthDialog({
+    required this.assetSymbol,
+    required this.amount,
+    required this.recipient,
+  });
+
+  @override
+  State<_TransactionAuthDialog> createState() => _TransactionAuthDialogState();
+}
+
+class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
+  int _currentStep = 0; // 0 = password, 1 = biometric/confirmation
+  final TextEditingController _passwordController = TextEditingController();
+  bool _obscurePassword = true;
+  bool _isAuthenticating = false;
+  String? _error;
+  bool _passwordVerified = false;
+  bool _biometricVerified = false;
+  bool _biometricsEnabled = false;
+  bool _biometricsChecked = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkBiometricStatus();
+  }
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _checkBiometricStatus() async {
+    try {
+      final authProvider = Provider.of<local_auth.AuthProvider>(
+        context,
+        listen: false,
+      );
+      final user = authProvider.user;
+      if (user == null) return;
+
+      final walletDoc = await FirebaseFirestore.instance
+          .collection('secure_wallets')
+          .doc(user.uid)
+          .get();
+
+      if (walletDoc.exists) {
+        final walletData = walletDoc.data()!;
+        setState(() {
+          _biometricsEnabled = walletData['biometricsEnabled'] as bool? ?? false;
+          _biometricsChecked = true;
+        });
+      } else {
+        setState(() {
+          _biometricsEnabled = false;
+          _biometricsChecked = true;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _biometricsEnabled = false;
+        _biometricsChecked = true;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppTheme.darkGrey,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      title: Column(
+        children: [
+          Text(
+            'Sign Transaction',
+            style: AppTheme.headingSmall.copyWith(color: AppTheme.primaryGold),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          if (_biometricsChecked) _buildStepIndicator(),
+        ],
+      ),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Transaction Summary
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.darkGrey.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.primaryGold.withOpacity(0.3)),
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    'Transaction Details',
+                    style: AppTheme.bodyMedium.copyWith(
+                      color: AppTheme.primaryGold,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _buildDetailRow('Asset', widget.assetSymbol),
+                  _buildDetailRow('Amount', widget.amount),
+                  _buildDetailRow('Recipient', widget.recipient.length > 20
+                      ? '${widget.recipient.substring(0, 20)}...'
+                      : widget.recipient),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            // Step Content
+            if (!_biometricsChecked)
+              const Center(child: CircularProgressIndicator())
+            else if (_currentStep == 0)
+              _buildPasswordStep()
+            else if (_currentStep == 1)
+              _biometricsEnabled ? _buildBiometricStep() : _buildConfirmationStep(),
+            // Error Message
+            if (_error != null) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.error_outline, color: Colors.red, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _error!,
+                        style: TextStyle(color: Colors.red, fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        if (_currentStep == 0) ...[
+          TextButton(
+            onPressed: _isAuthenticating
+                ? null
+                : () => Navigator.of(context).pop(null),
+            child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
+          ),
+          ElevatedButton(
+            onPressed: _isAuthenticating ? null : _verifyPassword,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryGold,
+              foregroundColor: AppTheme.black,
+            ),
+            child: _isAuthenticating
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Verify Password'),
+          ),
+        ] else if (_currentStep == 1) ...[
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _currentStep = 0;
+                _biometricVerified = false;
+                _error = null;
+              });
+            },
+            child: Text('Back', style: TextStyle(color: AppTheme.grey)),
+          ),
+          ElevatedButton(
+            onPressed: _isAuthenticating
+                ? null
+                : _biometricsEnabled
+                    ? _authenticateBiometric
+                    : _confirmTransaction,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryGold,
+              foregroundColor: AppTheme.black,
+            ),
+            child: _isAuthenticating
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Text(_biometricsEnabled
+                    ? 'Authenticate with Biometrics'
+                    : 'Confirm Transaction'),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildStepIndicator() {
+    final step2Label = _biometricsEnabled ? 'Biometric' : 'Confirm';
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _buildStepDot(0, 'Password', _currentStep >= 0),
+        Container(
+          width: 40,
+          height: 2,
+          color: _currentStep > 0
+              ? AppTheme.primaryGold
+              : AppTheme.grey.withOpacity(0.3),
+        ),
+        _buildStepDot(1, step2Label, _currentStep >= 1),
+      ],
+    );
+  }
+
+  Widget _buildStepDot(int step, String label, bool isActive) {
+    return Column(
+      children: [
+        Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: isActive ? AppTheme.primaryGold : AppTheme.grey.withOpacity(0.3),
+          ),
+          child: Center(
+            child: isActive && step < _currentStep
+                ? const Icon(Icons.check, color: Colors.white, size: 20)
+                : Text(
+                    '${step + 1}',
+                    style: TextStyle(
+                      color: isActive ? AppTheme.black : AppTheme.grey,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            color: isActive ? AppTheme.primaryGold : AppTheme.grey,
+            fontSize: 10,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            '$label:',
+            style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+          ),
+          Text(
+            value,
+            style: AppTheme.bodySmall.copyWith(
+              color: AppTheme.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPasswordStep() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          'Step 1: Enter Password',
+          style: AppTheme.bodyMedium.copyWith(
+            color: AppTheme.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Enter your wallet password to verify your identity',
+          style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _passwordController,
+          obscureText: _obscurePassword,
+          enabled: !_isAuthenticating,
+          style: TextStyle(color: AppTheme.white),
+          decoration: InputDecoration(
+            labelText: 'Password',
+            labelStyle: TextStyle(color: AppTheme.grey),
+            hintText: 'Enter your password',
+            hintStyle: TextStyle(color: AppTheme.grey.withOpacity(0.5)),
+            filled: true,
+            fillColor: AppTheme.darkGrey.withOpacity(0.5),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: AppTheme.primaryGold.withOpacity(0.3),
+              ),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: AppTheme.primaryGold.withOpacity(0.3),
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: AppTheme.primaryGold),
+            ),
+            suffixIcon: IconButton(
+              icon: Icon(
+                _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                color: AppTheme.grey,
+              ),
+              onPressed: () {
+                setState(() => _obscurePassword = !_obscurePassword);
+              },
+            ),
+          ),
+        ),
+        if (_passwordVerified) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.green.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.green.withOpacity(0.3)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.green, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Password verified successfully',
+                    style: TextStyle(color: Colors.green, fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildConfirmationStep() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          'Step 2: Confirm Transaction',
+          style: AppTheme.bodyMedium.copyWith(
+            color: AppTheme.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Please confirm this transaction. Your password has been verified.',
+          style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+        ),
+        const SizedBox(height: 24),
+        Center(
+          child: Icon(
+            Icons.verified_user,
+            size: 80,
+            color: _biometricVerified
+                ? Colors.green
+                : AppTheme.primaryGold,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppTheme.darkGrey.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppTheme.primaryGold.withOpacity(0.3)),
+          ),
+          child: Column(
+            children: [
+              Text(
+                'Transaction Summary',
+                style: AppTheme.bodyMedium.copyWith(
+                  color: AppTheme.primaryGold,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _buildDetailRow('Asset', widget.assetSymbol),
+              _buildDetailRow('Amount', widget.amount),
+              _buildDetailRow('Recipient', widget.recipient.length > 20
+                  ? '${widget.recipient.substring(0, 20)}...'
+                  : widget.recipient),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.orange.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.orange.withOpacity(0.3)),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.info_outline, color: Colors.orange, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Your wallet uses password-only protection. Tap confirm to proceed with the transaction.',
+                  style: TextStyle(color: Colors.orange, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBiometricStep() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          'Step 2: Biometric Authentication',
+          style: AppTheme.bodyMedium.copyWith(
+            color: AppTheme.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Use your fingerprint or Face ID to sign the transaction',
+          style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+        ),
+        const SizedBox(height: 24),
+        Center(
+          child: Icon(
+            Icons.fingerprint,
+            size: 80,
+            color: _biometricVerified
+                ? Colors.green
+                : AppTheme.primaryGold,
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (_biometricVerified) ...[
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.green.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.green.withOpacity(0.3)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.green, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Biometric authentication successful',
+                    style: TextStyle(color: Colors.green, fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ] else ...[
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.blue.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.blue.withOpacity(0.3)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, color: Colors.blue, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Tap the button below to authenticate with biometrics',
+                    style: TextStyle(color: Colors.blue, fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _verifyPassword() async {
+    if (_passwordController.text.isEmpty) {
+      setState(() {
+        _error = 'Please enter your password';
+      });
+      return;
+    }
+
+    setState(() {
+      _isAuthenticating = true;
+      _error = null;
+    });
+
+    // Verify password with Firebase Auth
+    try {
+      final authProvider = Provider.of<local_auth.AuthProvider>(
+        context,
+        listen: false,
+      );
+      final currentUser = authProvider.user;
+      if (currentUser == null || currentUser.email == null) {
+        throw Exception('User not authenticated');
+      }
+
+      final credential = EmailAuthProvider.credential(
+        email: currentUser.email!,
+        password: _passwordController.text,
+      );
+      await currentUser.reauthenticateWithCredential(credential);
+
+      setState(() {
+        _passwordVerified = true;
+        _isAuthenticating = false;
+        _error = null;
+      });
+
+      // Move to next step after a short delay
+      await Future.delayed(const Duration(milliseconds: 500));
+      setState(() {
+        _currentStep = 1;
+      });
+    } catch (e) {
+      setState(() {
+        _error = 'Invalid password. Please try again.';
+        _isAuthenticating = false;
+        _passwordVerified = false;
+      });
+    }
+  }
+
+  Future<void> _authenticateBiometric() async {
+    setState(() {
+      _isAuthenticating = true;
+      _error = null;
+    });
+
+    try {
+      final authProvider = Provider.of<local_auth.AuthProvider>(
+        context,
+        listen: false,
+      );
+      final user = authProvider.user;
+      if (user == null) {
+        throw Exception('User not authenticated');
+      }
+
+      // Authenticate with biometrics using BiometricService
+      // First get the wallet to retrieve credential ID
+      final walletDoc = await FirebaseFirestore.instance
+          .collection('secure_wallets')
+          .doc(user.uid)
+          .get();
+      
+      if (!walletDoc.exists) {
+        throw Exception('Secure wallet not found');
+      }
+
+      final walletData = walletDoc.data()!;
+      final biometricData = walletData['biometricData'] as Map<String, dynamic>?;
+      final credentialId = biometricData?['credentialId'] as String?;
+
+      final biometricResult = await BiometricService.authenticateWithBiometrics(
+        localizedReason: 'Authenticate to sign this transaction',
+        credentialId: credentialId,
+      );
+
+      if (biometricResult['success'] == true) {
+        setState(() {
+          _biometricVerified = true;
+          _isAuthenticating = false;
+        });
+
+        // Return success result
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (mounted) {
+          Navigator.of(context).pop({
+            'password': _passwordController.text,
+            'biometricVerified': true,
+          });
+        }
+      } else {
+        throw Exception(biometricResult['error'] ?? 'Biometric authentication failed');
+      }
+    } catch (e) {
+      setState(() {
+        _error = 'Biometric authentication failed: $e';
+        _isAuthenticating = false;
+        _biometricVerified = false;
+      });
+    }
+  }
+
+  Future<void> _confirmTransaction() async {
+    setState(() {
+      _isAuthenticating = true;
+      _error = null;
+    });
+
+    try {
+      // For password-only wallets, just confirm and return
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      setState(() {
+        _biometricVerified = true; // Mark as verified for consistency
+        _isAuthenticating = false;
+      });
+
+      // Return success result
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (mounted) {
+        Navigator.of(context).pop({
+          'password': _passwordController.text,
+          'biometricVerified': false, // No biometrics, but transaction confirmed
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _error = 'Transaction confirmation failed: $e';
+        _isAuthenticating = false;
+        _biometricVerified = false;
+      });
     }
   }
 }
