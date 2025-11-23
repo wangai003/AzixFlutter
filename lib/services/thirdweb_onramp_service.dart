@@ -48,7 +48,7 @@ class ThirdWebOnrampService {
     if (networkConfig == null) {
       throw Exception('Unsupported network: $network');
     }
-    
+
     // Build ThirdWeb Pay URL
     final baseUrl = 'https://embedded-wallet.thirdweb.com/sdk/2022-08-12/pay';
     
@@ -100,20 +100,20 @@ class ThirdWebOnrampService {
     if (networkConfig != null) {
       params['chainId'] = networkConfig['chainId']!;
     }
-    
+
     if (amount != null) {
       params['tokenAmount'] = amount.toString();
     }
-    
+
     final uri = Uri.parse(baseUrl).replace(queryParameters: params);
     return uri.toString();
   }
-  
+
   /// Get network configuration
   static Map<String, String>? getNetworkConfig(String network) {
     return supportedNetworks[network];
   }
-  
+
   /// Check if client ID is configured
   static bool get isConfigured {
     return _clientId.isNotEmpty && _clientId != 'YOUR_THIRDWEB_CLIENT_ID';
