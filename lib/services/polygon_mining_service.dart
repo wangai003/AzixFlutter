@@ -11,7 +11,7 @@ class PolygonMiningService {
 
   double _minedTokens = 0.0;
   Timer? _miningTimer;
-  final double miningRatePerHour = 0.25; // AKOFA/hour
+  final double miningRatePerHour = 1.5; // AKOFA/hour
   final StreamController<double> _tokenStreamController =
       StreamController<double>.broadcast();
 

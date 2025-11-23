@@ -45,7 +45,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 2, vsync: this);
 
     // ========================================================================
     // WALLET AUTHENTICATION ENTRY POINT
@@ -134,7 +134,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Multi-Asset Wallet',
+              'Legacy Wallet',
               style: AppTheme.headingMedium.copyWith(
                 color: AppTheme.primaryGold,
                 fontSize: 18,
@@ -211,7 +211,6 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
           tabs: const [
             Tab(text: 'Overview'),
             Tab(text: 'Transactions'),
-            Tab(text: 'Purchase'),
           ],
           indicatorColor: AppTheme.primaryGold,
           labelColor: AppTheme.primaryGold,
@@ -244,7 +243,6 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
               children: [
                 _buildOverviewTab(walletProvider),
                 _buildTransactionsTab(walletProvider),
-                _buildPurchaseTab(walletProvider),
               ],
             );
           },

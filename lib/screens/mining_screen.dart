@@ -263,7 +263,7 @@ class _MiningScreenState extends State<MiningScreen> {
 
       if (now.isBefore(sessionEnd)) {
         final elapsed = now.difference(sessionStart);
-        final mined = elapsed.inSeconds * (0.25 / 3600);
+        final mined = elapsed.inSeconds * (1.5 / 3600);
         final remaining = sessionEnd.difference(now).inSeconds;
 
         setState(() {
@@ -400,40 +400,6 @@ class _MiningScreenState extends State<MiningScreen> {
                                       : AppTheme.headingMedium)
                                   .copyWith(color: AppTheme.primaryGold),
                         ),
-                        const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.purple.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: Colors.purple.withOpacity(0.5),
-                              width: 1,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.hexagon,
-                                color: Colors.purple[300],
-                                size: 16,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                'Polygon Network',
-                                style: TextStyle(
-                                  color: Colors.purple[200],
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
                       ],
                     ),
                   ).animate().fadeIn(
@@ -469,22 +435,36 @@ class _MiningScreenState extends State<MiningScreen> {
                                     desktop: 180,
                                   ),
                               decoration: BoxDecoration(
-                                gradient: AppTheme.goldGradient,
                                 shape: BoxShape.circle,
                                 boxShadow: AppTheme.buttonShadow,
+                                border: Border.all(
+                                  color: AppTheme.primaryGold,
+                                  width: 3,
+                                ),
                               ),
-                              child: Icon(
-                                _isMining ? Icons.engineering : Icons.terrain,
-                                color: AppTheme.black,
-                                size:
-                                    ResponsiveLayout.getValueForScreenType<
-                                      double
-                                    >(
-                                      context: context,
-                                      mobile: 30,
-                                      tablet: 37.5,
-                                      desktop: 45,
-                                    ),
+                              child: ClipOval(
+                                child: Image.network(
+                                  'https://files.catbox.moe/lcg61a.jpg',
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Container(
+                                      decoration: BoxDecoration(
+                                        gradient: AppTheme.goldGradient,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Icon(
+                                        _isMining ? Icons.engineering : Icons.terrain,
+                                        color: AppTheme.black,
+                                        size: ResponsiveLayout.getValueForScreenType<double>(
+                                          context: context,
+                                          mobile: 30,
+                                          tablet: 37.5,
+                                          desktop: 45,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
                               ),
                             )
                             .animate(target: _isMining ? 1 : 0)
@@ -634,7 +614,7 @@ class _MiningScreenState extends State<MiningScreen> {
                                     ),
                                   ),
                                   Text(
-                                    '≈ ${(0.25 * (_remainingSeconds / 3600)).toStringAsFixed(6)} remaining',
+                                    '≈ ${(1.5 * (_remainingSeconds / 3600)).toStringAsFixed(6)} remaining',
                                     style: AppTheme.caption.copyWith(
                                       color: AppTheme.grey.withOpacity(0.7),
                                     ),
@@ -677,7 +657,7 @@ class _MiningScreenState extends State<MiningScreen> {
                                   ),
                                   const SizedBox(width: 8),
                                   Text(
-                                    '0.25 AKOFA/hour',
+                                    '1.5 AKOFA/hour',
                                     style: AppTheme.bodyMedium.copyWith(
                                       color: AppTheme.white,
                                       fontWeight: FontWeight.w500,
