@@ -1,20 +1,18 @@
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
-import 'package:crypto/crypto.dart' as crypto;
 import 'package:cryptography/cryptography.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import 'package:web3dart/web3dart.dart' as web3dart;
 import 'package:web3dart/crypto.dart' as web3crypto;
-import 'package:cloud_firestore/cloud_firestore.dart' as firestore;
+import '../config/api_config.dart';
 
 /// Secure Polygon Wallet Service implementing password-based AES-GCM encryption
 /// Similar to MetaMask, Phantom, and other popular wallet implementations
 /// Supports Polygon (Matic) network operations
 class PolygonWalletService {
-  static final FirebaseAuth _auth = FirebaseAuth.instance;
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   // Polygon RPC endpoints
@@ -812,77 +810,6 @@ class PolygonWalletService {
     }
   }
 
-  /// Get ERC-20 token balance
-  static Future<Map<String, dynamic>> _getERC20TokenBalance(
-    String walletAddress,
-    String tokenAddress,
-    int decimals,
-  ) async {
-    try {
-      // ERC-20 balanceOf function signature
-      final functionSignature = '0x70a08231'; // balanceOf(address)
-
-      // Pad wallet address to 32 bytes
-      final paddedAddress = walletAddress.startsWith('0x')
-          ? walletAddress.substring(2).padLeft(64, '0')
-          : walletAddress.padLeft(64, '0');
-
-      final data = functionSignature + paddedAddress;
-
-      final response = await http.post(
-        Uri.parse(_currentRpcUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'jsonrpc': '2.0',
-          'method': 'eth_call',
-          'params': [
-            {'to': tokenAddress, 'data': data},
-            'latest',
-          ],
-          'id': 1,
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        final responseData = json.decode(response.body);
-        final result = responseData['result'] as String?;
-
-        if (result != null && result != '0x') {
-          // Remove 0x prefix and parse as BigInt
-          final balanceHex = result.substring(2);
-          final balanceBigInt = BigInt.parse(balanceHex, radix: 16);
-
-          // Convert to double with proper decimals
-          final divisor = BigInt.from(10).pow(decimals);
-          final balance = balanceBigInt / divisor;
-
-          return {
-            'success': true,
-            'balance': balance.toDouble(),
-            'rawBalance': balanceBigInt.toString(),
-            'decimals': decimals,
-          };
-        } else {
-          return {
-            'success': true,
-            'balance': 0.0,
-            'rawBalance': '0',
-            'decimals': decimals,
-          };
-        }
-      } else {
-        throw Exception('RPC request failed: ${response.statusCode}');
-      }
-    } catch (e) {
-      return {
-        'success': false,
-        'error': e.toString(),
-        'balance': 0.0,
-        'decimals': decimals,
-      };
-    }
-  }
-
   /// Send MATIC transaction
   static Future<Map<String, dynamic>> sendMaticTransaction({
     required String userId,
@@ -967,60 +894,6 @@ class PolygonWalletService {
     }
   }
 
-  /// Get current gas price
-  static Future<int> _getGasPrice() async {
-    try {
-      final response = await http.post(
-        Uri.parse(_currentRpcUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'jsonrpc': '2.0',
-          'method': 'eth_gasPrice',
-          'params': [],
-          'id': 1,
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final gasPriceHex = data['result'] as String;
-        return int.parse(gasPriceHex.substring(2), radix: 16);
-      }
-    } catch (e) {
-      print('Error getting gas price: $e');
-    }
-
-    // Fallback gas price (20 gwei)
-    return 20000000000;
-  }
-
-  /// Get transaction count (nonce)
-  static Future<int> _getTransactionCount(String address) async {
-    try {
-      final response = await http.post(
-        Uri.parse(_currentRpcUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'jsonrpc': '2.0',
-          'method': 'eth_getTransactionCount',
-          'params': [address, 'pending'],
-          'id': 1,
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final nonceHex = data['result'] as String;
-        return int.parse(nonceHex.substring(2), radix: 16);
-      }
-    } catch (e) {
-      print('Error getting transaction count: $e');
-    }
-
-    return 0;
-  }
-
-
   /// Get transaction receipt
   static Future<Map<String, dynamic>> getTransactionReceipt(
     String txHash,
@@ -1064,169 +937,301 @@ class PolygonWalletService {
     }
   }
 
-  /// Get transaction history for a Polygon address using PolygonScan API
+  /// Get transaction history for a Polygon address using Alchemy API
+  /// Uses alchemy_getAssetTransfers + eth_getTransactionByHash + eth_getTransactionReceipt
+  /// Returns ALL transactions: MATIC, ERC-20, NFTs, internal transfers
   static Future<List<Map<String, dynamic>>> getPolygonTransactionHistory(
     String address, {
-    int limit = 20,
+    int limit = 50,
   }) async {
-    try {
-      final transactions = <Map<String, dynamic>>[];
-
-      // Use PolygonScan API for transaction history
-      // Amoy testnet API: https://api-amoy.polygonscan.com/api
-      // Amoy explorer: https://amoy.polygonscan.com/
-      // Mainnet API: https://api.polygonscan.com/api
-      final apiUrl = _isTestnet
-          ? 'https://api-amoy.polygonscan.com/api'
-          : 'https://api.polygonscan.com/api';
-      
-      print('🌐 Using PolygonScan API: $apiUrl (testnet: $_isTestnet)');
-
-      // Fetch token transfers (ERC-20 transactions including AKOFA)
-      final tokenTxUrl = '$apiUrl?module=account&action=tokentx&address=$address&page=1&offset=$limit&sort=desc';
-      
-      print('🔍 Fetching token transactions from: $tokenTxUrl');
-      final tokenTxResponse = await http.get(Uri.parse(tokenTxUrl));
-      
-      print('📡 Token transactions response status: ${tokenTxResponse.statusCode}');
-      
-      if (tokenTxResponse.statusCode == 200) {
-        final tokenTxData = json.decode(tokenTxResponse.body);
-        print('📊 Token transactions data: ${tokenTxData['status']}, result type: ${tokenTxData['result'].runtimeType}');
-        
-        // Handle both string and list results
-        if (tokenTxData['status'] == '1' || tokenTxData['status'] == 1) {
-          final result = tokenTxData['result'];
-          
-          // PolygonScan returns string "0" or empty array when no transactions
-          if (result == null || result == '0' || (result is List && result.isEmpty)) {
-            print('ℹ️ No token transactions found');
-          } else if (result is List) {
-            final tokenTxs = result as List;
-            
-            for (final tx in tokenTxs) {
-              try {
-                // Parse token transfer transaction
-                final value = BigInt.parse(tx['value'] as String);
-                final decimals = int.tryParse(tx['tokenDecimal'] as String? ?? '18') ?? 18;
-                final divisor = BigInt.from(10).pow(decimals);
-                final amount = value.toDouble() / divisor.toDouble();
-                
-                final from = tx['from'] as String? ?? '';
-                final to = tx['to'] as String? ?? '';
-                final userAddress = address.toLowerCase();
-                
-                final isIncoming = to.toLowerCase() == userAddress && from.toLowerCase() != userAddress;
-                final isOutgoing = from.toLowerCase() == userAddress && to.toLowerCase() != userAddress;
-                
-                transactions.add({
-                  'hash': tx['hash'] as String,
-                  'blockNumber': int.tryParse(tx['blockNumber'] as String? ?? '0') ?? 0,
-                  'timestamp': DateTime.fromMillisecondsSinceEpoch(
-                    (int.tryParse(tx['timeStamp'] as String? ?? '0') ?? 0) * 1000,
-                  ),
-                  'from': from,
-                  'to': to,
-                  'value': amount,
-                  'asset': tx['tokenSymbol'] as String? ?? 'TOKEN',
-                  'tokenName': tx['tokenName'] as String? ?? 'Unknown Token',
-                  'contractAddress': tx['contractAddress'] as String? ?? '',
-                  'type': isIncoming ? 'receive' : (isOutgoing ? 'send' : 'self'),
-                  'status': 'success', // PolygonScan only shows confirmed transactions
-                  'gasPrice': int.tryParse(tx['gasPrice'] as String? ?? '0', radix: 16) ?? 0,
-                  'gasUsed': int.tryParse(tx['gasUsed'] as String? ?? '0', radix: 16) ?? 0,
-                  'confirmations': int.tryParse(tx['confirmations'] as String? ?? '0') ?? 0,
-                  'network': _isTestnet ? 'polygon-amoy' : 'polygon-mainnet',
-                });
-              } catch (e) {
-                print('Error parsing token transaction: $e');
-                continue;
-              }
-            }
-          }
-        }
-      }
-
-      // Also fetch native MATIC transactions
-      final maticTxUrl = '$apiUrl?module=account&action=txlist&address=$address&page=1&offset=${limit ~/ 2}&sort=desc';
-      
-      print('🔍 Fetching MATIC transactions from: $maticTxUrl');
-      final maticTxResponse = await http.get(Uri.parse(maticTxUrl));
-      
-      print('📡 MATIC transactions response status: ${maticTxResponse.statusCode}');
-      if (maticTxResponse.statusCode != 200) {
-        print('❌ API request failed: ${maticTxResponse.statusCode}');
-        print('Response body: ${maticTxResponse.body}');
-      }
-      
-      if (maticTxResponse.statusCode == 200) {
-        final maticTxData = json.decode(maticTxResponse.body);
-        print('📊 MATIC transactions data: ${maticTxData['status']}, result type: ${maticTxData['result'].runtimeType}');
-        
-        if (maticTxData['status'] == '1' || maticTxData['status'] == 1) {
-          final result = maticTxData['result'];
-          
-          // PolygonScan returns string "0" or empty array when no transactions
-          if (result == null || result == '0' || (result is List && result.isEmpty)) {
-            print('ℹ️ No MATIC transactions found');
-          } else if (result is List) {
-            final maticTxs = result as List;
-          
-          for (final tx in maticTxs) {
-            try {
-              // Skip if it's a contract creation or contract call (we only want simple transfers)
-              if (tx['to'] == null || tx['to'] == '') continue;
-              
-              final value = BigInt.parse(tx['value'] as String);
-              final amount = value.toDouble() / 1e18; // Convert wei to MATIC
-              
-              final from = tx['from'] as String? ?? '';
-              final to = tx['to'] as String? ?? '';
-              final userAddress = address.toLowerCase();
-              
-              final isIncoming = to.toLowerCase() == userAddress && from.toLowerCase() != userAddress;
-              final isOutgoing = from.toLowerCase() == userAddress && to.toLowerCase() != userAddress;
-              
-              // Only add if it's a transfer (not a contract interaction)
-              if (isIncoming || isOutgoing) {
-                transactions.add({
-                  'hash': tx['hash'] as String,
-                  'blockNumber': int.tryParse(tx['blockNumber'] as String? ?? '0') ?? 0,
-                  'timestamp': DateTime.fromMillisecondsSinceEpoch(
-                    (int.tryParse(tx['timeStamp'] as String? ?? '0') ?? 0) * 1000,
-                  ),
-                  'from': from,
-                  'to': to,
-                  'value': amount,
-                  'asset': 'MATIC',
-                  'tokenName': 'Polygon Matic',
-                  'contractAddress': '',
-                  'type': isIncoming ? 'receive' : (isOutgoing ? 'send' : 'self'),
-                  'status': tx['txreceipt_status'] == '1' ? 'success' : 'failed',
-                  'gasPrice': int.tryParse(tx['gasPrice'] as String? ?? '0', radix: 16) ?? 0,
-                  'gasUsed': int.tryParse(tx['gasUsed'] as String? ?? '0', radix: 16) ?? 0,
-                  'confirmations': int.tryParse(tx['confirmations'] as String? ?? '0') ?? 0,
-                  'network': _isTestnet ? 'polygon-amoy' : 'polygon-mainnet',
-                });
-              }
-            } catch (e) {
-              print('Error parsing MATIC transaction: $e');
-              continue;
-            }
-          }
-          }
-        }
-      }
-
-      print('✅ Total transactions found: ${transactions.length}');
-
-      // Sort by timestamp (newest first) and limit results
-      transactions.sort((a, b) => (b['timestamp'] as DateTime).compareTo(a['timestamp'] as DateTime));
-      
-      return transactions.take(limit).toList();
-    } catch (e) {
-      print('Error fetching Polygon transaction history: $e');
+    if (!ApiConfig.hasAlchemyApiKey) {
+      print('❌ No Alchemy API key configured!');
+      print('   Configure your API key in lib/config/api_config.dart');
       return [];
     }
+    
+    try {
+      final network = _isTestnet ? 'polygon-amoy' : 'polygon-mainnet';
+      final rpcUrl = 'https://$network.g.alchemy.com/v2/${ApiConfig.alchemyApiKey}';
+      
+      print('🔄 Fetching transactions using Alchemy API...');
+      print('📍 Address: $address');
+      print('🌐 Network: $network');
+      
+      // Step 1: Get all asset transfers
+      final transfers = await _getAlchemyAssetTransfers(rpcUrl, address);
+      print('✅ Found ${transfers.length} transfers');
+      
+      if (transfers.isEmpty) return [];
+      
+      // Step 2: Enrich with full transaction details
+      final enrichedTxs = <Map<String, dynamic>>[];
+      
+      for (final transfer in transfers.take(limit)) {
+        try {
+          final hash = transfer['hash'] as String?;
+          if (hash == null) continue;
+          
+          // Get full transaction data
+          final rawTx = await _getTransactionByHash(rpcUrl, hash);
+          final receipt = await _getTransactionReceipt(rpcUrl, hash);
+          
+          // Parse transfer data
+          final from = transfer['from'] as String? ?? '';
+          final to = transfer['to'] as String? ?? '';
+          final asset = transfer['asset'] as String? ?? 'MATIC';
+          final value = transfer['value'] != null
+              ? double.tryParse(transfer['value'].toString()) ?? 0.0
+              : 0.0;
+          
+          // Parse timestamp
+          final metadata = transfer['metadata'] as Map<String, dynamic>?;
+          final blockTimestamp = metadata?['blockTimestamp'] as String?;
+          DateTime timestamp = DateTime.now();
+          if (blockTimestamp != null) {
+            try {
+              timestamp = DateTime.parse(blockTimestamp);
+            } catch (_) {}
+          }
+          
+          // Parse block number
+          final blockNum = transfer['blockNum'] as String?;
+          int blockNumber = 0;
+          if (blockNum != null) {
+            blockNumber = int.tryParse(blockNum.replaceAll('0x', ''), radix: 16) ?? 0;
+          }
+          
+          // Determine type
+          final userAddr = address.toLowerCase();
+          final isIncoming = to.toLowerCase() == userAddr;
+          final isOutgoing = from.toLowerCase() == userAddr;
+          String type = 'contract';
+          if (isIncoming && !isOutgoing) type = 'receive';
+          else if (isOutgoing && !isIncoming) type = 'send';
+          else if (isIncoming && isOutgoing) type = 'self';
+          
+          // Parse gas and status
+          int gasUsed = 0;
+          int gasPrice = 0;
+          String status = 'success';
+          
+          if (receipt != null) {
+            final gasUsedHex = receipt['gasUsed'] as String?;
+            if (gasUsedHex != null) {
+              gasUsed = int.tryParse(gasUsedHex.replaceAll('0x', ''), radix: 16) ?? 0;
+            }
+            final statusHex = receipt['status'] as String?;
+            status = statusHex == '0x1' ? 'success' : 'failed';
+          }
+          
+          if (rawTx != null) {
+            final gasPriceHex = rawTx['gasPrice'] as String?;
+            if (gasPriceHex != null) {
+              gasPrice = int.tryParse(gasPriceHex.replaceAll('0x', ''), radix: 16) ?? 0;
+            }
+          }
+          
+          final txMap = {
+            'hash': hash,
+            'blockNumber': blockNumber,
+            'timestamp': timestamp,
+            'from': from,
+            'to': to,
+            'value': value,
+            'asset': asset,
+            'tokenName': asset,
+            'contractAddress': transfer['rawContract']?['address'] as String? ?? '',
+            'type': type,
+            'status': status,
+            'gasPrice': gasPrice,
+            'gasUsed': gasUsed,
+            'confirmations': 0,
+            'network': _isTestnet ? 'polygon-amoy' : 'polygon-mainnet',
+          };
+          
+          print('✅ Enriched transaction: hash=${txMap['hash']}, type=${txMap['type']}, from=${txMap['from']}, to=${txMap['to']}, value=${txMap['value']}, asset=${txMap['asset']}');
+          
+          enrichedTxs.add(txMap);
+        } catch (e) {
+          print('⚠️ Error enriching transfer: $e');
+          continue;
+        }
+      }
+      
+      // Sort by timestamp
+      enrichedTxs.sort((a, b) => (b['timestamp'] as DateTime).compareTo(a['timestamp'] as DateTime));
+      
+      print('✅ Loaded ${enrichedTxs.length} transactions');
+      return enrichedTxs;
+      
+    } catch (e) {
+      print('❌ Error fetching transactions: $e');
+      return [];
+    }
+  }
+  
+  /// Get asset transfers using Alchemy's alchemy_getAssetTransfers
+  static Future<List<dynamic>> _getAlchemyAssetTransfers(String rpcUrl, String address) async {
+    print('═══════════════════════════════════════════════════════════════');
+    print('🔍 ALCHEMY API REQUEST');
+    print('═══════════════════════════════════════════════════════════════');
+    print('📍 RPC URL (masked): ${rpcUrl.replaceAll(RegExp(r'/v2/.*'), '/v2/***')}');
+    print('📍 Address: $address');
+    print('🔑 API Key length: ${ApiConfig.alchemyApiKey.length} chars');
+    if (ApiConfig.alchemyApiKey.length < 32) {
+      print('⚠️ WARNING: API key seems short (expected 32 chars). Please verify your Alchemy API key.');
+    }
+    print('🔑 API Key first 10 chars: ${ApiConfig.alchemyApiKey.substring(0, min(10, ApiConfig.alchemyApiKey.length))}...');
+    print('═══════════════════════════════════════════════════════════════');
+    
+    final allTransfers = <dynamic>[];
+    
+    // Fetch incoming transfers
+    final incomingPayload = {
+      'id': 1,
+      'jsonrpc': '2.0',
+      'method': 'alchemy_getAssetTransfers',
+      'params': [{
+        'fromBlock': '0x0',
+        'toBlock': 'latest',
+        'toAddress': address,
+        'category': ['external', 'erc20', 'erc721', 'erc1155'], // Note: 'internal' not supported on Polygon
+        'withMetadata': true,
+        'excludeZeroValue': false,
+      }],
+    };
+    
+    print('📥 Fetching INCOMING transfers...');
+    final incomingResp = await http.post(
+      Uri.parse(rpcUrl),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode(incomingPayload),
+    );
+    
+    print('📡 Incoming response status: ${incomingResp.statusCode}');
+    print('📡 FULL Incoming response body: ${incomingResp.body}');
+    
+    if (incomingResp.statusCode == 200) {
+      final body = json.decode(incomingResp.body);
+      print('📊 Incoming response body keys: ${body.keys.toList()}');
+      
+      if (body['error'] != null) {
+        print('❌ Incoming API error: ${body['error']}');
+        print('❌ Error details: ${json.encode(body['error'])}');
+      } else {
+        print('📊 Result field: ${body['result']}');
+        final transfers = body['result']?['transfers'] ?? [];
+        print('✅ Incoming transfers count: ${transfers.length}');
+        if (transfers.isEmpty) {
+          print('⚠️ WARNING: No incoming transfers found in Alchemy response!');
+        }
+        allTransfers.addAll(transfers);
+      }
+    } else {
+      print('❌ Incoming request failed: ${incomingResp.statusCode}');
+      print('   Response: ${incomingResp.body}');
+    }
+    
+    // Fetch outgoing transfers
+    final outgoingPayload = {
+      'id': 2,
+      'jsonrpc': '2.0',
+      'method': 'alchemy_getAssetTransfers',
+      'params': [{
+        'fromBlock': '0x0',
+        'toBlock': 'latest',
+        'fromAddress': address,
+        'category': ['external', 'erc20', 'erc721', 'erc1155'], // Note: 'internal' not supported on Polygon
+        'withMetadata': true,
+        'excludeZeroValue': false,
+      }],
+    };
+    
+    print('📤 Fetching OUTGOING transfers...');
+    final outgoingResp = await http.post(
+      Uri.parse(rpcUrl),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode(outgoingPayload),
+    );
+    
+    print('📡 Outgoing response status: ${outgoingResp.statusCode}');
+    print('📡 FULL Outgoing response body: ${outgoingResp.body}');
+    
+    if (outgoingResp.statusCode == 200) {
+      final body = json.decode(outgoingResp.body);
+      print('📊 Outgoing response body keys: ${body.keys.toList()}');
+      
+      if (body['error'] != null) {
+        print('❌ Outgoing API error: ${body['error']}');
+        print('❌ Error details: ${json.encode(body['error'])}');
+      } else {
+        print('📊 Result field: ${body['result']}');
+        final transfers = body['result']?['transfers'] ?? [];
+        print('✅ Outgoing transfers count: ${transfers.length}');
+        if (transfers.isEmpty) {
+          print('⚠️ WARNING: No outgoing transfers found in Alchemy response!');
+        }
+        allTransfers.addAll(transfers);
+      }
+    } else {
+      print('❌ Outgoing request failed: ${outgoingResp.statusCode}');
+      print('   Response: ${outgoingResp.body}');
+    }
+    
+    // Remove duplicates
+    final seen = <String>{};
+    final uniqueTransfers = allTransfers.where((t) {
+      final hash = t['hash'] as String?;
+      if (hash == null || seen.contains(hash)) return false;
+      seen.add(hash);
+      return true;
+    }).toList();
+    
+    print('📋 Total transfers (after deduplication): ${uniqueTransfers.length}');
+    return uniqueTransfers;
+  }
+  
+  /// Get transaction by hash using eth_getTransactionByHash
+  static Future<Map<String, dynamic>?> _getTransactionByHash(String rpcUrl, String hash) async {
+    try {
+      final response = await http.post(
+        Uri.parse(rpcUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'id': 1,
+          'jsonrpc': '2.0',
+          'method': 'eth_getTransactionByHash',
+          'params': [hash],
+        }),
+      );
+      
+      if (response.statusCode == 200) {
+        final body = json.decode(response.body);
+        return body['result'] as Map<String, dynamic>?;
+      }
+    } catch (_) {}
+    return null;
+  }
+  
+  /// Get transaction receipt using eth_getTransactionReceipt
+  static Future<Map<String, dynamic>?> _getTransactionReceipt(String rpcUrl, String hash) async {
+    try {
+      final response = await http.post(
+        Uri.parse(rpcUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'id': 1,
+          'jsonrpc': '2.0',
+          'method': 'eth_getTransactionReceipt',
+          'params': [hash],
+        }),
+      );
+      
+      if (response.statusCode == 200) {
+        final body = json.decode(response.body);
+        return body['result'] as Map<String, dynamic>?;
+      }
+    } catch (_) {}
+    return null;
   }
 }

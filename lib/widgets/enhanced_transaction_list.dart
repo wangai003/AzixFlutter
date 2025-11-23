@@ -27,8 +27,28 @@ class EnhancedTransactionList extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         itemCount: transactions.length,
         itemBuilder: (context, index) {
-          final transaction = transactions[index];
-          return _buildTransactionItem(transaction, context);
+          try {
+            final transaction = transactions[index];
+            return _buildTransactionItem(transaction, context);
+          } catch (e) {
+            debugPrint('❌ Error at transaction index $index: $e');
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Colors.red.withOpacity(0.3),
+                  width: 1,
+                ),
+              ),
+              child: Text(
+                'Error loading transaction at index $index',
+                style: AppTheme.bodySmall.copyWith(color: Colors.red),
+              ),
+            );
+          }
         },
       ),
     );
@@ -66,10 +86,11 @@ class EnhancedTransactionList extends StatelessWidget {
     app_transaction.Transaction transaction,
     BuildContext context,
   ) {
-    final isIncoming = transaction.isIncoming;
-    final amountColor = isIncoming ? Colors.green : Colors.red;
-    final icon = _getTransactionIcon(transaction.type);
-    final backgroundColor = _getTransactionBackgroundColor(transaction.type);
+    try {
+      final isIncoming = transaction.isIncoming;
+      final amountColor = isIncoming ? Colors.green : Colors.red;
+      final icon = _getTransactionIcon(transaction.type);
+      final backgroundColor = _getTransactionBackgroundColor(transaction.type);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -169,6 +190,37 @@ class EnhancedTransactionList extends StatelessWidget {
         onTap: () => _showTransactionDetails(context, transaction),
       ),
     );
+    } catch (e, stackTrace) {
+      // Log error and return error widget
+      debugPrint('❌ Error rendering transaction: $e');
+      debugPrint('   Transaction: ${transaction.id}');
+      debugPrint('   Stack trace: $stackTrace');
+      
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.red.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Colors.red.withOpacity(0.3),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.error, color: Colors.red, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Error displaying transaction: ${transaction.id}',
+                style: AppTheme.bodySmall.copyWith(color: Colors.red),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   IconData _getTransactionIcon(String type) {
@@ -360,13 +412,14 @@ class EnhancedTransactionList extends StatelessWidget {
     BuildContext context,
     app_transaction.Transaction transaction,
   ) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.darkGrey,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => Container(
+    try {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: AppTheme.darkGrey,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (context) => Container(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -511,7 +564,19 @@ class EnhancedTransactionList extends StatelessWidget {
           ],
         ),
       ),
-    );
+      );
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error showing transaction details: $e');
+      debugPrint('   Stack trace: $stackTrace');
+      
+      // Show error snackbar
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error displaying transaction details: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   Widget _buildDetailRow(String label, String value) {

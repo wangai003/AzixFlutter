@@ -62,33 +62,49 @@ class EnhancedWalletProvider extends ChangeNotifier {
   List<Map<String, dynamic>> get transactions => _transactions;
   
   /// Get transactions as Transaction objects for UI compatibility
-  List<app_transaction.Transaction> get transactionsAsObjects {
-    final user = _auth.currentUser;
-    if (user == null) return [];
-    
-    return _transactions.map((tx) {
-      return app_transaction.Transaction(
-        id: tx['hash'] as String? ?? 'polygon_${tx['hash']}',
-        userId: user.uid,
-        type: tx['type'] as String? ?? 'send',
-        status: tx['status'] == 'success' ? 'completed' : 'pending',
-        amount: (tx['value'] as num? ?? 0).toDouble(),
-        assetCode: tx['asset'] as String? ?? 'MATIC',
-        timestamp: tx['timestamp'] as DateTime? ?? DateTime.now(),
-        description: _getPolygonTransactionDescription(tx),
-        transactionHash: tx['hash'] as String?,
-        senderAddress: tx['from'] as String?,
-        recipientAddress: tx['to'] as String?,
-        metadata: {
-          'network': tx['network'],
-          'gasUsed': tx['gasUsed'],
-          'gasPrice': tx['gasPrice'],
-          'confirmations': tx['confirmations'],
-          'provider': 'polygon',
-        },
-      );
-    }).toList();
-  }
+  /// DEPRECATED: Use transactions (raw maps) directly with PolygonTransactionList
+  // List<app_transaction.Transaction> get transactionsAsObjects {
+  //   final user = _auth.currentUser;
+  //   if (user == null) return [];
+  //   
+  //   return _transactions.map((tx) {
+  //     try {
+  //       // Validate transaction data before accessing
+  //       if (tx == null) {
+  //         debugPrint('⚠️ Null transaction in list, skipping');
+  //         return null;
+  //       }
+  //       
+  //       debugPrint('📊 Processing transaction: ${tx.keys.toList()}');
+  //       
+  //       return app_transaction.Transaction(
+  //         id: tx['hash'] as String? ?? 'polygon_${tx['hash']}',
+  //         userId: user.uid,
+  //         type: tx['type'] as String? ?? 'send',
+  //         status: tx['status'] == 'success' ? 'completed' : 'pending',
+  //         amount: (tx['value'] as num? ?? 0).toDouble(),
+  //         assetCode: tx['asset'] as String? ?? 'MATIC',
+  //         timestamp: tx['timestamp'] as DateTime? ?? DateTime.now(),
+  //         description: _getPolygonTransactionDescription(tx),
+  //         transactionHash: tx['hash'] as String?,
+  //         senderAddress: tx['from'] as String?,
+  //         recipientAddress: tx['to'] as String?,
+  //         metadata: {
+  //           'network': tx['network'],
+  //           'gasUsed': tx['gasUsed'],
+  //           'gasPrice': tx['gasPrice'],
+  //           'confirmations': tx['confirmations'],
+  //           'provider': 'polygon',
+  //         },
+  //       );
+  //     } catch (e, stackTrace) {
+  //       debugPrint('❌ Error converting transaction to object: $e');
+  //       debugPrint('   Transaction data: $tx');
+  //       debugPrint('   Stack trace: $stackTrace');
+  //       return null;
+  //     }
+  //   }).where((tx) => tx != null).cast<app_transaction.Transaction>().toList();
+  // }
   bool get isMonitoringActive => _isMonitoringActive;
   bool get isProcessingPayment => _isProcessingPayment;
   Map<String, dynamic>? get currentPaymentStatus => _currentPaymentStatus;
@@ -1642,8 +1658,8 @@ class EnhancedWalletProvider extends ChangeNotifier {
 
   /// Get description for Polygon transaction
   String _getPolygonTransactionDescription(Map<String, dynamic> polyTx) {
-    final type = polyTx['type'];
-    final asset = polyTx['asset'];
+    final type = polyTx['type'] as String? ?? 'send';
+    final asset = polyTx['asset'] as String? ?? 'MATIC';
 
     switch (type) {
       case 'receive':
@@ -1651,7 +1667,8 @@ class EnhancedWalletProvider extends ChangeNotifier {
       case 'send':
         return 'Sent $asset';
       case 'contract_creation':
-        return 'Contract Creation';
+      case 'contract':
+        return 'Contract Interaction';
       case 'self':
         return 'Self Transfer ($asset)';
       default:

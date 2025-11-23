@@ -6,7 +6,6 @@ import 'package:share_plus/share_plus.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../providers/enhanced_wallet_provider.dart';
 import '../theme/app_theme.dart';
-import '../widgets/enhanced_transaction_list.dart';
 import '../widgets/multi_asset_balance_display.dart';
 import '../widgets/mpesa_purchase_dialog.dart';
 import '../widgets/mpesa_sell_dialog.dart';
@@ -24,7 +23,6 @@ import '../services/biometric_service.dart';
 import '../providers/auth_provider.dart' as local_auth;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'secure_wallet_creation_screen.dart';
-import '../models/transaction.dart' as app_transaction;
 
 class EnhancedWalletScreen extends StatefulWidget {
   const EnhancedWalletScreen({super.key});
@@ -44,21 +42,6 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-
-    // Listen to tab changes to load transactions when transactions tab is selected
-    _tabController.addListener(() {
-      if (!_tabController.indexIsChanging && _tabController.index == 1) {
-        // Transactions tab is selected (index 1)
-        final walletProvider = Provider.of<EnhancedWalletProvider>(
-          context,
-          listen: false,
-        );
-        if (walletProvider.hasWallet) {
-          // Load transactions when tab is opened
-          walletProvider.loadTransactions(forceRefresh: false);
-        }
-      }
-    });
 
     // Refresh wallet data when screen loads
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -413,9 +396,6 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
             // Sell Tokens Section
             _buildSellTokensSection(walletProvider),
 
-            // Recent Transactions
-            _buildRecentTransactions(walletProvider),
-
             const SizedBox(height: 24),
 
             // Wallet Stats
@@ -427,138 +407,146 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
   }
 
   Widget _buildTransactionsTab(EnhancedWalletProvider walletProvider) {
-    return Column(
-      children: [
-        // Filter/Search Bar
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppTheme.darkGrey.withOpacity(0.3),
-            border: Border(
-              bottom: BorderSide(
-                color: AppTheme.primaryGold.withOpacity(0.2),
-                width: 1,
-              ),
-            ),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  decoration: InputDecoration(
-                    hintText: 'Search transactions...',
-                    hintStyle: TextStyle(color: AppTheme.grey),
-                    prefixIcon: Icon(Icons.search, color: AppTheme.primaryGold),
-                    filled: true,
-                    fillColor: AppTheme.darkGrey.withOpacity(0.5),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                  style: TextStyle(color: AppTheme.white),
-                  onChanged: (query) {
-                    // TODO: Implement search functionality
-                  },
-                ),
-              ),
-              const SizedBox(width: 12),
-              DropdownButton<String>(
-                value: 'all',
-                dropdownColor: AppTheme.darkGrey,
-                style: TextStyle(color: AppTheme.white),
-                items: const [
-                  DropdownMenuItem(value: 'all', child: Text('All Types')),
-                  DropdownMenuItem(value: 'send', child: Text('Sent')),
-                  DropdownMenuItem(value: 'receive', child: Text('Received')),
-                ],
-                onChanged: (value) {
-                  // TODO: Implement filter functionality
-                },
-              ),
-            ],
-          ),
-        ),
+    // Auto-load transactions when tab opens
+    if (walletProvider.transactions.isEmpty && !walletProvider.isLoading) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        walletProvider.loadTransactions();
+      });
+    }
 
-        // Transaction List
-        Expanded(
-          child: Consumer<EnhancedWalletProvider>(
-            builder: (context, provider, child) {
-              // Load transactions if not already loaded or if we have a wallet but no transactions
-              if (provider.hasWallet && provider.transactions.isEmpty && !provider.isLoading) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  debugPrint('🔄 Auto-loading transactions for transactions tab...');
-                  provider.loadTransactions();
-                });
-              }
-              
-              debugPrint('📊 Consumer rebuild - transactions: ${provider.transactions.length}');
-              debugPrint('📊 Is loading: ${provider.isLoading}');
-              debugPrint('📊 Has wallet: ${provider.hasWallet}');
-              debugPrint('📊 Public key: ${provider.publicKey}');
-              
-              // Show loading indicator while loading
-              if (provider.isLoading && provider.transactions.isEmpty) {
-                return const Center(
-                  child: CircularProgressIndicator(color: AppTheme.primaryGold),
-                );
-              }
-              
-              // Show empty state if no transactions
-              if (provider.transactions.isEmpty) {
-                return SingleChildScrollView(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.receipt_long, size: 64, color: AppTheme.grey.withOpacity(0.5)),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No transactions found',
-                          style: AppTheme.headingSmall.copyWith(
-                            color: AppTheme.grey,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Your transaction history will appear here',
-                          style: AppTheme.bodySmall.copyWith(
-                            color: AppTheme.grey.withOpacity(0.7),
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 24),
-                        ElevatedButton(
-                          onPressed: () {
-                            provider.loadTransactions(forceRefresh: true);
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.primaryGold,
-                            foregroundColor: AppTheme.black,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 12,
-                            ),
-                          ),
-                          child: const Text('Refresh'),
-                        ),
-                      ],
-                    ),
+    return Container(
+      color: AppTheme.black,
+      child: walletProvider.isLoading && walletProvider.transactions.isEmpty
+          ? const Center(
+              child: CircularProgressIndicator(color: AppTheme.primaryGold),
+            )
+          : walletProvider.transactions.isEmpty
+              ? Center(
+                  child: Text(
+                    'No transactions yet',
+                    style: TextStyle(color: AppTheme.grey, fontSize: 16),
                   ),
-                );
-              }
-              
-              debugPrint('📊 Rendering transaction list with ${provider.transactions.length} items');
-              return EnhancedTransactionList(
-                transactions: provider.transactionsAsObjects,
-                onRefresh: () => provider.loadTransactions(forceRefresh: true),
-              );
-            },
-          ),
-        ),
-      ],
+                )
+              : RefreshIndicator(
+                  onRefresh: () => walletProvider.loadTransactions(forceRefresh: true),
+                  color: AppTheme.primaryGold,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: walletProvider.transactions.length,
+                    itemBuilder: (context, index) {
+                      final tx = walletProvider.transactions[index];
+                      
+                      // Extract data safely
+                      final type = tx['type'] as String? ?? 'send';
+                      final asset = tx['asset'] as String? ?? 'MATIC';
+                      final value = (tx['value'] as num? ?? 0).toDouble();
+                      final hash = tx['hash'] as String? ?? '';
+                      final from = tx['from'] as String? ?? '';
+                      final to = tx['to'] as String? ?? '';
+                      final status = tx['status'] as String? ?? 'success';
+                      
+                      final isReceive = type == 'receive';
+                      final color = isReceive ? Colors.green : Colors.red;
+                      
+                      return Card(
+                        color: AppTheme.darkGrey,
+                        margin: const EdgeInsets.only(bottom: 12),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Type and Amount
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        isReceive ? Icons.arrow_downward : Icons.arrow_upward,
+                                        color: color,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        isReceive ? 'Received' : 'Sent',
+                                        style: TextStyle(
+                                          color: AppTheme.white,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  Text(
+                                    '${isReceive ? '+' : '-'}$value $asset',
+                                    style: TextStyle(
+                                      color: color,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              
+                              // From/To Address
+                              Text(
+                                '${isReceive ? 'From' : 'To'}: ${_formatAddress(isReceive ? from : to)}',
+                                style: TextStyle(
+                                  color: AppTheme.grey,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              
+                              // Hash
+                              Text(
+                                'Hash: ${_formatAddress(hash)}',
+                                style: TextStyle(
+                                  color: AppTheme.grey.withOpacity(0.7),
+                                  fontSize: 11,
+                                  fontFamily: 'monospace',
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              
+                              // Status Badge
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: status == 'success' 
+                                      ? Colors.green.withOpacity(0.2)
+                                      : Colors.orange.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  status.toUpperCase(),
+                                  style: TextStyle(
+                                    color: status == 'success' 
+                                        ? Colors.green 
+                                        : Colors.orange,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
     );
+  }
+
+  String _formatAddress(String address) {
+    if (address.isEmpty || address.length < 10) return address;
+    return '${address.substring(0, 6)}...${address.substring(address.length - 4)}';
   }
 
   Widget _buildPurchaseTab(EnhancedWalletProvider walletProvider) {
@@ -763,99 +751,6 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     );
 
     return fullWidth ? button : Expanded(child: button);
-  }
-
-  Widget _buildRecentTransactions(EnhancedWalletProvider walletProvider) {
-    final recentTxs = walletProvider.recentTransactions;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'Recent Transactions',
-              style: AppTheme.headingMedium.copyWith(
-                color: AppTheme.primaryGold,
-              ),
-            ),
-            TextButton(
-              onPressed: () => _tabController.animateTo(1),
-              child: Text(
-                'View All',
-                style: TextStyle(color: AppTheme.primaryGold),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        if (recentTxs.isEmpty)
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: AppTheme.darkGrey.withOpacity(0.3),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Center(
-              child: Text(
-                'No transactions yet',
-                style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
-              ),
-            ),
-          )
-        else
-          Column(
-            children: recentTxs
-                .take(3)
-                .map((tx) => _buildTransactionItem(tx))
-                .toList(),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildTransactionItem(dynamic tx) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppTheme.darkGrey.withOpacity(0.3),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            tx.type == 'send' ? Icons.arrow_upward : Icons.arrow_downward,
-            color: tx.type == 'send' ? Colors.red : Colors.green,
-            size: 20,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  tx.description,
-                  style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
-                ),
-                Text(
-                  '${tx.timestamp.toLocal()}',
-                  style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
-                ),
-              ],
-            ),
-          ),
-          Text(
-            '${tx.type == 'send' ? '-' : '+'}${tx.amount} ${tx.assetCode}',
-            style: AppTheme.bodyMedium.copyWith(
-              color: tx.type == 'send' ? Colors.red : Colors.green,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   Widget _buildSellTokensSection(EnhancedWalletProvider walletProvider) {
@@ -1597,76 +1492,8 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                 style: TextStyle(color: AppTheme.grey, fontSize: 14),
               ),
               const SizedBox(height: 24),
-              // Polygon Network Assets
-              Text(
-                'Polygon Network',
-                style: AppTheme.bodyLarge.copyWith(
-                  color: AppTheme.primaryGold,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 12),
-              // MATIC Option
-              ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: Colors.purple,
-                  child: const Text(
-                    'M',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                title: Text(
-                  'Send MATIC',
-                  style: TextStyle(color: AppTheme.white),
-                ),
-                subtitle: Text(
-                  'Native Polygon cryptocurrency',
-                  style: TextStyle(color: AppTheme.grey, fontSize: 12),
-                ),
-                onTap: () {
-                  Navigator.pop(context);
-                  _showSendAssetDialog(
-                    walletProvider,
-                    walletProvider.supportedAssets[0],
-                  ); // MATIC
-                },
-              ),
-              // AKOFA Option
-              ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: Colors.orange,
-                  child: const Text(
-                    'A',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                title: Text(
-                  'Send AKOFA',
-                  style: TextStyle(color: AppTheme.white),
-                ),
-                subtitle: Text(
-                  'AKOFA ecosystem token',
-                  style: TextStyle(color: AppTheme.grey, fontSize: 12),
-                ),
-                onTap: () {
-                  Navigator.pop(context);
-                  _showSendAssetDialog(
-                    walletProvider,
-                    walletProvider.supportedAssets[1],
-                  ); // AKOFA
-                },
-              ),
-              // Polygon Network Assets
+              // Polygon Network Assets - Dynamic tokens only
               if (walletProvider.hasPolygonWallet) ...[
-                const SizedBox(height: 24),
-                Divider(color: AppTheme.primaryGold.withOpacity(0.3)),
-                const SizedBox(height: 12),
                 Text(
                   'Polygon Network',
                   style: AppTheme.bodyLarge.copyWith(
@@ -2159,11 +1986,78 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     final amountController = TextEditingController();
     final passwordController = TextEditingController();
     bool obscurePassword = true;
+    bool isResolving = false;
+    String? resolvedAddress;
+    String? resolvedName;
+    String? tagError;
+    bool isValidInput = false;
 
     final symbol = token['symbol'] as String;
     final name = token['name'] as String;
     final balance = token['formattedBalance'] as String;
     final isNative = token['isNative'] as bool;
+
+    // Function to resolve Akofa tag or validate address
+    Future<void> resolveInput(StateSetter setDialogState) async {
+      final input = recipientController.text.trim();
+      if (input.isEmpty) {
+        setDialogState(() {
+          resolvedAddress = null;
+          resolvedName = null;
+          tagError = null;
+          isValidInput = false;
+        });
+        return;
+      }
+
+      setDialogState(() {
+        isResolving = true;
+        tagError = null;
+      });
+
+      try {
+        // Check if input is a valid Polygon address
+        if (AkofaTagService.isValidAddress(input, 'polygon')) {
+          setDialogState(() {
+            resolvedAddress = input;
+            resolvedName = null;
+            tagError = null;
+            isValidInput = true;
+          });
+        } else {
+          // Try to resolve as AKOFA tag
+          final result = await AkofaTagService.resolveTag(
+            input,
+            blockchain: 'polygon',
+          );
+
+          if (result['success']) {
+            setDialogState(() {
+              resolvedAddress = result['address'];
+              resolvedName = result['firstName'];
+              tagError = null;
+              isValidInput = true;
+            });
+          } else {
+            setDialogState(() {
+              resolvedAddress = null;
+              resolvedName = null;
+              tagError = result['error'];
+              isValidInput = false;
+            });
+          }
+        }
+      } catch (e) {
+        setDialogState(() {
+          resolvedAddress = null;
+          resolvedName = null;
+          tagError = 'Failed to resolve input: $e';
+          isValidInput = false;
+        });
+      } finally {
+        setDialogState(() => isResolving = false);
+      }
+    }
 
     showDialog(
       context: context,
@@ -2179,7 +2073,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Send $name to a Polygon address',
+                  'Send $name to Akofa Tag or Polygon address',
                   style: TextStyle(color: AppTheme.grey, fontSize: 14),
                   textAlign: TextAlign.center,
                 ),
@@ -2188,9 +2082,9 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                   controller: recipientController,
                   style: TextStyle(color: AppTheme.white),
                   decoration: InputDecoration(
-                    labelText: 'Recipient Polygon Address',
+                    labelText: 'Recipient (Akofa Tag or Address)',
                     labelStyle: TextStyle(color: AppTheme.primaryGold),
-                    hintText: '0x...',
+                    hintText: 'e.g., john1234 or 0x...',
                     hintStyle: TextStyle(color: AppTheme.grey),
                     enabledBorder: UnderlineInputBorder(
                       borderSide: BorderSide(color: AppTheme.primaryGold),
@@ -2198,8 +2092,97 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                     focusedBorder: UnderlineInputBorder(
                       borderSide: BorderSide(color: AppTheme.primaryGold),
                     ),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        isResolving ? Icons.hourglass_top : Icons.search,
+                        color: AppTheme.primaryGold,
+                      ),
+                      onPressed: isResolving ? null : () => resolveInput(setState),
+                    ),
                   ),
+                  onChanged: (_) {
+                    // Auto-resolve after user stops typing
+                    Future.delayed(const Duration(milliseconds: 500), () {
+                      if (recipientController.text.trim().isNotEmpty) {
+                        resolveInput(setState);
+                      }
+                    });
+                  },
                 ),
+                // Resolution Result Display
+                if (resolvedAddress != null && isValidInput) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.green.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.check_circle, color: Colors.green, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                resolvedName != null
+                                    ? 'Tag Resolved'
+                                    : 'Valid Address',
+                                style: TextStyle(
+                                  color: Colors.green,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              if (resolvedName != null)
+                                Text(
+                                  resolvedName!,
+                                  style: const TextStyle(
+                                    color: AppTheme.white,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              Text(
+                                '${resolvedAddress!.substring(0, 8)}...${resolvedAddress!.substring(resolvedAddress!.length - 8)}',
+                                style: TextStyle(
+                                  color: AppTheme.grey,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                // Error Display
+                if (tagError != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.red.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.error_outline, color: Colors.red, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            tagError!,
+                            style: TextStyle(color: Colors.red, fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 TextField(
                   controller: amountController,
@@ -2278,28 +2261,15 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
             ),
             ElevatedButton(
               onPressed:
-                  recipientController.text.trim().isEmpty ||
+                  !isValidInput ||
+                      resolvedAddress == null ||
                       amountController.text.trim().isEmpty ||
                       passwordController.text.trim().isEmpty
                   ? null
                   : () async {
-                      final recipientAddress = recipientController.text.trim();
+                      final recipientAddress = resolvedAddress!; // Use resolved address
                       final amountText = amountController.text.trim();
                       final password = passwordController.text.trim();
-
-                      // Validate Polygon address format
-                      if (!recipientAddress.startsWith('0x') ||
-                          recipientAddress.length != 42) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Please enter a valid Polygon address',
-                            ),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        return;
-                      }
 
                       final amount = double.tryParse(amountText);
                       if (amount == null || amount <= 0) {

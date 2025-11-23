@@ -63,33 +63,12 @@ class _SendDialogState extends State<SendDialog> {
       listen: false,
     );
 
-    // Start with MATIC and AKOFA if available
+    // Initialize with empty list
     _availableAssets = [];
 
-    // Add MATIC (Polygon native token)
-    _availableAssets.add({
-      'code': 'MATIC',
-      'balance': walletProvider.maticBalance,
-      'name': 'Polygon Matic',
-      'blockchain': 'polygon',
-    });
-
-    // Add AKOFA if available
-    final akofaBalance = walletProvider.akofaBalance;
-    if (double.tryParse(akofaBalance) != null && double.parse(akofaBalance) > 0) {
-      _availableAssets.add({
-        'code': 'AKOFA',
-        'balance': akofaBalance,
-        'name': 'Akofa Coin',
-        'blockchain': 'polygon',
-      });
-    }
-
-    // Add other Polygon tokens from wallet
+    // Add Polygon tokens from wallet (dynamic tokens only)
     for (var entry in walletProvider.polygonTokens.entries) {
       final token = entry.value;
-      // Skip MATIC as it's already added
-      if (entry.key == 'MATIC') continue;
 
       // Only add tokens with positive balance
       if ((token['balance'] as num?) != null && (token['balance'] as num) > 0) {
