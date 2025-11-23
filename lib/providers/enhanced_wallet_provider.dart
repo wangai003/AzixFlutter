@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../services/enhanced_stellar_service.dart';
 import '../services/enhanced_mpesa_service.dart';
 import '../services/secure_wallet_service.dart';
 import '../services/payment_webhook_service.dart';
@@ -14,7 +13,6 @@ import '../models/transaction.dart' as app_transaction;
 import '../models/asset_config.dart';
 
 class EnhancedWalletProvider extends ChangeNotifier {
-  final EnhancedStellarService _stellarService = EnhancedStellarService();
   final EnhancedMpesaService _mpesaService = EnhancedMpesaService();
   final PaymentWebhookService _webhookService = PaymentWebhookService();
   final PaymentSecurityService _securityService = PaymentSecurityService();
@@ -23,15 +21,14 @@ class EnhancedWalletProvider extends ChangeNotifier {
       MoonPayCallbackService();
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // State variables
+  // State variables - now using Polygon as primary wallet
   bool _isLoading = false;
   String? _error;
   bool _hasWallet = false;
-  String? _publicKey;
-  Map<String, dynamic> _balances = {};
-  List<app_transaction.Transaction> _transactions = [];
+  String? _address; // Polygon address (replaces Stellar publicKey)
+  Map<String, dynamic> _balances = {}; // Polygon token balances
+  List<Map<String, dynamic>> _transactions = []; // Polygon transactions
   bool _isMonitoringActive = false;
-  bool _hasAkofaTrustline = false;
 
   // M-Pesa related state
   bool _isProcessingPayment = false;
@@ -43,26 +40,55 @@ class EnhancedWalletProvider extends ChangeNotifier {
   List<Map<String, dynamic>> _moonPayTransactionHistory = [];
   bool _isMonitoringMoonPayTransactions = false;
 
-  // Secure wallet state
+  // Secure wallet state (now for Polygon)
   bool _hasSecureWallet = false;
   bool _isBiometricAuthenticating = false;
-  String? _secureWalletPublicKey;
+  String? _secureWalletAddress;
 
-  // Polygon wallet state
-  bool _hasPolygonWallet = false;
-  String? _polygonAddress;
-  Map<String, dynamic> _polygonBalances = {};
+  // Polygon token balances (multi-asset support)
   Map<String, Map<String, dynamic>> _polygonTokens = {};
   bool _isProcessingPolygonTransaction = false;
-  List<Map<String, dynamic>> _polygonTransactions = [];
+  
+  // Network configuration
+  bool _isTestnet = true; // Default to Amoy testnet
 
   // Getters
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get hasWallet => _hasWallet;
-  String? get publicKey => _publicKey;
+  String? get address => _address; // Polygon address
+  String? get publicKey => _address; // Alias for backward compatibility
   Map<String, dynamic> get balances => _balances;
-  List<app_transaction.Transaction> get transactions => _transactions;
+  List<Map<String, dynamic>> get transactions => _transactions;
+  
+  /// Get transactions as Transaction objects for UI compatibility
+  List<app_transaction.Transaction> get transactionsAsObjects {
+    final user = _auth.currentUser;
+    if (user == null) return [];
+    
+    return _transactions.map((tx) {
+      return app_transaction.Transaction(
+        id: tx['hash'] as String? ?? 'polygon_${tx['hash']}',
+        userId: user.uid,
+        type: tx['type'] as String? ?? 'send',
+        status: tx['status'] == 'success' ? 'completed' : 'pending',
+        amount: (tx['value'] as num? ?? 0).toDouble(),
+        assetCode: tx['asset'] as String? ?? 'MATIC',
+        timestamp: tx['timestamp'] as DateTime? ?? DateTime.now(),
+        description: _getPolygonTransactionDescription(tx),
+        transactionHash: tx['hash'] as String?,
+        senderAddress: tx['from'] as String?,
+        recipientAddress: tx['to'] as String?,
+        metadata: {
+          'network': tx['network'],
+          'gasUsed': tx['gasUsed'],
+          'gasPrice': tx['gasPrice'],
+          'confirmations': tx['confirmations'],
+          'provider': 'polygon',
+        },
+      );
+    }).toList();
+  }
   bool get isMonitoringActive => _isMonitoringActive;
   bool get isProcessingPayment => _isProcessingPayment;
   Map<String, dynamic>? get currentPaymentStatus => _currentPaymentStatus;
@@ -78,35 +104,39 @@ class EnhancedWalletProvider extends ChangeNotifier {
   // Secure wallet getters
   bool get hasSecureWallet => _hasSecureWallet;
   bool get isBiometricAuthenticating => _isBiometricAuthenticating;
-  String? get secureWalletPublicKey => _secureWalletPublicKey;
+  String? get secureWalletPublicKey => _secureWalletAddress;
+  String? get secureWalletAddress => _secureWalletAddress;
 
   // Polygon wallet getters
-  bool get hasPolygonWallet => _hasPolygonWallet;
-  String? get polygonAddress => _polygonAddress;
-  Map<String, dynamic> get polygonBalances => _polygonBalances;
+  bool get hasPolygonWallet => _hasWallet; // Unified wallet
+  String? get polygonAddress => _address;
+  Map<String, dynamic> get polygonBalances => _balances;
   Map<String, Map<String, dynamic>> get polygonTokens => _polygonTokens;
   bool get isProcessingPolygonTransaction => _isProcessingPolygonTransaction;
-  String get polygonBalance => _polygonBalances['matic'] ?? '0';
-  List<Map<String, dynamic>> get polygonTransactions => _polygonTransactions;
+  String get polygonBalance => _balances['matic']?.toString() ?? '0';
+  List<Map<String, dynamic>> get polygonTransactions => _transactions;
 
-  // Computed getters
-  String get xlmBalance => _balances['xlm'] ?? '0';
-  String get akofaBalance => _balances['akofa'] ?? '0';
-  bool get hasAkofaTrustline => _hasAkofaTrustline;
+  // Computed getters (Polygon equivalents)
+  String get maticBalance => _balances['matic']?.toString() ?? '0';
+  String get akofaBalance => _polygonTokens['AKOFA']?['balance']?.toString() ?? '0';
+  String get xlmBalance => maticBalance; // Alias for backward compatibility
   int get transactionCount => _transactions.length;
-  List<app_transaction.Transaction> get recentTransactions =>
+  List<Map<String, dynamic>> get recentTransactions =>
       _transactions.take(10).toList();
+  
+  // Network getters
+  bool get isTestnet => _isTestnet;
+  Map<String, dynamic> get networkInfo => PolygonWalletService.getNetworkInfo();
 
   EnhancedWalletProvider() {
     _initialize();
   }
 
   void _initialize() {
-    // Set up real-time callbacks
-    _stellarService.setTransactionCallback(_onTransactionsUpdated);
-    _stellarService.setBalanceCallback(_onBalancesUpdated);
-    _stellarService.setNewTransactionCallback(_onNewTransaction);
-
+    // Initialize network settings
+    final networkInfo = PolygonWalletService.getNetworkInfo();
+    _isTestnet = networkInfo['isTestnet'] as bool;
+    
     // Check wallet status
     checkWalletStatus();
 
@@ -119,31 +149,24 @@ class EnhancedWalletProvider extends ChangeNotifier {
       }
     });
   }
-
-  /// Check Polygon wallet status
-  Future<void> checkPolygonWalletStatus() async {
-    try {
-      final user = _auth.currentUser;
-      if (user == null) return;
-
-      _hasPolygonWallet = await PolygonWalletService.hasPolygonWallet(user.uid);
-      if (_hasPolygonWallet) {
-        _polygonAddress = await PolygonWalletService.getPolygonWalletAddress(
-          user.uid,
-        );
-        if (_polygonAddress != null) {
-          await loadPolygonBalances();
-        }
-      }
-      notifyListeners();
-    } catch (e) {
-      print('Error checking Polygon wallet status: $e');
+  
+  /// Switch network (mainnet/testnet)
+  Future<void> switchNetwork({required bool isTestnet}) async {
+    _isTestnet = isTestnet;
+    PolygonWalletService.setNetwork(isTestnet: isTestnet);
+    
+    // Refresh wallet data after network switch
+    if (_hasWallet && _address != null) {
+      await Future.wait([loadBalances(), loadTransactions(forceRefresh: true)]);
     }
+    
+    notifyListeners();
   }
+
 
   // ==================== WALLET MANAGEMENT ====================
 
-  /// Check wallet status and initialize if needed
+  /// Check wallet status and initialize if needed (Polygon wallet)
   Future<void> checkWalletStatus() async {
     _setLoading(true);
     _setError(null);
@@ -155,48 +178,21 @@ class EnhancedWalletProvider extends ChangeNotifier {
         return;
       }
 
-      // Check for secure wallet first
-      _hasSecureWallet = await SecureWalletService.hasSecureWallet(user.uid);
-      if (_hasSecureWallet) {
-        _secureWalletPublicKey = await SecureWalletService.getWalletPublicKey(
-          user.uid,
-        );
-        _publicKey = _secureWalletPublicKey;
-        _hasWallet = true;
-      } else {
-        // Fall back to regular wallet
-        _hasWallet = await _stellarService.hasWallet();
-        if (_hasWallet) {
-          _publicKey = await _stellarService.getPublicKey();
-        }
-      }
-
-      // Check Polygon wallet status
-      await checkPolygonWalletStatus();
-
+      // Check for Polygon wallet
+      _hasWallet = await PolygonWalletService.hasPolygonWallet(user.uid);
       if (_hasWallet) {
-        // Load initial data
-        await Future.wait([loadBalances(), loadTransactions()]);
-
-        // Load Polygon transactions if wallet exists
-        if (_hasPolygonWallet && _polygonAddress != null) {
-          await loadPolygonTransactions();
-        }
-
-        // Automatically setup wallet (fund with XLM and create AKOFA trustline if needed)
-        if (_publicKey != null) {
-          await _autoSetupWalletIfNeeded(_publicKey!);
-        }
-
-        // Start real-time monitoring
-        if (!_isMonitoringActive) {
-          _stellarService.startRealTimeMonitoring();
-          _isMonitoringActive = true;
-        }
-
-        // Start MoonPay transaction monitoring
-        if (!_isMonitoringMoonPayTransactions) {
-          await startMoonPayTransactionMonitoring();
+        _address = await PolygonWalletService.getPolygonWalletAddress(user.uid);
+        _hasSecureWallet = true; // Polygon wallets are secure by default
+        _secureWalletAddress = _address;
+        
+        if (_address != null) {
+          // Load initial data
+          await Future.wait([loadBalances(), loadTransactions()]);
+          
+          // Start MoonPay transaction monitoring
+          if (!_isMonitoringMoonPayTransactions) {
+            await startMoonPayTransactionMonitoring();
+          }
         }
       }
     } catch (e) {
@@ -223,7 +219,7 @@ class EnhancedWalletProvider extends ChangeNotifier {
     }
   }
 
-  /// Create a Polygon wallet alongside the Stellar wallet
+  /// Create a Polygon wallet (primary wallet creation method)
   Future<Map<String, dynamic>> createPolygonWallet({
     required String password,
     String? recoveryPhrase,
@@ -245,11 +241,14 @@ class EnhancedWalletProvider extends ChangeNotifier {
 
       if (result['success'] == true) {
         // Update local state
-        _hasPolygonWallet = true;
-        _polygonAddress = result['address'];
+        _hasWallet = true;
+        _hasSecureWallet = true;
+        _address = result['address'];
+        _secureWalletAddress = _address;
 
         // Load initial balances
-        await loadPolygonBalances();
+        await loadBalances();
+        await loadTransactions();
 
         _setLoading(false);
         return result;
@@ -263,92 +262,31 @@ class EnhancedWalletProvider extends ChangeNotifier {
     }
   }
 
-  /// Create a secure wallet with biometric protection
+  /// Create a secure Polygon wallet with biometric protection
   Future<Map<String, dynamic>> createSecureWallet({
     required BuildContext context,
     required String password,
     String? recoveryPhrase,
     bool enableBiometrics = false,
   }) async {
-    _setLoading(true);
-    _setError(null);
-
-    try {
-      final user = _auth.currentUser;
-      if (user == null) {
-        throw Exception('User not authenticated');
-      }
-
-      final result = await SecureWalletService.createSecureWallet(
-        userId: user.uid,
-        password: password,
-        recoveryPhrase: recoveryPhrase,
-        enableBiometrics: enableBiometrics,
-      );
-
-      if (result['success'] == true) {
-        // Update local state
-        _hasSecureWallet = true;
-        _secureWalletPublicKey = result['publicKey'];
-        _publicKey = _secureWalletPublicKey;
-        _hasWallet = true;
-
-        // Load wallet data (this will also check trustline status)
-        await Future.wait([loadBalances(), loadTransactions()]);
-
-        // Setup wallet automatically
-        if (_publicKey != null) {
-          await _autoSetupWalletIfNeeded(_publicKey!);
-        }
-
-        // Start monitoring
-        if (!_isMonitoringActive) {
-          _stellarService.startRealTimeMonitoring();
-          _isMonitoringActive = true;
-        }
-
-        // Start MoonPay transaction monitoring
-        if (!_isMonitoringMoonPayTransactions) {
-          await startMoonPayTransactionMonitoring();
-        }
-
-        // Integrate MoonPay transactions with existing monitoring
-        await _syncMoonPayTransactionsWithStellar();
-
-        // Also create Polygon wallet if not exists
-        if (!_hasPolygonWallet) {
-          try {
-            await createPolygonWallet(
-              password: password,
-              recoveryPhrase: recoveryPhrase,
-            );
-          } catch (e) {
-            // Polygon wallet creation is optional, don't fail the whole process
-            print('Warning: Polygon wallet creation failed: $e');
-          }
-        }
-      }
-
-      _setLoading(false);
-      return result;
-    } catch (e) {
-      _setError('Failed to create secure wallet: $e');
-      _setLoading(false);
-      return {'success': false, 'error': e.toString()};
-    }
+    // For Polygon, we use the PolygonWalletService which already includes encryption
+    // Biometric support can be added via SecureWalletService wrapper if needed
+    return await createPolygonWallet(
+      password: password,
+      recoveryPhrase: recoveryPhrase,
+    );
   }
 
-  /// Check if user has a secure wallet
+  /// Check if user has a secure wallet (Polygon)
   Future<bool> checkSecureWalletStatus() async {
     try {
       final user = _auth.currentUser;
       if (user == null) return false;
 
-      _hasSecureWallet = await SecureWalletService.hasSecureWallet(user.uid);
+      _hasSecureWallet = await PolygonWalletService.hasPolygonWallet(user.uid);
       if (_hasSecureWallet) {
-        _secureWalletPublicKey = await SecureWalletService.getWalletPublicKey(
-          user.uid,
-        );
+        _address = await PolygonWalletService.getPolygonWalletAddress(user.uid);
+        _secureWalletAddress = _address;
       }
       notifyListeners();
       return _hasSecureWallet;
@@ -357,89 +295,22 @@ class EnhancedWalletProvider extends ChangeNotifier {
     }
   }
 
-  /// Load wallet balances
+  /// Load wallet balances (Polygon)
   Future<void> loadBalances() async {
-    if (_publicKey == null) return;
+    if (_address == null) return;
 
     try {
-      _balances = await _stellarService.getWalletBalances(_publicKey!);
-      // Also check trustline status
-      _hasAkofaTrustline = await _stellarService.hasAkofaTrustline(_publicKey!);
-      notifyListeners();
-    } catch (e) {}
-  }
-
-  /// Load transactions
-  Future<void> loadTransactions({bool forceRefresh = false}) async {
-    if (_isLoading && !forceRefresh) {
-      debugPrint('⏸️ Already loading transactions, skipping...');
-      return;
-    }
-    
-    try {
-      _isLoading = true;
-      notifyListeners();
-      
-      debugPrint('🔄 Loading transactions... Public key: $_publicKey');
-      
-      // If we have a public key, use it directly with blockchain service
-      if (_publicKey != null && _publicKey!.isNotEmpty) {
-        debugPrint('✅ Using public key from provider: $_publicKey');
-        // Use blockchain transaction service with the public key directly
-        final transactions = await BlockchainTransactionService.getTransactionsForPublicKey(
-          _publicKey!,
-        );
-        _transactions = transactions;
-        debugPrint('✅ Loaded ${transactions.length} transactions from blockchain');
-      } else {
-        debugPrint('⚠️ No public key in provider, trying blockchain service lookup...');
-        // Fallback to blockchain service which will look up the public key
-        final transactions = await BlockchainTransactionService.getUserTransactionsFromBlockchain();
-        _transactions = transactions;
-        debugPrint('✅ Loaded ${transactions.length} transactions from blockchain service');
-        
-        // If still no transactions, try enhanced service as last resort
-        if (_transactions.isEmpty) {
-          debugPrint('⚠️ No transactions from blockchain service, trying enhanced service...');
-          _transactions = await _stellarService.getUserTransactionsFromBlockchain(
-            forceRefresh: forceRefresh,
-          );
-          debugPrint('✅ Loaded ${_transactions.length} transactions from enhanced service');
-        }
-      }
-      
-      _isLoading = false;
-      notifyListeners();
-    } catch (e, stackTrace) {
-      debugPrint('❌ Error loading transactions: $e');
-      debugPrint('Stack trace: $stackTrace');
-      // Set empty list on error instead of keeping old data
-      _transactions = [];
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  /// Load Polygon wallet balances
-  Future<void> loadPolygonBalances() async {
-    if (_polygonAddress == null) return;
-
-    try {
-      final balanceResult =
-          await PolygonWalletService.getAllPolygonTokenBalances(
-            _polygonAddress!,
-          );
+      final balanceResult = await PolygonWalletService.getAllPolygonTokenBalances(_address!);
       if (balanceResult['success'] == true) {
         final tokens = balanceResult['tokens'] as Map<String, dynamic>;
         _polygonTokens = Map<String, Map<String, dynamic>>.from(tokens);
-
-        // Update legacy single balance for backward compatibility
+        
+        // Update balances map for backward compatibility
         if (_polygonTokens.containsKey('MATIC')) {
-          _polygonBalances = {
-            'matic': _polygonTokens['MATIC']!['balance'].toString(),
-            'symbol': _polygonTokens['MATIC']!['symbol'],
-            'network': balanceResult['network'],
-          };
+          _balances['matic'] = _polygonTokens['MATIC']!['balance'];
+        }
+        if (_polygonTokens.containsKey('AKOFA')) {
+          _balances['akofa'] = _polygonTokens['AKOFA']!['balance'];
         }
       }
       notifyListeners();
@@ -448,36 +319,47 @@ class EnhancedWalletProvider extends ChangeNotifier {
     }
   }
 
-  /// Load Polygon transaction history
-  Future<void> loadPolygonTransactions() async {
-    if (_polygonAddress == null) return;
-
+  /// Load transactions (Polygon)
+  Future<void> loadTransactions({bool forceRefresh = false}) async {
+    if (_isLoading && !forceRefresh) {
+      debugPrint('⏸️ Already loading transactions, skipping...');
+      return;
+    }
+    
+    if (_address == null) return;
+    
     try {
-      _polygonTransactions =
-          await PolygonWalletService.getPolygonTransactionHistory(
-            _polygonAddress!,
-            limit: 50,
-          );
+      _isLoading = true;
       notifyListeners();
-    } catch (e) {
-      print('Error loading Polygon transactions: $e');
-      _polygonTransactions = [];
+      
+      debugPrint('🔄 Loading Polygon transactions... Address: $_address');
+      
+      _transactions = await PolygonWalletService.getPolygonTransactionHistory(
+        _address!,
+        limit: 50,
+      );
+      
+      debugPrint('✅ Loaded ${_transactions.length} Polygon transactions');
+      
+      _isLoading = false;
+      notifyListeners();
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error loading Polygon transactions: $e');
+      debugPrint('Stack trace: $stackTrace');
+      _transactions = [];
+      _isLoading = false;
       notifyListeners();
     }
   }
 
-  /// Refresh all wallet data
+
+  /// Refresh all wallet data (Polygon)
   Future<void> refreshWallet() async {
     _setLoading(true);
     _setError(null);
 
     try {
       await Future.wait([loadBalances(), loadTransactions(forceRefresh: true)]);
-
-      // Also refresh Polygon data if available
-      if (_hasPolygonWallet && _polygonAddress != null) {
-        await Future.wait([loadPolygonBalances(), loadPolygonTransactions()]);
-      }
     } catch (e) {
       _setError('Failed to refresh wallet: $e');
     }
@@ -485,131 +367,68 @@ class EnhancedWalletProvider extends ChangeNotifier {
     _setLoading(false);
   }
 
-  /// Automatically setup wallet if needed (fund with XLM and create AKOFA trustline)
-  Future<void> _autoSetupWalletIfNeeded(String publicKey) async {
+  /// Automatically setup wallet if needed (Polygon - no trustlines needed)
+  Future<void> _autoSetupWalletIfNeeded(String address) async {
     try {
-      // Check if account has sufficient XLM
-      final hasSufficientXlm = await _stellarService.hasSufficientXlm(
-        publicKey,
-      );
-      final hasAkofaTrustline = await _stellarService.hasAkofaTrustline(
-        publicKey,
-      );
-
-      if (!hasSufficientXlm || !hasAkofaTrustline) {
-        print(
-          '🔧 Wallet needs setup - XLM: $hasSufficientXlm, Trustline: $hasAkofaTrustline',
-        );
-
-        // Show loading message
-        _setError('Setting up your wallet automatically...');
-
-        // Perform automatic setup
-        final setupResult = await _stellarService.autoSetupWallet(publicKey);
-
-        if (setupResult['success'] == true) {
-          // Clear the loading message
-          _setError(null);
-
-          // Refresh balances and trustline status after setup
-          await loadBalances();
-
-          // Show success message
-          String successMessage = 'Wallet setup completed!';
-          if (setupResult['funded'] == true &&
-              setupResult['trustlineCreated'] == true) {
-            successMessage =
-                'Wallet funded with XLM and AKOFA trustline created!';
-          } else if (setupResult['funded'] == true) {
-            successMessage = 'Wallet funded with test XLM!';
-          } else if (setupResult['trustlineCreated'] == true) {
-            successMessage = 'AKOFA trustline created!';
-          }
-
-          // Set success message temporarily
-          _setError(successMessage);
-
-          // Clear success message after 3 seconds
-          Future.delayed(const Duration(seconds: 3), () {
-            if (_error == successMessage) {
-              _setError(null);
-            }
-          });
-        } else {
-          _setError('Wallet setup failed: ${setupResult['message']}');
-        }
+      // Polygon doesn't require trustlines - tokens are automatically available
+      // Just ensure wallet has been created and has an address
+      if (address.isEmpty) {
+        print('⚠️ Wallet address is empty');
+        return;
       }
+      print('✅ Polygon wallet ready: $address');
     } catch (e) {
-      _setError('Failed to setup wallet automatically: $e');
+      print('Error in auto-setup: $e');
     }
   }
 
   // ==================== TRANSACTION OPERATIONS ====================
 
-  /// Send AKOFA tokens
+  /// Send AKOFA tokens (Polygon ERC-20) - backward compatibility method
   Future<Map<String, dynamic>> sendAkofaTokens({
     required String recipientAddress,
     required double amount,
     String? memo,
+    String? password,
   }) async {
-    _setLoading(true);
-    _setError(null);
-
-    try {
-      final result = await _stellarService.sendAkofaTokens(
+    // If password is provided, use the secure method
+    if (password != null) {
+      return await sendAkofaWithAuthentication(
         recipientAddress: recipientAddress,
         amount: amount,
-        memo: memo,
+        memo: memo ?? '',
+        password: password,
       );
-
-      if (result['success'] == true) {
-        // Refresh data after successful transaction
-        await Future.wait([
-          loadBalances(),
-          loadTransactions(forceRefresh: true),
-        ]);
-      }
-
-      _setLoading(false);
-      return result;
-    } catch (e) {
-      _setError('Failed to send AKOFA tokens: $e');
-      _setLoading(false);
-      return {'success': false, 'error': e.toString()};
     }
+    
+    // Otherwise return error - password required for Polygon
+    return {
+      'success': false,
+      'error': 'Password required for Polygon transactions',
+    };
   }
 
-  /// Send XLM
+  /// Send XLM (alias for sendMatic - backward compatibility)
   Future<Map<String, dynamic>> sendXLM({
     required String recipientAddress,
     required double amount,
     String? memo,
+    String? password,
   }) async {
-    _setLoading(true);
-    _setError(null);
-
-    try {
-      final result = await _stellarService.sendXlm(
-        recipientAddress,
-        amount.toString(),
-        memo: memo,
+    // If password is provided, use sendMatic
+    if (password != null) {
+      return await sendMatic(
+        recipientAddress: recipientAddress,
+        amount: amount,
+        password: password,
       );
-
-      if (result['success'] == true) {
-        // Refresh data after successful transaction
-        await Future.wait([
-          loadBalances(),
-          loadTransactions(forceRefresh: true),
-        ]);
-      }
-
-      _setLoading(false);
-      return result;
-    } catch (e) {
-      _setError('Failed to send XLM: $e');
-      _setLoading(false);
-      return {'success': false, 'error': e.toString()};
     }
+    
+    // Otherwise return error - password required for Polygon
+    return {
+      'success': false,
+      'error': 'Password required for Polygon transactions',
+    };
   }
 
   /// Send AKOFA tokens with authentication (secure wallet)
@@ -724,123 +543,75 @@ class EnhancedWalletProvider extends ChangeNotifier {
 
   // ==================== MULTI-ASSET SUPPORT ====================
 
-  /// Get all supported assets
-  List<AssetConfig> get supportedAssets => _stellarService.getSupportedAssets();
+  /// Get all supported assets (Polygon tokens)
+  List<AssetConfig> get supportedAssets {
+    // Return Polygon token configurations
+    // This would be populated from PolygonWalletService token registry
+    return [
+      AssetConfig(
+        code: 'MATIC',
+        symbol: 'MATIC',
+        name: 'Polygon Matic',
+        issuer: '',
+        isNative: true,
+        decimals: 18,
+      ),
+      // Add other Polygon tokens as needed
+    ];
+  }
 
-  /// Get stablecoins only
-  List<AssetConfig> get stablecoins => _stellarService.getStablecoins();
+  /// Get stablecoins only (Polygon)
+  List<AssetConfig> get stablecoins {
+    return supportedAssets.where((asset) => asset.isStablecoin).toList();
+  }
 
-  /// Create trustlines for multiple assets
+  /// Create multiple trustlines (Polygon - no-op, trustlines not needed)
+  /// This method exists for backward compatibility but does nothing on Polygon
   Future<Map<String, dynamic>> createMultipleTrustlines(
     List<AssetConfig> assets,
   ) async {
-    if (_publicKey == null) {
-      return {'success': false, 'message': 'No wallet found'};
-    }
-
-    _setLoading(true);
-    _setError(null);
-
-    try {
-      final result = await _stellarService.createMultipleTrustlines(
-        _publicKey!,
-        assets,
-      );
-
-      if (result['success'] == true) {
-        // Refresh balances after creating trustlines
-        await loadBalances();
-      }
-
-      _setLoading(false);
-      return result;
-    } catch (e) {
-      _setError('Failed to create trustlines: $e');
-      _setLoading(false);
-      return {'success': false, 'error': e.toString()};
-    }
+    // Polygon doesn't require trustlines - tokens are automatically available
+    return {
+      'success': true,
+      'message': 'Polygon doesn\'t require trustlines - tokens are automatically available',
+      'assets': assets.map((a) => a.symbol).toList(),
+    };
   }
 
-  /// Send any asset (generic method)
+  /// Send any asset (generic method - Polygon)
   Future<Map<String, dynamic>> sendAsset({
     required String recipientAddress,
     required AssetConfig asset,
     required double amount,
     String? memo,
-    String? password, // Optional password for secure wallets
+    required String password, // Required password for Polygon transactions
   }) async {
     _setLoading(true);
     _setError(null);
 
     try {
-      debugPrint('🔄 Sending ${asset.symbol} - Has secure wallet: $_hasSecureWallet, Password provided: ${password != null && password.isNotEmpty}');
+      debugPrint('🔄 Sending ${asset.symbol} on Polygon - Address: $_address');
       
-      // Check if user has a secure wallet and password is provided
-      if (_hasSecureWallet && password != null && password.isNotEmpty) {
-        debugPrint('✅ Using secure wallet flow for ${asset.code}');
-        // For secure wallets, use SecureWalletService for supported assets
-        if (asset.code == 'XLM' || asset.code == 'AKOFA') {
-          final user = _auth.currentUser;
-          if (user == null) {
-            throw Exception('User not authenticated');
-          }
-
-          debugPrint('🔐 Signing transaction with SecureWalletService...');
-          final result = await SecureWalletService.signTransactionWithPassword(
-            userId: user.uid,
-            password: password,
-            recipientAddress: recipientAddress,
-            amount: amount,
-            assetCode: asset.code,
-            memo: memo ?? '',
-          );
-
-          debugPrint('📊 Transaction result: ${result['success']}, Error: ${result['error']}');
-
-          if (result['success'] == true) {
-            // Refresh data after successful transaction
-            await Future.wait([
-              loadBalances(),
-              loadTransactions(forceRefresh: true),
-            ]);
-            debugPrint('✅ Transaction successful, balances refreshed');
-          }
-
-          _setLoading(false);
-          return result;
-        } else {
-          // For other assets with secure wallets, we need to decrypt the secret key
-          // and use it with the enhanced stellar service
-          // This is a fallback for assets not directly supported by SecureWalletService
-          debugPrint('⚠️ Asset ${asset.code} not directly supported by SecureWalletService');
-          _setError('Secure wallet transactions for ${asset.symbol} require direct secret key access. Please use a regular wallet for this asset.');
-          _setLoading(false);
-          return {'success': false, 'error': 'Asset not supported with secure wallet'};
-        }
+      if (_address == null) {
+        throw Exception('No wallet found');
       }
 
-      // Regular wallet flow - use enhanced stellar service
-      debugPrint('🔄 Using regular wallet flow (enhanced stellar service)');
-      final result = await _stellarService.sendAsset(
-        recipientAddress: recipientAddress,
-        asset: asset,
-        amount: amount,
-        memo: memo,
-      );
-
-      debugPrint('📊 Regular wallet transaction result: ${result['success']}, Error: ${result['error']}');
-
-      if (result['success'] == true) {
-        // Refresh data after successful transaction
-        await Future.wait([
-          loadBalances(),
-          loadTransactions(forceRefresh: true),
-        ]);
-        debugPrint('✅ Transaction successful, balances refreshed');
+      // For MATIC (native token)
+      if (asset.code == 'MATIC' || asset.isNative) {
+        return await sendMatic(
+          recipientAddress: recipientAddress,
+          amount: amount,
+          password: password,
+        );
       }
 
+      // For ERC-20 tokens (like AKOFA), implement ERC-20 transfer
+      // This requires contract interaction
       _setLoading(false);
-      return result;
+      return {
+        'success': false,
+        'error': 'ERC-20 token transfers not yet implemented. Currently only MATIC transfers are supported.',
+      };
     } catch (e, stackTrace) {
       debugPrint('❌ Error sending ${asset.symbol}: $e');
       debugPrint('Stack trace: $stackTrace');
@@ -850,13 +621,13 @@ class EnhancedWalletProvider extends ChangeNotifier {
     }
   }
 
-  /// Send MATIC tokens
+  /// Send MATIC tokens (Polygon native token)
   Future<Map<String, dynamic>> sendMatic({
     required String recipientAddress,
     required double amount,
     required String password,
   }) async {
-    if (!_hasPolygonWallet) {
+    if (!_hasWallet || _address == null) {
       return {'success': false, 'error': 'No Polygon wallet found'};
     }
 
@@ -865,8 +636,13 @@ class EnhancedWalletProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        throw Exception('User not authenticated');
+      }
+
       final result = await PolygonWalletService.sendMaticTransaction(
-        userId: _auth.currentUser!.uid,
+        userId: user.uid,
         password: password,
         toAddress: recipientAddress,
         amountMatic: amount,
@@ -874,7 +650,7 @@ class EnhancedWalletProvider extends ChangeNotifier {
 
       if (result['success'] == true) {
         // Refresh balances and transactions after successful transaction
-        await Future.wait([loadPolygonBalances(), loadPolygonTransactions()]);
+        await Future.wait([loadBalances(), loadTransactions(forceRefresh: true)]);
       }
 
       _isProcessingPolygonTransaction = false;
@@ -900,12 +676,8 @@ class EnhancedWalletProvider extends ChangeNotifier {
     }
 
     if (!_hasSecureWallet) {
-      return await sendAsset(
-        recipientAddress: recipientAddress,
-        asset: stablecoin,
-        amount: amount,
-        memo: memo,
-      );
+      // Password is required for Polygon transactions
+      return {'success': false, 'error': 'Password required for transactions'};
     }
 
     _isBiometricAuthenticating = true;
@@ -960,17 +732,17 @@ class EnhancedWalletProvider extends ChangeNotifier {
     return AssetConfigs.findByAssetId(assetId);
   }
 
-  /// Check if user has trustline for asset
+  /// Check if user has trustline for asset (Polygon - always true, no trustlines needed)
   Future<bool> hasTrustlineForAsset(AssetConfig asset) async {
-    if (_publicKey == null) return false;
-    return await _stellarService.hasTrustlineForAsset(_publicKey!, asset);
+    // Polygon doesn't require trustlines - all tokens are automatically available
+    return true;
   }
 
-  /// Setup wallet with multiple assets (XLM funding + trustlines)
+  /// Setup wallet with multiple assets (Polygon - no setup needed)
   Future<Map<String, dynamic>> setupWalletWithMultipleAssets(
     List<AssetConfig> assets,
   ) async {
-    if (_publicKey == null) {
+    if (_address == null) {
       return {'success': false, 'message': 'No wallet found'};
     }
 
@@ -978,11 +750,12 @@ class EnhancedWalletProvider extends ChangeNotifier {
     _setError(null);
 
     try {
-      // First setup basic wallet (XLM funding + AKOFA trustline)
-      await _autoSetupWalletIfNeeded(_publicKey!);
+      // First setup basic wallet (Polygon doesn't need funding or trustlines)
+      await _autoSetupWalletIfNeeded(_address!);
 
-      // Then create trustlines for additional assets
-      final trustlineResult = await createMultipleTrustlines(assets);
+      // Polygon doesn't require trustlines - tokens are automatically available
+      // This is a no-op for Polygon
+      final trustlineResult = {'success': true, 'message': 'Polygon doesn\'t require trustlines'};
 
       _setLoading(false);
 
@@ -1251,9 +1024,9 @@ class EnhancedWalletProvider extends ChangeNotifier {
 
   // ==================== REAL-TIME CALLBACKS ====================
 
-  /// Called when transactions are updated
+  /// Called when transactions are updated (not used for Polygon)
   void _onTransactionsUpdated(List<app_transaction.Transaction> transactions) {
-    _transactions = transactions;
+    // Not used for Polygon - transactions are Maps
     notifyListeners();
   }
 
@@ -1271,24 +1044,24 @@ class EnhancedWalletProvider extends ChangeNotifier {
   // ==================== UTILITY METHODS ====================
 
   /// Filter transactions by type
-  List<app_transaction.Transaction> filterTransactions(String type) {
+  List<Map<String, dynamic>> filterTransactions(String type) {
     if (type == 'all') return _transactions;
-    return _transactions.where((tx) => tx.type == type).toList();
+    return _transactions.where((tx) => tx['type'] == type).toList();
   }
 
   /// Search transactions
-  List<app_transaction.Transaction> searchTransactions(String query) {
+  List<Map<String, dynamic>> searchTransactions(String query) {
     if (query.isEmpty) return _transactions;
 
     final lowercaseQuery = query.toLowerCase();
     return _transactions.where((tx) {
-      return (tx.description?.toLowerCase().contains(lowercaseQuery) ??
+      return ((tx['description'] as String?)?.toLowerCase().contains(lowercaseQuery) ??
               false) ||
-          tx.assetCode.toLowerCase().contains(lowercaseQuery) ||
-          (tx.memo?.toLowerCase().contains(lowercaseQuery) ?? false) ||
-          (tx.senderAkofaTag?.toLowerCase().contains(lowercaseQuery) ??
+          (tx['asset'] as String? ?? tx['assetCode'] as String? ?? '').toLowerCase().contains(lowercaseQuery) ||
+          ((tx['memo'] as String?)?.toLowerCase().contains(lowercaseQuery) ?? false) ||
+          ((tx['senderAkofaTag'] as String?)?.toLowerCase().contains(lowercaseQuery) ??
               false) ||
-          (tx.recipientAkofaTag?.toLowerCase().contains(lowercaseQuery) ??
+          ((tx['recipientAkofaTag'] as String?)?.toLowerCase().contains(lowercaseQuery) ??
               false);
     }).toList();
   }
@@ -1303,18 +1076,23 @@ class EnhancedWalletProvider extends ChangeNotifier {
     double totalMined = 0;
 
     for (final tx in _transactions) {
-      switch (tx.type) {
+      final type = tx['type'] as String? ?? '';
+      final amount = (tx['value'] as num? ?? tx['amount'] as num? ?? 0).toDouble();
+      
+      switch (type) {
         case 'send':
+        case 'outgoing':
           sentCount++;
-          totalSent += tx.amount;
+          totalSent += amount;
           break;
         case 'receive':
+        case 'incoming':
           receivedCount++;
-          totalReceived += tx.amount;
+          totalReceived += amount;
           break;
         case 'mining':
           miningCount++;
-          totalMined += tx.amount;
+          totalMined += amount;
           break;
       }
     }
@@ -1338,13 +1116,13 @@ class EnhancedWalletProvider extends ChangeNotifier {
 
   // ==================== MOONPAY INTEGRATION ====================
 
-  /// Purchase XLM using MoonPay
+  /// Purchase MATIC using MoonPay (Polygon)
   Future<Map<String, dynamic>> purchaseXLMWithMoonPay({
     required double amountUSD,
     String? email,
     String? externalCustomerId,
   }) async {
-    if (_publicKey == null) {
+    if (_address == null) {
       return {'success': false, 'error': 'No wallet found'};
     }
 
@@ -1353,15 +1131,15 @@ class EnhancedWalletProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Validate wallet address
-      if (!MoonPayService.isValidStellarAddress(_publicKey!)) {
-        throw Exception('Invalid Stellar wallet address');
+      // Validate wallet address (Polygon address format)
+      if (!_address!.startsWith('0x') || _address!.length != 42) {
+        throw Exception('Invalid Polygon wallet address');
       }
 
-      // Generate MoonPay widget URL
+      // Generate MoonPay widget URL for Polygon/MATIC
       final widgetUrl = MoonPayService.generateEnhancedWidgetUrl(
-        walletAddress: _publicKey!,
-        currencyCode: 'xlm',
+        walletAddress: _address!,
+        currencyCode: 'matic_polygon', // MoonPay code for Polygon MATIC
         baseCurrencyAmount: amountUSD,
         baseCurrencyCode: 'USD',
         email: email,
@@ -1374,8 +1152,8 @@ class EnhancedWalletProvider extends ChangeNotifier {
       _currentMoonPayTransaction = {
         'widgetUrl': widgetUrl,
         'amountUSD': amountUSD,
-        'walletAddress': _publicKey,
-        'currencyCode': 'xlm',
+        'walletAddress': _address,
+        'currencyCode': 'matic_polygon',
         'status': 'initiated',
         'timestamp': DateTime.now().toIso8601String(),
       };
@@ -1704,21 +1482,24 @@ class EnhancedWalletProvider extends ChangeNotifier {
         final transactionId = moonPayTx['id'];
         final walletAddress = moonPayTx['walletAddress'];
 
-        // Check if this transaction is already recorded in Stellar transactions
-        final stellarTxs = _transactions
+        // Check if this transaction is already recorded in Polygon transactions
+        final polygonTxs = _transactions
             .where(
-              (tx) =>
-                  tx.transactionHash == transactionId ||
-                  tx.metadata['externalTransactionId'] == transactionId,
+              (tx) {
+                final metadata = tx['metadata'] as Map<String, dynamic>?;
+                return tx['hash'] == transactionId ||
+                    tx['transactionHash'] == transactionId ||
+                    (metadata?['externalTransactionId'] == transactionId);
+              },
             )
             .toList();
 
-        if (stellarTxs.isEmpty && walletAddress == _publicKey) {
-          // Transaction not found in Stellar, but MoonPay shows completed
-          // This might indicate the transaction is still being processed on Stellar
+        if (polygonTxs.isEmpty && walletAddress == _address) {
+          // Transaction not found in Polygon, but MoonPay shows completed
+          // This might indicate the transaction is still being processed on Polygon
           // We'll let the regular monitoring handle it, but log for awareness
           debugPrint(
-            'MoonPay transaction $transactionId completed but not yet in Stellar transactions',
+            'MoonPay transaction $transactionId completed but not yet in Polygon transactions',
           );
         }
       }
@@ -1727,12 +1508,12 @@ class EnhancedWalletProvider extends ChangeNotifier {
     }
   }
 
-  /// Get combined blockchain transaction history (Stellar + Polygon + MoonPay)
+  /// Get combined blockchain transaction history (Polygon + MoonPay)
   Future<List<app_transaction.Transaction>>
   getCombinedBlockchainTransactionHistory() async {
     try {
       debugPrint('🔄 Getting combined transaction history...');
-      debugPrint('   Public key: $_publicKey');
+      debugPrint('   Address: $_address');
       debugPrint('   Has wallet: $_hasWallet');
       
       // Get Stellar transactions with timeout
@@ -1748,16 +1529,16 @@ class EnhancedWalletProvider extends ChangeNotifier {
         // Continue with empty list if loading fails
       }
       
-      final stellarTxs = _transactions;
-      debugPrint('   Stellar transactions loaded: ${stellarTxs.length}');
+      final polygonTxs = _transactions;
+      debugPrint('   Polygon transactions loaded: ${polygonTxs.length}');
 
       final user = _auth.currentUser;
-      final allTransactions = <app_transaction.Transaction>[...stellarTxs];
+      final allTransactions = <app_transaction.Transaction>[];
 
       if (user != null) {
-        // Get Polygon transactions and convert to Transaction format
-        if (_hasPolygonWallet && _polygonTransactions.isNotEmpty) {
-          final polygonTransactions = _polygonTransactions.map((polyTx) {
+        // Convert Polygon transactions to Transaction format
+        if (_hasWallet && polygonTxs.isNotEmpty) {
+          final polygonTransactions = polygonTxs.map((polyTx) {
             return app_transaction.Transaction(
               id: 'polygon_${polyTx['hash']}',
               userId: user.uid,
@@ -1789,7 +1570,7 @@ class EnhancedWalletProvider extends ChangeNotifier {
             .getUserMoonPayTransactions(user.uid);
 
         final moonPayTransactions = moonPayTxs.map((mpTx) {
-          final currencyCode = mpTx['currency']?['code'] ?? 'XLM';
+          final currencyCode = mpTx['currency']?['code'] ?? 'MATIC';
           final amount = mpTx['quoteCurrencyAmount']?.toDouble() ?? 0.0;
 
           return app_transaction.Transaction(
@@ -1830,7 +1611,32 @@ class EnhancedWalletProvider extends ChangeNotifier {
     } catch (e, stackTrace) {
       debugPrint('❌ Error getting combined transaction history: $e');
       debugPrint('Stack trace: $stackTrace');
-      return _transactions; // Fallback to Stellar transactions
+      // Convert Polygon transactions to Transaction objects
+      final user = _auth.currentUser;
+      if (user == null) return [];
+      
+      return _transactions.map((tx) {
+        return app_transaction.Transaction(
+          id: tx['hash'] as String? ?? 'polygon_${tx['hash']}',
+          userId: user.uid,
+          type: tx['type'] as String? ?? 'send',
+          status: tx['status'] == 'success' ? 'completed' : 'pending',
+          amount: (tx['value'] as num? ?? 0).toDouble(),
+          assetCode: tx['asset'] as String? ?? 'MATIC',
+          timestamp: tx['timestamp'] as DateTime? ?? DateTime.now(),
+          description: _getPolygonTransactionDescription(tx),
+          transactionHash: tx['hash'] as String?,
+          senderAddress: tx['from'] as String?,
+          recipientAddress: tx['to'] as String?,
+          metadata: {
+            'network': tx['network'],
+            'gasUsed': tx['gasUsed'],
+            'gasPrice': tx['gasPrice'],
+            'confirmations': tx['confirmations'],
+            'provider': 'polygon',
+          },
+        );
+      }).toList();
     }
   }
 
@@ -1894,7 +1700,7 @@ class EnhancedWalletProvider extends ChangeNotifier {
 
   /// Manually setup wallet (public method for user-triggered setup)
   Future<Map<String, dynamic>> setupWalletManually() async {
-    if (_publicKey == null) {
+    if (_address == null) {
       return {'success': false, 'message': 'No wallet found'};
     }
 
@@ -1902,8 +1708,8 @@ class EnhancedWalletProvider extends ChangeNotifier {
     _setError(null);
 
     try {
-      await _autoSetupWalletIfNeeded(_publicKey!);
-      // Refresh balances and trustline status after manual setup
+      await _autoSetupWalletIfNeeded(_address!);
+      // Refresh balances after manual setup
       await loadBalances();
       _setLoading(false);
       return {'success': true, 'message': 'Wallet setup completed'};
@@ -1928,7 +1734,7 @@ class EnhancedWalletProvider extends ChangeNotifier {
 
   void _resetState() {
     _hasWallet = false;
-    _publicKey = null;
+    _address = null;
     _balances = {};
     _transactions = [];
     _isMonitoringActive = false;
@@ -1936,14 +1742,9 @@ class EnhancedWalletProvider extends ChangeNotifier {
     _currentMoonPayTransaction = null;
     _moonPayTransactionHistory = [];
     _isMonitoringMoonPayTransactions = false;
-    _hasAkofaTrustline = false;
-
-    // Reset Polygon wallet state
-    _hasPolygonWallet = false;
-    _polygonAddress = null;
-    _polygonBalances = {};
+    _hasSecureWallet = false;
+    _secureWalletAddress = null;
     _polygonTokens = {};
-    _polygonTransactions = [];
     _isProcessingPolygonTransaction = false;
 
     _error = null;
@@ -1954,7 +1755,6 @@ class EnhancedWalletProvider extends ChangeNotifier {
 
   @override
   void dispose() {
-    _stellarService.dispose();
     _mpesaService.dispose();
     super.dispose();
   }

@@ -601,6 +601,7 @@ class _WebViewPageState extends State<WebViewPage> {
                           asset: asset,
                           amount: amount,
                           memo: memoText,
+                          password: password, // Password from dialog
                         );
 
                         if (result['success'] == true) {

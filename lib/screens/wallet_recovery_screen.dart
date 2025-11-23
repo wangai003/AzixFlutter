@@ -1,99 +1,237 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:stellar_flutter_sdk/stellar_flutter_sdk.dart';
-
-import '../providers/auth_provider.dart';
-import '../providers/stellar_provider.dart';
+import '../services/wallet_recovery_helper.dart';
 import '../theme/app_theme.dart';
-import '../widgets/custom_button.dart';
+import '../providers/auth_provider.dart' as local_auth;
+import '../providers/enhanced_wallet_provider.dart';
 
 class WalletRecoveryScreen extends StatefulWidget {
-  const WalletRecoveryScreen({Key? key}) : super(key: key);
+  const WalletRecoveryScreen({super.key});
 
   @override
   State<WalletRecoveryScreen> createState() => _WalletRecoveryScreenState();
 }
 
 class _WalletRecoveryScreenState extends State<WalletRecoveryScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _secretKeyController = TextEditingController();
-  bool _isLoading = false;
-  String? _error;
-  bool _showSecretKey = false;
-  bool _createNewWallet = false;
+  final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _confirmPasswordController =
+      TextEditingController();
+  bool _isProcessing = false;
+  String? _statusMessage;
+  String? _errorMessage;
+  Map<String, dynamic>? _diagnosis;
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _performDiagnosis();
+  }
 
   @override
   void dispose() {
-    _secretKeyController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
     super.dispose();
   }
 
-  Future<void> _recoverWallet() async {
-    if (!_formKey.currentState!.validate()) {
+  Future<void> _performDiagnosis() async {
+    final authProvider = Provider.of<local_auth.AuthProvider>(
+      context,
+      listen: false,
+    );
+    final user = authProvider.user;
+
+    if (user == null) {
+      setState(() {
+        _errorMessage = 'User not authenticated';
+      });
       return;
     }
 
     setState(() {
-      _isLoading = true;
-      _error = null;
+      _isProcessing = true;
+      _statusMessage = 'Diagnosing wallet...';
     });
 
     try {
-      final stellarProvider = Provider.of<StellarProvider>(context, listen: false);
-      
-      if (_createNewWallet) {
-        // Create a new wallet
-        await stellarProvider.createWallet(context);
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('New wallet created successfully'),
-            backgroundColor: Colors.green,
+      final diagnosis = await WalletRecoveryHelper.diagnoseWallet(user.uid);
+
+      setState(() {
+        _diagnosis = diagnosis;
+        _isProcessing = false;
+        _statusMessage = null;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Diagnosis failed: $e';
+        _isProcessing = false;
+        _statusMessage = null;
+      });
+    }
+  }
+
+  Future<void> _performRecovery() async {
+    final authProvider = Provider.of<local_auth.AuthProvider>(
+      context,
+      listen: false,
+    );
+    final user = authProvider.user;
+
+    if (user == null) {
+      setState(() {
+        _errorMessage = 'User not authenticated';
+      });
+      return;
+    }
+
+    // Validate password
+    final password = _passwordController.text;
+    final confirmPassword = _confirmPasswordController.text;
+
+    if (password.isEmpty) {
+      setState(() {
+        _errorMessage = 'Please enter a password';
+      });
+      return;
+    }
+
+    if (password.length < 8) {
+      setState(() {
+        _errorMessage = 'Password must be at least 8 characters';
+      });
+      return;
+    }
+
+    if (password != confirmPassword) {
+      setState(() {
+        _errorMessage = 'Passwords do not match';
+      });
+      return;
+    }
+
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.darkGrey,
+        title: const Text(
+          '⚠️ Confirm Wallet Recovery',
+          style: TextStyle(color: Colors.orange),
+        ),
+        content: const Text(
+          'This will delete your current wallet and create a new one. '
+          'Any funds in your current wallet address will NOT be accessible. '
+          'Are you sure you want to continue?',
+          style: TextStyle(color: AppTheme.white),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
           ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+            ),
+            child: const Text('Yes, Recover Wallet'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() {
+      _isProcessing = true;
+      _statusMessage = 'Performing wallet recovery...';
+      _errorMessage = null;
+    });
+
+    try {
+      final result = await WalletRecoveryHelper.performFullRecovery(
+        userId: user.uid,
+        newPassword: password,
+      );
+
+      if (result['success'] == true) {
+        setState(() {
+          _statusMessage = 'Wallet recovered successfully!';
+          _isProcessing = false;
+        });
+
+        // Refresh wallet provider
+        final walletProvider = Provider.of<EnhancedWalletProvider>(
+          context,
+          listen: false,
         );
-        
-        Navigator.of(context).pop(true);
-      } else {
-        // Recover using provided secret key
-        final secretKey = _secretKeyController.text.trim();
-        
-        // Validate the secret key format
-        try {
-          KeyPair.fromSecretSeed(secretKey);
-        } catch (e) {
-          setState(() {
-            _isLoading = false;
-            _error = 'Invalid secret key format';
-          });
-          return;
-        }
-        
-        // Attempt to recover the wallet
-        final success = await stellarProvider.recoverWalletWithSecretKey(secretKey);
-        
-        if (success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Wallet recovered successfully'),
-              backgroundColor: Colors.green,
+        await walletProvider.checkWalletStatus();
+
+        // Show success dialog
+        if (mounted) {
+          await showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              backgroundColor: AppTheme.darkGrey,
+              title: const Text(
+                '✅ Recovery Successful',
+                style: TextStyle(color: Colors.green),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Your wallet has been recovered and verified!',
+                    style: TextStyle(color: AppTheme.white),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'New Address:',
+                    style: TextStyle(
+                      color: AppTheme.primaryGold,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    result['address'] ?? 'N/A',
+                    style: const TextStyle(
+                      color: AppTheme.white,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    Navigator.pop(context); // Close recovery screen
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryGold,
+                  ),
+                  child: const Text('Done'),
+                ),
+              ],
             ),
           );
-          
-          Navigator.of(context).pop(true);
-        } else {
-          setState(() {
-            _error = 'Failed to recover wallet';
-          });
         }
+      } else {
+        setState(() {
+          _errorMessage = 'Recovery failed: ${result['error']}';
+          _isProcessing = false;
+          _statusMessage = null;
+        });
       }
     } catch (e) {
       setState(() {
-        _error = 'Error: ${e.toString()}';
-      });
-    } finally {
-      setState(() {
-        _isLoading = false;
+        _errorMessage = 'Recovery failed: $e';
+        _isProcessing = false;
+        _statusMessage = null;
       });
     }
   }
@@ -104,151 +242,269 @@ class _WalletRecoveryScreenState extends State<WalletRecoveryScreen> {
       appBar: AppBar(
         title: const Text('Wallet Recovery'),
         backgroundColor: AppTheme.black,
-        foregroundColor: AppTheme.primaryGold,
       ),
+      backgroundColor: AppTheme.black,
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 16),
-              
-              // Header
-              Text(
-                'Wallet Recovery',
-                style: AppTheme.headingLarge.copyWith(
-                  color: AppTheme.primaryGold,
-                  fontWeight: FontWeight.bold,
-                ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Warning banner
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.orange),
               ),
-              const SizedBox(height: 8),
-              Text(
-                'Your wallet encryption appears to be corrupted. You can either recover your wallet using your secret key or create a new wallet.',
-                style: AppTheme.bodyMedium.copyWith(
-                  color: AppTheme.grey,
-                ),
-              ),
-              const SizedBox(height: 24),
-              
-              // Recovery options
-              SwitchListTile(
-                title: Text(
-                  'Create a new wallet',
-                  style: AppTheme.bodyLarge.copyWith(
-                    color: Colors.white,
-                  ),
-                ),
-                subtitle: Text(
-                  'Warning: You will lose access to your previous wallet',
-                  style: AppTheme.bodySmall.copyWith(
-                    color: Colors.red[300],
-                  ),
-                ),
-                value: _createNewWallet,
-                onChanged: (value) {
-                  setState(() {
-                    _createNewWallet = value;
-                  });
-                },
-                activeColor: AppTheme.primaryGold,
-              ),
-              const SizedBox(height: 24),
-              
-              if (!_createNewWallet) ...[
-                // Secret key input
-                Text(
-                  'Enter your wallet secret key',
-                  style: AppTheme.bodyLarge.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextFormField(
-                  controller: _secretKeyController,
-                  decoration: InputDecoration(
-                    hintText: 'S... (51 characters)',
-                    filled: true,
-                    fillColor: AppTheme.darkGrey,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
-                    ),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        _showSecretKey ? Icons.visibility_off : Icons.visibility,
-                        color: AppTheme.grey,
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          _showSecretKey = !_showSecretKey;
-                        });
-                      },
-                    ),
-                  ),
-                  style: const TextStyle(color: Colors.white),
-                  obscureText: !_showSecretKey,
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter your secret key';
-                    }
-                    if (value.length != 56) {
-                      return 'Secret key should be 56 characters long';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Your secret key is a 56-character string starting with "S". Never share it with anyone.',
-                  style: AppTheme.bodySmall.copyWith(
-                    color: AppTheme.grey,
-                  ),
-                ),
-              ],
-              
-              const SizedBox(height: 32),
-              
-              // Error message
-              if (_error != null) ...[
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.red.shade300),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.error_outline, color: Colors.red),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          _error!,
-                          style: AppTheme.bodyMedium.copyWith(
-                            color: Colors.red.shade300,
+              child: Row(
+                children: [
+                  const Icon(Icons.warning, color: Colors.orange, size: 32),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        Text(
+                          'Wallet Recovery Required',
+                          style: TextStyle(
+                            color: Colors.orange,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
                           ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Your wallet has a data inconsistency and needs to be recovered.',
+                          style: TextStyle(
+                            color: AppTheme.white,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 24),
+
+            // Diagnosis section
+            if (_diagnosis != null) ...[
+              Text(
+                'Diagnosis:',
+                style: AppTheme.headingMedium.copyWith(
+                  color: AppTheme.primaryGold,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppTheme.darkGrey,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _diagnosis!['message'] ?? 'Unknown',
+                      style: const TextStyle(color: AppTheme.white),
+                    ),
+                    if (_diagnosis!['explanation'] != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        _diagnosis!['explanation'],
+                        style: const TextStyle(
+                          color: AppTheme.grey,
+                          fontSize: 13,
                         ),
                       ),
                     ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+            ],
+
+            // Recovery form
+            Text(
+              'Create New Wallet',
+              style: AppTheme.headingMedium.copyWith(
+                color: AppTheme.primaryGold,
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Enter a new password for your wallet:',
+              style: TextStyle(color: AppTheme.grey),
+            ),
+            const SizedBox(height: 16),
+
+            // Password field
+            TextField(
+              controller: _passwordController,
+              obscureText: _obscurePassword,
+              style: const TextStyle(color: AppTheme.white),
+              decoration: InputDecoration(
+                labelText: 'New Password',
+                labelStyle: const TextStyle(color: AppTheme.grey),
+                hintText: 'Enter password (min 8 characters)',
+                hintStyle: TextStyle(color: AppTheme.grey.withOpacity(0.5)),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscurePassword ? Icons.visibility : Icons.visibility_off,
+                    color: AppTheme.grey,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _obscurePassword = !_obscurePassword;
+                    });
+                  },
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppTheme.grey),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppTheme.grey),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppTheme.primaryGold),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // Confirm password field
+            TextField(
+              controller: _confirmPasswordController,
+              obscureText: _obscureConfirmPassword,
+              style: const TextStyle(color: AppTheme.white),
+              decoration: InputDecoration(
+                labelText: 'Confirm Password',
+                labelStyle: const TextStyle(color: AppTheme.grey),
+                hintText: 'Re-enter password',
+                hintStyle: TextStyle(color: AppTheme.grey.withOpacity(0.5)),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscureConfirmPassword
+                        ? Icons.visibility
+                        : Icons.visibility_off,
+                    color: AppTheme.grey,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _obscureConfirmPassword = !_obscureConfirmPassword;
+                    });
+                  },
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppTheme.grey),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppTheme.grey),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppTheme.primaryGold),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 24),
+
+            // Recovery button
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton(
+                onPressed: _isProcessing ? null : _performRecovery,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                const SizedBox(height: 24),
-              ],
-              
-              // Submit button
-              SizedBox(
-                width: double.infinity,
-                child: CustomButton(
-                  text: _createNewWallet ? 'Create New Wallet' : 'Recover Wallet',
-                  onPressed: _isLoading ? () {} : _recoverWallet,
-                  isLoading: _isLoading,
+                child: _isProcessing
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : const Text(
+                        'Recover Wallet',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // Status messages
+            if (_statusMessage != null) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue),
+                ),
+                child: Row(
+                  children: [
+                    const CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _statusMessage!,
+                        style: const TextStyle(color: Colors.blue),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
-          ),
+
+            if (_errorMessage != null) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.error, color: Colors.red),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _errorMessage!,
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );

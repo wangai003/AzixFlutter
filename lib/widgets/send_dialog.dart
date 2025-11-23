@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import '../providers/stellar_provider.dart';
+import '../providers/enhanced_wallet_provider.dart';
 import '../theme/app_theme.dart';
 import 'qr_scanner.dart';
 import 'package:flutter/foundation.dart';
@@ -42,7 +42,7 @@ class _SendDialogState extends State<SendDialog> {
   // For asset selection
   String _selectedAssetCode = '';
   String _selectedAssetBalance = '0';
-  String _selectedBlockchain = 'stellar'; // Default to stellar
+  String _selectedBlockchain = 'polygon'; // Default to polygon
   List<Map<String, dynamic>> _availableAssets = [];
 
   @override
@@ -58,44 +58,46 @@ class _SendDialogState extends State<SendDialog> {
   }
 
   void _loadAvailableAssets() async {
-    final stellarProvider = Provider.of<StellarProvider>(
+    final walletProvider = Provider.of<EnhancedWalletProvider>(
       context,
       listen: false,
     );
 
-    // Start with XLM and AKOFA if available
+    // Start with MATIC and AKOFA if available
     _availableAssets = [];
 
-    // Add XLM
+    // Add MATIC (Polygon native token)
     _availableAssets.add({
-      'code': 'XLM',
-      'balance': stellarProvider.balance,
-      'name': 'Stellar Lumens',
-      'blockchain': 'stellar',
+      'code': 'MATIC',
+      'balance': walletProvider.maticBalance,
+      'name': 'Polygon Matic',
+      'blockchain': 'polygon',
     });
 
-    // Add AKOFA if trustline exists
-    if (stellarProvider.hasAkofaTrustline) {
+    // Add AKOFA if available
+    final akofaBalance = walletProvider.akofaBalance;
+    if (double.tryParse(akofaBalance) != null && double.parse(akofaBalance) > 0) {
       _availableAssets.add({
         'code': 'AKOFA',
-        'balance': stellarProvider.akofaBalance,
+        'balance': akofaBalance,
         'name': 'Akofa Coin',
-        'blockchain': 'stellar',
+        'blockchain': 'polygon',
       });
     }
 
-    // Add other Stellar assets from wallet
-    for (var asset in stellarProvider.walletAssets) {
-      // Skip XLM and AKOFA as they're already added
-      if (asset['code'] == 'XLM' || asset['code'] == 'AKOFA') continue;
+    // Add other Polygon tokens from wallet
+    for (var entry in walletProvider.polygonTokens.entries) {
+      final token = entry.value;
+      // Skip MATIC as it's already added
+      if (entry.key == 'MATIC') continue;
 
-      // Only add assets with positive balance
-      if (double.parse(asset['balance'].toString()) > 0) {
+      // Only add tokens with positive balance
+      if ((token['balance'] as num?) != null && (token['balance'] as num) > 0) {
         _availableAssets.add({
-          'code': asset['code'],
-          'balance': asset['balance'],
-          'name': asset['name'] ?? asset['code'],
-          'blockchain': 'stellar',
+          'code': entry.key,
+          'balance': token['balance'].toString(),
+          'name': token['name'] ?? entry.key,
+          'blockchain': 'polygon',
         });
       }
     }
@@ -208,9 +210,9 @@ class _SendDialogState extends State<SendDialog> {
     }
   }
 
-  bool _isValidStellarAddress(String address) {
-    // Basic Stellar address validation: starts with 'G' and is 56 characters long
-    return address.startsWith('G') && address.length == 56;
+  bool _isValidPolygonAddress(String address) {
+    // Basic Polygon address validation: starts with '0x' and is 42 characters long
+    return address.startsWith('0x') && address.length == 42;
   }
 
   bool _isValidAddressForBlockchain(String address, String blockchain) {

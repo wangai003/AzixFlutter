@@ -61,8 +61,8 @@ class _SendAkofaDialogState extends State<SendAkofaDialog> {
     });
 
     try {
-      // Check if input is a valid Stellar address
-      if (_isValidStellarAddress(input)) {
+      // Check if input is a valid Polygon address
+      if (_isValidPolygonAddress(input)) {
         setState(() {
           _resolvedAddress = input;
           _resolvedName = null; // No name for raw addresses
@@ -73,7 +73,7 @@ class _SendAkofaDialogState extends State<SendAkofaDialog> {
         // Try to resolve as AKOFA tag
         final result = await AkofaTagService.resolveTag(
           input,
-          blockchain: 'stellar',
+          blockchain: 'polygon',
         );
 
         if (result['success']) {
@@ -104,9 +104,9 @@ class _SendAkofaDialogState extends State<SendAkofaDialog> {
     }
   }
 
-  bool _isValidStellarAddress(String address) {
-    // Basic Stellar address validation: starts with 'G' and is 56 characters long
-    return address.startsWith('G') && address.length == 56;
+  bool _isValidPolygonAddress(String address) {
+    // Basic Polygon address validation: starts with '0x' and is 42 characters long
+    return address.startsWith('0x') && address.length == 42;
   }
 
   Future<void> _sendAkofa() async {

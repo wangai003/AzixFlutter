@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 import 'akofa_tag_service.dart';
 import 'biometric_service.dart';
+import 'polygon_wallet_service.dart';
 
 /// Secure Wallet Service implementing password-based AES-GCM encryption with optional biometric protection
 /// Similar to MetaMask, Phantom, and other popular wallet implementations
@@ -624,7 +625,12 @@ class SecureWalletService {
   );
 
   /// Derive encryption key from password and salt
-  Future<SecretKey> _deriveKey(String password, List<int> salt) async {
+  static Future<SecretKey> _deriveKey(String password, List<int> salt) async {
+    final pbkdf2 = Pbkdf2(
+      macAlgorithm: Hmac.sha256(),
+      iterations: 100000, // Industry standard for password hashing
+      bits: 256,
+    );
     return await pbkdf2.deriveKey(
       secretKey: SecretKey(utf8.encode(password)),
       nonce: salt,
@@ -632,7 +638,7 @@ class SecureWalletService {
   }
 
   /// Encrypt private key with password
-  Future<Map<String, String>> _encryptPrivateKey(
+  static Future<Map<String, String>> _encryptPrivateKey(
     String password,
     String privateKey,
   ) async {
@@ -702,70 +708,43 @@ class SecureWalletService {
         enableBiometrics = false; // Disable since not supported
       }
 
-      print('🔑 Generating new Stellar wallet...');
-      // Generate new Stellar wallet
-      final keyPair = stellar.KeyPair.random();
-      final publicKey = keyPair.accountId;
-      final secretKey = keyPair.secretSeed;
-      print('✅ Wallet generated: ${publicKey.substring(0, 10)}...');
-
-      // Step 1: Fund the wallet with XLM using Friendbot
-      print('💰 Funding wallet with test XLM...');
-      final fundingResult = await _fundWalletWithFriendbot(publicKey);
-      if (!fundingResult['success']) {
-        throw Exception('Failed to fund wallet: ${fundingResult['error']}');
-      }
-      print('✅ Wallet funded with test XLM');
-
-      // Step 2: Create trustlines for both AKOFA and USDC
-      print('🔗 Creating AKOFA trustline...');
-      final akofaTrustlineResult = await _createAkofaTrustline(
-        publicKey,
-        secretKey,
+      print('🔑 Creating Polygon wallet...');
+      // Use PolygonWalletService to create the wallet
+      // This already handles encryption and storage
+      final polygonResult = await PolygonWalletService.createSecurePolygonWallet(
+        userId: userId,
+        password: password,
+        recoveryPhrase: recoveryPhrase,
       );
-      if (!akofaTrustlineResult['success']) {
-        throw Exception(
-          'Failed to create AKOFA trustline: ${akofaTrustlineResult['error']}',
-        );
+
+      if (!polygonResult['success']) {
+        throw Exception('Failed to create Polygon wallet: ${polygonResult['error']}');
       }
-      print('✅ AKOFA trustline created successfully');
 
-      print('🔗 Creating USDC trustline...');
-      final usdcTrustlineResult = await _createUsdcTrustline(
-        publicKey,
-        secretKey,
-      );
-      if (!usdcTrustlineResult['success']) {
-        throw Exception(
-          'Failed to create USDC trustline: ${usdcTrustlineResult['error']}',
-        );
+      final address = polygonResult['address'] as String;
+      print('✅ Polygon wallet created: ${address.substring(0, 10)}...');
+
+      // Polygon doesn't require funding or trustlines - tokens are automatically available
+      print('✅ Polygon wallet ready - no funding or trustlines needed');
+
+      // Get the encrypted private key from Firestore for biometric setup
+      final walletDoc = await _firestore
+          .collection('polygon_wallets')
+          .doc(userId)
+          .get();
+      
+      if (!walletDoc.exists) {
+        throw Exception('Polygon wallet not found after creation');
       }
-      print('✅ USDC trustline created successfully');
 
-      // Step 3: Verify wallet setup
-      print('🔍 Verifying wallet setup...');
-      final verificationResult = await _verifyWalletSetup(publicKey);
-      if (!verificationResult['success']) {
-        throw Exception(
-          'Wallet verification failed: ${verificationResult['error']}',
-        );
-      }
-      print('✅ Wallet setup verified');
-
-      // Step 4: Now encrypt and store the credentials
-      print('🔐 Encrypting wallet credentials...');
-      final service = SecureWalletService();
-
-      // Encrypt the secret key with password
-      final encryptedSecretKey = await service._encryptPrivateKey(
-        password,
-        secretKey,
-      );
+      final walletData = walletDoc.data()!;
+      final encryptedPrivateKey = walletData['encryptedPrivateKey'] as Map<String, dynamic>;
+      final encryptedSecretKey = Map<String, String>.from(encryptedPrivateKey);
 
       // Encrypt recovery phrase if provided
       Map<String, String>? encryptedRecoveryPhrase;
       if (recoveryPhrase != null) {
-        encryptedRecoveryPhrase = await service._encryptPrivateKey(
+        encryptedRecoveryPhrase = await _encryptPrivateKey(
           password,
           recoveryPhrase,
         );
@@ -794,34 +773,20 @@ class SecureWalletService {
         print('ℹ️ Creating wallet with password-only protection (biometrics not enabled)');
       }
 
-      // Store encrypted wallet data in Firestore
-      final walletData = {
-        'userId': userId,
-        'publicKey': publicKey,
-        'encryptedSecretKey': encryptedSecretKey,
-        'encryptedRecoveryPhrase': encryptedRecoveryPhrase,
+      // Update polygon_wallets collection with biometric data
+      await _firestore.collection('polygon_wallets').doc(userId).update({
         'biometricData': biometricData,
-        'createdAt': FieldValue.serverTimestamp(),
-        'lastAccessed': FieldValue.serverTimestamp(),
-        'version': '3.0', // Updated version for biometric support
         'securityLevel': securityLevel,
-        'encryptionMethod': 'cryptography-aes-gcm',
         'biometricsEnabled': enableBiometrics && biometricData != null,
-        'walletFunded': true,
-        'akofaTrustlineCreated': true,
-        'usdcTrustlineCreated': true,
-        'setupComplete': true,
-      };
+        'lastAccessed': FieldValue.serverTimestamp(),
+      });
 
-      await _firestore.collection('secure_wallets').doc(userId).set(walletData);
-
-      // Also update USER collection with public key (for compatibility)
+      // Also update USER collection with Polygon address
       await _firestore.collection('USER').doc(userId).update({
-        'stellarPublicKey': publicKey,
+        'polygonAddress': address,
         'hasSecureWallet': true,
+        'hasPolygonWallet': true,
         'walletSecurityLevel': securityLevel,
-        'walletFunded': true,
-        'usdcTrustlineCreated': true,
         'lastWalletUpdate': FieldValue.serverTimestamp(),
       });
 
@@ -871,12 +836,12 @@ class SecureWalletService {
               final linkResult = await AkofaTagService.linkTagToWallet(
                 userId: userId,
                 tag: tagToLink,
-                publicKey: publicKey,
-                blockchain: 'stellar',
+                publicKey: address,
+                blockchain: 'polygon',
               );
 
               if (linkResult['success']) {
-                print('✅ Akofa tag linked to wallet: $tagToLink -> $publicKey');
+                print('✅ Akofa tag linked to wallet: $tagToLink -> $address');
 
                 // Update wallet data with tag info
                 await _firestore
@@ -903,11 +868,10 @@ class SecureWalletService {
 
       return {
         'success': true,
-        'publicKey': publicKey,
-        'message':
-            'Secure wallet created successfully with automatic funding and trustline setup',
-        'walletFunded': true,
-        'usdcTrustlineCreated': true,
+        'publicKey': address,
+        'address': address,
+        'message': 'Secure Polygon wallet created successfully',
+        'network': polygonResult['network'],
         'securityFeatures': [
           'AES-GCM encryption',
           'PBKDF2 key derivation',
@@ -930,147 +894,127 @@ class SecureWalletService {
   }
 
   /// Authenticate with password (and optionally biometrics) and decrypt wallet
+  /// Re-engineered wrapper for PolygonWalletService with enhanced error handling
   static Future<Map<String, dynamic>> authenticateAndDecryptWallet(
     String userId,
     String password, {
     bool useBiometrics = false,
   }) async {
     try {
-      print('🔐 Starting wallet decryption for user: $userId');
+      print('═══════════════════════════════════════════════════════════════');
+      print('🔐 [SECURE WALLET] Initiating wallet decryption');
+      print('═══════════════════════════════════════════════════════════════');
+      print('👤 [SECURE WALLET] User ID: $userId');
+      print('🔒 [SECURE WALLET] Biometrics requested: $useBiometrics');
 
       // Validate inputs
       if (userId.isEmpty) {
-        throw Exception('Invalid user ID provided');
+        throw Exception('User ID is empty. Please ensure you are logged in.');
       }
       if (password.isEmpty) {
-        throw Exception('Password is required');
+        throw Exception('Password is required for wallet decryption.');
       }
 
-      // Get wallet data from Firestore
-      final walletDoc = await _firestore
-          .collection('secure_wallets')
-          .doc(userId)
-          .get();
+      print('✅ [SECURE WALLET] Input validation passed');
 
-      if (!walletDoc.exists) {
-        print('❌ Secure wallet not found for user: $userId');
-        throw Exception(
-          'Secure wallet not found. Please create a secure wallet first.',
-        );
-      }
-
-      print('✅ Secure wallet data found');
-
-      final walletData = walletDoc.data()!;
-      final encryptedSecretKey =
-          walletData['encryptedSecretKey'] as Map<String, dynamic>;
-      final publicKey = walletData['publicKey'] as String;
-      final biometricsEnabled =
-          walletData['biometricsEnabled'] as bool? ?? false;
-
-      // Handle biometric authentication if requested and available
-      if (useBiometrics && biometricsEnabled) {
-        print('🔒 Performing biometric authentication...');
-        final biometricResult = await _authenticateWithBiometrics(userId);
-
-        if (!biometricResult['success']) {
-          return {
-            'success': false,
-            'error':
-                'Biometric authentication failed: ${biometricResult['error']}',
-            'message': 'Please use password authentication instead',
-          };
-        }
-
-        print('✅ Biometric authentication successful');
-        // If biometrics succeed, we can proceed with password decryption
-      } else if (useBiometrics && !biometricsEnabled) {
-        return {
-          'success': false,
-          'error': 'Biometric authentication not enabled for this wallet',
-          'message':
-              'Please enable biometrics first or use password authentication',
-        };
-      }
-
-      // Create service instance for decryption
-      final service = SecureWalletService();
-
-      // Convert to the expected type for decryption
-      final encryptedData = Map<String, String>.from(encryptedSecretKey);
-
-      // Decrypt the secret key using password
-      print('🔓 Decrypting secret key...');
-      final secretKey = await service._decryptPrivateKey(
+      // Use PolygonWalletService for primary authentication and decryption
+      print('🔄 [SECURE WALLET] Delegating to PolygonWalletService...');
+      final polygonResult = await PolygonWalletService.authenticateAndDecryptPolygonWallet(
+        userId,
         password,
-        encryptedData,
       );
 
-      print('✅ Secret key decrypted successfully');
-
-      // Verify the decrypted key is valid by checking if it produces the correct public key
-      try {
-        final keyPair = stellar.KeyPair.fromSecretSeed(secretKey);
-        final derivedPublicKey = keyPair.accountId;
-
-        if (derivedPublicKey != publicKey) {
-          throw Exception('Decrypted key verification failed');
-        }
-
-        print('✅ Decrypted key verification successful');
-      } catch (e) {
-        print('❌ Invalid decrypted key: $e');
-        throw Exception('Invalid password or corrupted wallet data');
+      if (polygonResult['success'] != true) {
+        print('❌ [SECURE WALLET] Polygon wallet decryption failed');
+        throw Exception(polygonResult['error'] ?? 'Unknown decryption error');
       }
 
-      // Update last accessed timestamp
-      await _firestore.collection('secure_wallets').doc(userId).update({
-        'lastAccessed': FieldValue.serverTimestamp(),
-      });
+      print('✅ [SECURE WALLET] Polygon wallet decrypted successfully');
 
+      final address = polygonResult['address'] as String;
+      final privateKey = polygonResult['privateKey'] as String;
+
+      print('🔍 [SECURE WALLET] Address: $address');
+      print('🔍 [SECURE WALLET] Private key length: ${privateKey.length}');
+
+      // Handle biometric authentication if requested
+      if (useBiometrics) {
+        print('🔒 [SECURE WALLET] Biometric authentication requested');
+        
+        final walletDoc = await _firestore
+            .collection('polygon_wallets')
+            .doc(userId)
+            .get();
+
+        if (walletDoc.exists) {
+          final walletData = walletDoc.data()!;
+          final biometricsEnabled = walletData['biometricsEnabled'] as bool? ?? false;
+
+          if (biometricsEnabled) {
+            print('🔒 [SECURE WALLET] Performing biometric authentication...');
+            final biometricResult = await _authenticateWithBiometrics(userId);
+
+            if (biometricResult['success'] != true) {
+              print('❌ [SECURE WALLET] Biometric authentication failed');
+              return {
+                'success': false,
+                'error': 'Biometric authentication failed: ${biometricResult['error']}',
+                'message': 'Biometric verification failed. Please try again or use password only.',
+              };
+            }
+            print('✅ [SECURE WALLET] Biometric authentication successful');
+          } else {
+            print('⚠️ [SECURE WALLET] Biometrics not enabled for this wallet');
+            return {
+              'success': false,
+              'error': 'Biometric authentication not enabled',
+              'message': 'Please enable biometrics first or use password authentication only.',
+            };
+          }
+        }
+      }
+
+      print('═══════════════════════════════════════════════════════════════');
+      print('✅ [SECURE WALLET] Wallet decryption completed successfully');
+      print('═══════════════════════════════════════════════════════════════');
+
+      // Return comprehensive result
       return {
         'success': true,
-        'publicKey': publicKey,
-        'secretKey': secretKey,
-        'message': 'Wallet decrypted successfully',
+        'publicKey': address,
+        'address': address,
+        'secretKey': privateKey,
+        'privateKey': privateKey,
+        'message': 'Wallet decrypted and verified successfully',
+        'network': polygonResult['network'],
+        'chainId': polygonResult['chainId'],
       };
-    } catch (e) {
-      print('❌ Wallet decryption failed: $e');
+      
+    } catch (e, stackTrace) {
+      print('═══════════════════════════════════════════════════════════════');
+      print('❌ [SECURE WALLET] Wallet decryption failed');
+      print('═══════════════════════════════════════════════════════════════');
+      print('❌ [SECURE WALLET] Error: $e');
+      print('❌ [SECURE WALLET] Stack trace: $stackTrace');
+      
       return {
         'success': false,
         'error': e.toString(),
-        'message': 'Failed to authenticate and decrypt wallet',
+        'message': 'Wallet decryption failed. Please check your password and try again.',
       };
     }
   }
 
-  /// Check if user has a secure wallet
+  /// Check if user has a secure wallet (Polygon)
   static Future<bool> hasSecureWallet(String userId) async {
-    try {
-      final walletDoc = await _firestore
-          .collection('secure_wallets')
-          .doc(userId)
-          .get();
-      return walletDoc.exists;
-    } catch (e) {
-      return false;
-    }
+    // Check for Polygon wallet (now the primary secure wallet)
+    return await PolygonWalletService.hasPolygonWallet(userId);
   }
 
-  /// Get wallet public key without authentication
+  /// Get wallet public key/address without authentication (Polygon)
   static Future<String?> getWalletPublicKey(String userId) async {
-    try {
-      final walletDoc = await _firestore
-          .collection('secure_wallets')
-          .doc(userId)
-          .get();
-      if (walletDoc.exists) {
-        return walletDoc.data()?['publicKey'] as String?;
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
+    // Get Polygon wallet address (now the primary secure wallet)
+    return await PolygonWalletService.getPolygonWalletAddress(userId);
   }
 
   /// Transaction limits configuration
