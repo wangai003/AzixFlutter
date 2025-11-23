@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../providers/enhanced_wallet_provider.dart';
+import '../providers/wallet_session_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/multi_asset_balance_display.dart';
 import '../widgets/mpesa_purchase_dialog.dart';
@@ -16,10 +17,13 @@ import '../widgets/card_payment_dialog.dart';
 import '../widgets/bank_transfer_dialog.dart';
 import '../widgets/moonpay_purchase_dialog.dart';
 import '../widgets/moonpay_button.dart';
+import '../widgets/custom_thirdweb_onramp.dart';
+import '../widgets/wallet_auth_dialog.dart';
 import 'buy_crypto_screen.dart';
 import '../services/secure_wallet_service.dart';
 import '../services/akofa_tag_service.dart';
 import '../services/biometric_service.dart';
+import '../services/polygon_wallet_service.dart';
 import '../providers/auth_provider.dart' as local_auth;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'secure_wallet_creation_screen.dart';
@@ -43,8 +47,14 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
 
-    // Refresh wallet data when screen loads
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    // ========================================================================
+    // WALLET AUTHENTICATION ENTRY POINT
+    // This is the ONLY place in the app where wallet authentication is triggered
+    // The dialog will ONLY appear when user navigates to this Enhanced Wallet Screen
+    // ========================================================================
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _checkWalletSession();
+      
       final walletProvider = Provider.of<EnhancedWalletProvider>(
         context,
         listen: false,
@@ -57,6 +67,55 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
       }
     });
   }
+  
+  /// Check wallet session and show authentication dialog if needed
+  /// This is called ONLY when entering the Enhanced Wallet Screen
+  Future<void> _checkWalletSession() async {
+    final sessionProvider = Provider.of<WalletSessionProvider>(
+      context,
+      listen: false,
+    );
+    
+    final walletProvider = Provider.of<EnhancedWalletProvider>(
+      context,
+      listen: false,
+    );
+    
+    // First check if user has a secure wallet
+    final hasSecureWallet = await walletProvider.checkSecureWalletStatus();
+    
+    // Only prompt for password if user has an existing secure wallet
+    if (!hasSecureWallet) {
+      // User doesn't have a secure wallet yet - skip authentication
+      debugPrint('🔓 No secure wallet found - skipping session check');
+      return;
+    }
+    
+    // User has a secure wallet - check if session is valid
+    if (!sessionProvider.isSessionValid()) {
+      // Show authentication dialog
+      final authenticated = await showWalletAuthDialog(context);
+      
+      if (!authenticated) {
+        // User cancelled authentication - go back
+        if (mounted) {
+          Navigator.of(context).pop();
+        }
+      }
+    } else {
+      // Session is valid, refresh it
+      sessionProvider.refreshSession();
+    }
+  }
+  
+  /// Record user activity to keep session alive
+  void _recordActivity() {
+    final sessionProvider = Provider.of<WalletSessionProvider>(
+      context,
+      listen: false,
+    );
+    sessionProvider.recordActivity();
+  }
 
   @override
   void dispose() {
@@ -66,23 +125,58 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
 
   @override
   Widget build(BuildContext context) {
+    // Record activity when user interacts with wallet
+    _recordActivity();
+    
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          'Multi-Asset Wallet',
-          style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Multi-Asset Wallet',
+              style: AppTheme.headingMedium.copyWith(
+                color: AppTheme.primaryGold,
+                fontSize: 18,
+              ),
+            ),
+            // Session status indicator
+            Consumer<WalletSessionProvider>(
+              builder: (context, sessionProvider, child) {
+                final timeRemaining = sessionProvider.timeUntilExpiry;
+                if (timeRemaining == null) return const SizedBox.shrink();
+                
+                final minutes = timeRemaining.inMinutes;
+                final seconds = timeRemaining.inSeconds % 60;
+                
+                return Text(
+                  'Session: ${minutes}m ${seconds}s',
+                  style: TextStyle(
+                    color: minutes < 1 ? Colors.orange : AppTheme.grey,
+                    fontSize: 10,
+                  ),
+                );
+              },
+            ),
+          ],
         ),
         backgroundColor: AppTheme.black,
         elevation: 0,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh, color: AppTheme.primaryGold),
-            onPressed: _refreshWallet,
+            onPressed: () {
+              _recordActivity();
+              _refreshWallet();
+            },
             tooltip: 'Refresh Wallet',
           ),
           IconButton(
             icon: const Icon(Icons.qr_code, color: AppTheme.primaryGold),
-            onPressed: _showReceiveOptions,
+            onPressed: () {
+              _recordActivity();
+              _showReceiveOptions();
+            },
             tooltip: 'Receive Assets',
           ),
           Consumer<EnhancedWalletProvider>(
@@ -93,12 +187,23 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                     Icons.visibility,
                     color: AppTheme.primaryGold,
                   ),
-                  onPressed: () => _showWalletCredentials(walletProvider),
+                  onPressed: () {
+                    _recordActivity();
+                    _showWalletCredentials(walletProvider);
+                  },
                   tooltip: 'View Wallet Credentials',
                 );
               }
               return const SizedBox.shrink();
             },
+          ),
+          // Logout button
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.orange),
+            onPressed: () {
+              _logoutFromWallet();
+            },
+            tooltip: 'Lock Wallet',
           ),
         ],
         bottom: TabBar(
@@ -111,6 +216,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
           indicatorColor: AppTheme.primaryGold,
           labelColor: AppTheme.primaryGold,
           unselectedLabelColor: AppTheme.grey,
+          onTap: (_) => _recordActivity(),
         ),
       ),
       body: Container(
@@ -674,14 +780,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
               child: _buildActionButton(
                 'Buy Crypto',
                 Icons.account_balance_wallet,
-                () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => BuyCryptoScreen(
-                      walletAddress: walletProvider.publicKey!,
-                    ),
-                  ),
-                ),
+                () => _showThirdWebOnramp(walletProvider),
               ),
             ),
             const SizedBox(width: 12),
@@ -1310,6 +1409,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
   // ==================== ACTION METHODS ====================
 
   Future<void> _refreshWallet() async {
+    _recordActivity(); // Record activity
     setState(() => _isRefreshing = true);
     final walletProvider = Provider.of<EnhancedWalletProvider>(
       context,
@@ -1323,6 +1423,51 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     }
 
     setState(() => _isRefreshing = false);
+  }
+  
+  /// Logout from wallet feature (not entire app)
+  Future<void> _logoutFromWallet() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.darkGrey,
+        title: Text(
+          'Lock Wallet',
+          style: TextStyle(color: AppTheme.primaryGold),
+        ),
+        content: Text(
+          'This will lock your wallet. You\'ll need to authenticate to access it again.',
+          style: TextStyle(color: AppTheme.white),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: AppTheme.white,
+            ),
+            child: const Text('Lock Wallet'),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirm == true) {
+      final sessionProvider = Provider.of<WalletSessionProvider>(
+        context,
+        listen: false,
+      );
+      sessionProvider.logoutWallet();
+      
+      // Go back to main app
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    }
   }
 
   Future<void> _checkAndPromptForAkofaTag(
@@ -1448,6 +1593,133 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
         ),
       );
     }
+  }
+
+  /// Helper method to build gas info row
+  Widget _buildGasInfoRow(String label, String value, {bool isHighlight = false}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: isHighlight ? Colors.orange : AppTheme.grey,
+            fontSize: 13,
+            fontWeight: isHighlight ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            color: isHighlight ? Colors.orange : AppTheme.white,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Show ThirdWeb onramp dialog
+  void _showThirdWebOnramp(EnhancedWalletProvider walletProvider) {
+    if (walletProvider.address == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Wallet address not available'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Open Custom ThirdWeb Onramp UI
+    // Your own branded UI using ThirdWeb's Pay API
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (context) => CustomThirdWebOnramp(
+          walletAddress: walletProvider.address!,
+          network: walletProvider.isTestnet ? 'polygon-amoy' : 'polygon',
+          onClose: () {
+            // Refresh wallet when closing
+            walletProvider.refreshWallet();
+          },
+        ),
+      ),
+    );
+  }
+
+  /// Show buy crypto options
+  void _showBuyCryptoOptions() {
+    final walletProvider = Provider.of<EnhancedWalletProvider>(
+      context,
+      listen: false,
+    );
+    
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.darkGrey,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Top Up Your Wallet',
+              style: AppTheme.headingMedium.copyWith(
+                color: AppTheme.primaryGold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Choose a method to add MATIC to your wallet',
+              style: TextStyle(color: AppTheme.grey, fontSize: 14),
+            ),
+            const SizedBox(height: 24),
+            ListTile(
+              leading: CircleAvatar(
+                backgroundColor: AppTheme.primaryGold.withOpacity(0.2),
+                child: const Icon(Icons.credit_card, color: AppTheme.primaryGold),
+              ),
+              title: Text(
+                'Buy with Card',
+                style: TextStyle(color: AppTheme.white),
+              ),
+              subtitle: Text(
+                'Use ThirdWeb Pay to purchase MATIC',
+                style: TextStyle(color: AppTheme.grey, fontSize: 12),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _showThirdWebOnramp(walletProvider);
+              },
+            ),
+            const Divider(color: AppTheme.grey),
+            ListTile(
+              leading: CircleAvatar(
+                backgroundColor: Colors.blue.withOpacity(0.2),
+                child: const Icon(Icons.qr_code, color: Colors.blue),
+              ),
+              title: Text(
+                'Receive from Another Wallet',
+                style: TextStyle(color: AppTheme.white),
+              ),
+              subtitle: Text(
+                'Get your wallet address',
+                style: TextStyle(color: AppTheme.grey, fontSize: 12),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _showReceiveOptions();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showSendOptions() {
@@ -1884,6 +2156,150 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                         return;
                       }
 
+                      // Check gas fees before proceeding
+                      final userAddress = walletProvider.address;
+                      if (userAddress == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Wallet address not found'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      // Show checking gas dialog
+                      showDialog(
+                        context: context,
+                        barrierDismissible: false,
+                        builder: (context) => AlertDialog(
+                          backgroundColor: AppTheme.darkGrey,
+                          content: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const CircularProgressIndicator(
+                                color: AppTheme.primaryGold,
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'Checking gas fees...',
+                                style: TextStyle(
+                                  color: AppTheme.white,
+                                  fontSize: 16,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+
+                      // Estimate gas fee
+                      Map<String, dynamic> gasEstimate;
+                      if (asset.isNative || asset.code == 'MATIC') {
+                        gasEstimate = await PolygonWalletService.estimateMaticGasFee(
+                          fromAddress: userAddress,
+                          toAddress: resolvedAddress,
+                          amountMatic: amount,
+                        );
+                      } else if (asset.contractAddress != null) {
+                        gasEstimate = await PolygonWalletService.estimateERC20GasFee(
+                          fromAddress: userAddress,
+                          tokenContractAddress: asset.contractAddress!,
+                        );
+                      } else {
+                        // Close checking dialog
+                        Navigator.of(context).pop();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Unable to estimate gas fees'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      // Close checking dialog
+                      Navigator.of(context).pop();
+
+                      // Check if user has enough MATIC for gas
+                      if (gasEstimate['success'] != true || gasEstimate['hasEnoughForGas'] != true) {
+                        final gasFee = gasEstimate['gasFee'] as double? ?? 0.0;
+                        final insufficientAmount = gasEstimate['insufficientAmount'] as double? ?? 0.0;
+                        final currentBalance = gasEstimate['currentBalance'] as double? ?? 0.0;
+                        
+                        showDialog(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            backgroundColor: AppTheme.darkGrey,
+                            title: Row(
+                              children: [
+                                Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+                                const SizedBox(width: 12),
+                                Text(
+                                  'Insufficient Gas',
+                                  style: TextStyle(color: Colors.orange),
+                                ),
+                              ],
+                            ),
+                            content: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'You don\'t have enough MATIC to pay for gas fees.',
+                                  style: TextStyle(color: AppTheme.white, fontSize: 15),
+                                ),
+                                const SizedBox(height: 16),
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      _buildGasInfoRow('Estimated Gas Fee:', '${gasFee.toStringAsFixed(6)} MATIC'),
+                                      const SizedBox(height: 8),
+                                      _buildGasInfoRow('Your MATIC Balance:', '${currentBalance.toStringAsFixed(6)} MATIC'),
+                                      const SizedBox(height: 8),
+                                      _buildGasInfoRow('Additional Needed:', '${insufficientAmount.toStringAsFixed(6)} MATIC', isHighlight: true),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'Please top up your wallet with MATIC to continue with this transaction.',
+                                  style: TextStyle(color: AppTheme.grey, fontSize: 13),
+                                ),
+                              ],
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.of(context).pop(),
+                                child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
+                              ),
+                              ElevatedButton.icon(
+                                onPressed: () {
+                                  Navigator.of(context).pop();
+                                  // Navigate to buy crypto screen or show buy options
+                                  _showBuyCryptoOptions();
+                                },
+                                icon: const Icon(Icons.add_circle_outline),
+                                label: const Text('Top Up'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.orange,
+                                  foregroundColor: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                        return;
+                      }
+
                       Navigator.of(context).pop();
 
                       // Show loading dialog
@@ -2294,6 +2710,153 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                         return;
                       }
 
+                      // Check gas fees before proceeding
+                      final userAddress = walletProvider.address;
+                      if (userAddress == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Wallet address not found'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      // Show checking gas dialog
+                      showDialog(
+                        context: context,
+                        barrierDismissible: false,
+                        builder: (context) => AlertDialog(
+                          backgroundColor: AppTheme.darkGrey,
+                          content: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const CircularProgressIndicator(
+                                color: AppTheme.primaryGold,
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'Checking gas fees...',
+                                style: TextStyle(
+                                  color: AppTheme.white,
+                                  fontSize: 16,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+
+                      // Estimate gas fee
+                      Map<String, dynamic> gasEstimate;
+                      if (isNative) {
+                        gasEstimate = await PolygonWalletService.estimateMaticGasFee(
+                          fromAddress: userAddress,
+                          toAddress: recipientAddress,
+                          amountMatic: amount,
+                        );
+                      } else {
+                        final contractAddress = token['contractAddress'] as String?;
+                        if (contractAddress == null || contractAddress.isEmpty) {
+                          // Close checking dialog
+                          Navigator.of(context).pop();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Token contract address not found'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                          return;
+                        }
+                        gasEstimate = await PolygonWalletService.estimateERC20GasFee(
+                          fromAddress: userAddress,
+                          tokenContractAddress: contractAddress,
+                        );
+                      }
+
+                      // Close checking dialog
+                      Navigator.of(context).pop();
+
+                      // Check if user has enough MATIC for gas
+                      if (gasEstimate['success'] != true || gasEstimate['hasEnoughForGas'] != true) {
+                        Navigator.of(context).pop(); // Close send dialog
+                        
+                        final gasFee = gasEstimate['gasFee'] as double? ?? 0.0;
+                        final insufficientAmount = gasEstimate['insufficientAmount'] as double? ?? 0.0;
+                        final maticBalance = gasEstimate['currentBalance'] as double? ?? 0.0;
+                        
+                        showDialog(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            backgroundColor: AppTheme.darkGrey,
+                            title: Row(
+                              children: [
+                                Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+                                const SizedBox(width: 12),
+                                Text(
+                                  'Insufficient Gas',
+                                  style: TextStyle(color: Colors.orange),
+                                ),
+                              ],
+                            ),
+                            content: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'You don\'t have enough MATIC to pay for gas fees.',
+                                  style: TextStyle(color: AppTheme.white, fontSize: 15),
+                                ),
+                                const SizedBox(height: 16),
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      _buildGasInfoRow('Estimated Gas Fee:', '${gasFee.toStringAsFixed(6)} MATIC'),
+                                      const SizedBox(height: 8),
+                                      _buildGasInfoRow('Your MATIC Balance:', '${maticBalance.toStringAsFixed(6)} MATIC'),
+                                      const SizedBox(height: 8),
+                                      _buildGasInfoRow('Additional Needed:', '${insufficientAmount.toStringAsFixed(6)} MATIC', isHighlight: true),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'Please top up your wallet with MATIC to continue with this transaction.',
+                                  style: TextStyle(color: AppTheme.grey, fontSize: 13),
+                                ),
+                              ],
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.of(context).pop(),
+                                child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
+                              ),
+                              ElevatedButton.icon(
+                                onPressed: () {
+                                  Navigator.of(context).pop();
+                                  _showBuyCryptoOptions();
+                                },
+                                icon: const Icon(Icons.add_circle_outline),
+                                label: const Text('Top Up'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.orange,
+                                  foregroundColor: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                        return;
+                      }
+
                       Navigator.of(context).pop();
 
                       // Show loading
@@ -2319,31 +2882,223 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                                 password,
                               );
 
+                        // Refresh balances
+                        await walletProvider.loadBalances();
+                        
                         if (result['success'] == true) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('$symbol sent successfully!'),
-                              backgroundColor: Colors.green,
+                          // Show enhanced success dialog
+                          showDialog(
+                            context: context,
+                            barrierDismissible: true,
+                            builder: (context) => AlertDialog(
+                              backgroundColor: AppTheme.darkGrey,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                side: BorderSide(
+                                  color: Colors.green.withOpacity(0.3),
+                                  width: 2,
+                                ),
+                              ),
+                              title: Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.green.withOpacity(0.2),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(
+                                      Icons.check_circle,
+                                      color: Colors.green,
+                                      size: 32,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      'Transaction Sent!',
+                                      style: TextStyle(
+                                        color: Colors.green,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              content: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: Colors.green.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: Colors.green.withOpacity(0.3),
+                                      ),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        _buildGasInfoRow('Amount:', '$amount $symbol'),
+                                        const SizedBox(height: 8),
+                                        _buildGasInfoRow('To:', '${recipientAddress.substring(0, 10)}...${recipientAddress.substring(recipientAddress.length - 8)}'),
+                                        if (result['txHash'] != null) ...[
+                                          const SizedBox(height: 8),
+                                          _buildGasInfoRow('TX Hash:', '${(result['txHash'] as String).substring(0, 10)}...'),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    'Your transaction has been broadcast to the network. It may take a few moments to confirm.',
+                                    style: TextStyle(color: AppTheme.grey, fontSize: 13),
+                                  ),
+                                ],
+                              ),
+                              actions: [
+                                ElevatedButton(
+                                  onPressed: () => Navigator.of(context).pop(),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  child: const Text('Done'),
+                                ),
+                              ],
                             ),
                           );
-
-                          // Refresh balances
-                          await walletProvider.loadBalances();
                         } else {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                'Failed to send $symbol: ${result['error']}',
+                          // Show enhanced error dialog
+                          showDialog(
+                            context: context,
+                            barrierDismissible: true,
+                            builder: (context) => AlertDialog(
+                              backgroundColor: AppTheme.darkGrey,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                side: BorderSide(
+                                  color: Colors.red.withOpacity(0.3),
+                                  width: 2,
+                                ),
                               ),
-                              backgroundColor: Colors.red,
+                              title: Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red.withOpacity(0.2),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(
+                                      Icons.error_outline,
+                                      color: Colors.red,
+                                      size: 32,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      'Transaction Failed',
+                                      style: TextStyle(
+                                        color: Colors.red,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              content: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: Colors.red.withOpacity(0.3),
+                                      ),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Error Message',
+                                          style: TextStyle(
+                                            color: AppTheme.grey,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          result['error'] ?? 'Unknown error occurred',
+                                          style: TextStyle(
+                                            color: AppTheme.white,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    'Please check your balance and try again. If the problem persists, contact support.',
+                                    style: TextStyle(color: AppTheme.grey, fontSize: 13),
+                                  ),
+                                ],
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.of(context).pop(),
+                                  child: Text('Close', style: TextStyle(color: AppTheme.grey)),
+                                ),
+                                ElevatedButton(
+                                  onPressed: () {
+                                    Navigator.of(context).pop();
+                                    // Retry by showing the send dialog again
+                                    _showSendPolygonAssetDialog(walletProvider, token);
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppTheme.primaryGold,
+                                    foregroundColor: AppTheme.black,
+                                  ),
+                                  child: const Text('Retry'),
+                                ),
+                              ],
                             ),
                           );
                         }
                       } catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Error sending $symbol: $e'),
-                            backgroundColor: Colors.red,
+                        showDialog(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            backgroundColor: AppTheme.darkGrey,
+                            title: Row(
+                              children: [
+                                Icon(Icons.error_outline, color: Colors.red, size: 28),
+                                const SizedBox(width: 12),
+                                Text('Error', style: TextStyle(color: Colors.red)),
+                              ],
+                            ),
+                            content: Text(
+                              'Failed to send $symbol: $e',
+                              style: TextStyle(color: AppTheme.white),
+                            ),
+                            actions: [
+                              ElevatedButton(
+                                onPressed: () => Navigator.of(context).pop(),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red,
+                                  foregroundColor: Colors.white,
+                                ),
+                                child: const Text('Close'),
+                              ),
+                            ],
                           ),
                         );
                       }
@@ -2367,13 +3122,60 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     double amount,
     String password,
   ) async {
-    // For now, only MATIC is supported for sending
-    // ERC-20 token sending would require additional implementation
-    return {
-      'success': false,
-      'error':
-          'ERC-20 token sending not yet implemented. Only MATIC transfers are supported.',
-    };
+    try {
+      final isNative = token['isNative'] as bool? ?? false;
+      final symbol = token['symbol'] as String;
+      
+      // For MATIC (native token)
+      if (isNative || symbol == 'MATIC') {
+        return await walletProvider.sendMatic(
+          recipientAddress: recipientAddress,
+          amount: amount,
+          password: password,
+        );
+      }
+      
+      // For ERC-20 tokens
+      final contractAddress = token['contractAddress'] as String?;
+      if (contractAddress == null || contractAddress.isEmpty) {
+        return {
+          'success': false,
+          'error': 'No contract address found for $symbol',
+        };
+      }
+      
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        return {
+          'success': false,
+          'error': 'User not authenticated',
+        };
+      }
+      
+      // Send ERC-20 token
+      final result = await PolygonWalletService.sendERC20TokenWithAuth(
+        userId: user.uid,
+        password: password,
+        tokenContractAddress: contractAddress,
+        toAddress: recipientAddress,
+        amount: amount,
+      );
+      
+      if (result['success'] == true) {
+        // Refresh balances and transactions after successful transaction
+        await Future.wait([
+          walletProvider.loadBalances(),
+          walletProvider.loadTransactions(forceRefresh: true),
+        ]);
+      }
+      
+      return result;
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+      };
+    }
   }
 
   void _showReceiveOptions() {
@@ -4679,4 +5481,5 @@ class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
       });
     }
   }
+
 }

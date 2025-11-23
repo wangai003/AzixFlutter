@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../services/mining_service.dart'; // Legacy mining service
+import '../services/polygon_mining_service.dart'; // Polygon mining service
 import '../services/akofa_tag_service.dart';
 import '../widgets/akofa_tag_prompt.dart';
 import '../theme/app_theme.dart';
@@ -17,15 +17,13 @@ class MiningScreen extends StatefulWidget {
 }
 
 class _MiningScreenState extends State<MiningScreen> {
-  final MiningService _legacyMiningService = MiningService();
+  final PolygonMiningService _polygonMiningService = PolygonMiningService();
   bool _isMining = false;
   int _remainingSeconds = 24 * 60 * 60; // 24 hours
   double _minedTokens = 0.0;
   Timer? _countdownTimer;
   String? _userWalletAddress;
   String? _currentSessionId;
-  List<Map<String, dynamic>> _unpaidSessions = [];
-  bool _isLoadingUnpaidSessions = false;
   Set<String> _claimingSessionIds = {}; // Track which sessions are being claimed
 
   @override
@@ -35,17 +33,29 @@ class _MiningScreenState extends State<MiningScreen> {
     // Check if user has AKOFA tag before allowing mining
     _checkUserTagAndProceed();
 
-    // Handle expired sessions on app reopen
-    _legacyMiningService.handleExpiredSessions();
+    // Handle expired sessions on app reopen (and wait for it to complete)
+    _handleExpiredSessionsAndLoad();
 
-    // Legacy streaming for mining
-    _legacyMiningService.minedTokenStream.listen((value) {
+    // Polygon streaming for mining
+    _polygonMiningService.minedTokenStream.listen((value) {
       setState(() => _minedTokens = value);
     });
 
     _loadUserWalletAddress();
     _restoreMiningSession();
-    _loadUnpaidSessions();
+  }
+
+  /// Handle expired sessions and load wallet in proper sequence
+  Future<void> _handleExpiredSessionsAndLoad() async {
+    try {
+      // First handle any expired sessions
+      await _polygonMiningService.handleExpiredSessions();
+      print('✅ Expired sessions handled');
+      
+      // Sessions will now be loaded via StreamBuilder in real-time
+    } catch (e) {
+      print('❌ Error handling expired sessions: $e');
+    }
   }
 
   /// Check if user has AKOFA tag and prompt creation if needed
@@ -84,11 +94,11 @@ class _MiningScreenState extends State<MiningScreen> {
           userId: user.uid,
           tag: tagCheck['tag'],
           publicKey: _userWalletAddress!,
-          blockchain: 'stellar',
+          blockchain: 'polygon',
         );
 
         if (linkResult['success']) {
-          print('✅ AKOFA tag linked to wallet for mining');
+          print('✅ AKOFA tag linked to Polygon wallet for mining');
         }
       }
     } catch (e) {
@@ -97,38 +107,27 @@ class _MiningScreenState extends State<MiningScreen> {
   }
 
   Future<void> _loadUserWalletAddress() async {
-    // Use the same wallet service as the mining service
+    // Load Polygon wallet address from the mining service
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     try {
-      final walletDoc = await FirebaseFirestore.instance
-          .collection('secure_wallets')
-          .doc(user.uid)
-          .get();
-
+      final polygonAddress = await _polygonMiningService.getUserWalletAddress();
+      
       setState(() {
-        _userWalletAddress = walletDoc.data()?['publicKey'];
+        _userWalletAddress = polygonAddress;
       });
+      
+      if (polygonAddress == null) {
+        print("⚠️ No Polygon wallet found for user. Please create a Polygon wallet first.");
+      } else {
+        print("✅ Loaded Polygon wallet: ${polygonAddress.substring(0, 10)}...");
+      }
     } catch (e) {
-      print("Error loading wallet address: $e");
+      print("Error loading Polygon wallet address: $e");
     }
   }
 
-  Future<void> _loadUnpaidSessions() async {
-    setState(() => _isLoadingUnpaidSessions = true);
-
-    try {
-      final sessions = await _legacyMiningService.getUnpaidMiningSessions();
-      setState(() {
-        _unpaidSessions = sessions;
-        _isLoadingUnpaidSessions = false;
-      });
-    } catch (e) {
-      print("Error loading unpaid sessions: $e");
-      setState(() => _isLoadingUnpaidSessions = false);
-    }
-  }
 
   Future<void> _claimSession(String sessionId) async {
     // Prevent double-clicking
@@ -150,22 +149,12 @@ class _MiningScreenState extends State<MiningScreen> {
         ),
       );
 
-      final result = await _legacyMiningService.claimSpecificUnpaidSession(
+      final result = await _polygonMiningService.claimSpecificUnpaidSession(
         sessionId,
       );
 
       if (result['success']) {
         final txHash = result['txHash'] as String?;
-        double? amount;
-        try {
-          final session = _unpaidSessions.firstWhere(
-            (s) => s['id'] == sessionId,
-            orElse: () => <String, dynamic>{},
-          );
-          amount = session['minedTokens'] as double?;
-        } catch (e) {
-          print("⚠️ Could not find session in list: $e");
-        }
         
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -177,10 +166,11 @@ class _MiningScreenState extends State<MiningScreen> {
                   '✅ Successfully claimed mining rewards!',
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
-                if (amount != null) ...[
-                  const SizedBox(height: 4),
-                  Text('Amount: ${amount.toStringAsFixed(6)} AKOFA'),
-                ],
+                const SizedBox(height: 4),
+                const Text(
+                  'AKOFA tokens have been sent to your wallet',
+                  style: TextStyle(fontSize: 13),
+                ),
                 if (txHash != null && txHash.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(
@@ -195,11 +185,11 @@ class _MiningScreenState extends State<MiningScreen> {
           ),
         );
         
-        // Refresh the unpaid sessions list
-        await _loadUnpaidSessions();
+        // StreamBuilder automatically updates the unpaid sessions list in real-time
       } else {
         final errorMessage = result['message'] ?? 'Unknown error occurred';
-        final isTrustlineError = errorMessage.toLowerCase().contains('trustline');
+        final isWalletError = errorMessage.toLowerCase().contains('wallet') ||
+                               errorMessage.toLowerCase().contains('balance');
         
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -208,20 +198,20 @@ class _MiningScreenState extends State<MiningScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  isTrustlineError 
-                    ? '⚠️ Wallet Setup Required' 
+                  isWalletError 
+                    ? '⚠️ Wallet Issue' 
                     : '❌ Failed to claim rewards',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   errorMessage,
-                  style: TextStyle(fontSize: isTrustlineError ? 13 : 12),
+                  style: TextStyle(fontSize: isWalletError ? 13 : 12),
                 ),
               ],
             ),
-            backgroundColor: isTrustlineError ? Colors.orange : Colors.red,
-            duration: Duration(seconds: isTrustlineError ? 8 : 5),
+            backgroundColor: isWalletError ? Colors.orange : Colors.red,
+            duration: Duration(seconds: isWalletError ? 8 : 5),
           ),
         );
       }
@@ -284,8 +274,8 @@ class _MiningScreenState extends State<MiningScreen> {
         });
 
         // Set the restored mined tokens in the service
-        _legacyMiningService.setInitialMinedTokens(mined);
-        _legacyMiningService.startMining();
+        _polygonMiningService.setInitialMinedTokens(mined);
+        _polygonMiningService.startMining();
 
         // Restart countdown timer
         _countdownTimer = Timer.periodic(const Duration(seconds: 1), (
@@ -295,10 +285,10 @@ class _MiningScreenState extends State<MiningScreen> {
             setState(() => _remainingSeconds--);
           } else {
             timer.cancel();
-            _legacyMiningService.stopMining();
+            _polygonMiningService.stopMining();
 
-            // ⛏️ Send mined tokens
-            await _legacyMiningService.completeMiningSession(
+            // ⛏️ Send mined tokens via Polygon
+            await _polygonMiningService.completeMiningSession(
               _currentSessionId!,
               _minedTokens,
             );
@@ -323,9 +313,9 @@ class _MiningScreenState extends State<MiningScreen> {
       _remainingSeconds = 24 * 60 * 60;
     });
 
-    final sessionRef = await _legacyMiningService.saveMiningSession();
+    final sessionRef = await _polygonMiningService.saveMiningSession();
     _currentSessionId = sessionRef.id;
-    _legacyMiningService.startMining();
+    _polygonMiningService.startMining();
 
     // Countdown timer for 24 hours
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
@@ -333,10 +323,10 @@ class _MiningScreenState extends State<MiningScreen> {
         setState(() => _remainingSeconds--);
       } else {
         timer.cancel();
-        _legacyMiningService.stopMining();
+        _polygonMiningService.stopMining();
 
-        // ⛏️ Send mined tokens
-        await _legacyMiningService.completeMiningSession(
+        // ⛏️ Send mined tokens via Polygon
+        await _polygonMiningService.completeMiningSession(
           _currentSessionId!,
           _minedTokens,
         );
@@ -361,7 +351,7 @@ class _MiningScreenState extends State<MiningScreen> {
   @override
   void dispose() {
     _countdownTimer?.cancel();
-    _legacyMiningService.dispose();
+    _polygonMiningService.dispose();
     super.dispose();
   }
 
@@ -397,16 +387,54 @@ class _MiningScreenState extends State<MiningScreen> {
                   // Header
                   Padding(
                     padding: const EdgeInsets.only(top: 16),
-                    child: Text(
-                      'AKOFA Mining',
-                      textAlign: TextAlign.center,
-                      style:
-                          (isDesktop
-                                  ? AppTheme.headingMedium.copyWith(
-                                      fontSize: 28,
-                                    )
-                                  : AppTheme.headingMedium)
-                              .copyWith(color: AppTheme.primaryGold),
+                    child: Column(
+                      children: [
+                        Text(
+                          'AKOFA Mining',
+                          textAlign: TextAlign.center,
+                          style:
+                              (isDesktop
+                                      ? AppTheme.headingMedium.copyWith(
+                                          fontSize: 28,
+                                        )
+                                      : AppTheme.headingMedium)
+                                  .copyWith(color: AppTheme.primaryGold),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.purple.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: Colors.purple.withOpacity(0.5),
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.hexagon,
+                                color: Colors.purple[300],
+                                size: 16,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Polygon Network',
+                                style: TextStyle(
+                                  color: Colors.purple[200],
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ).animate().fadeIn(
                     duration: const Duration(milliseconds: 600),
@@ -801,181 +829,279 @@ class _MiningScreenState extends State<MiningScreen> {
                               ]
                             : []),
 
-                        // Unpaid Sessions Section
-                        if (_unpaidSessions.isNotEmpty) ...[
-                          SizedBox(height: isDesktop ? 48.0 : 40.0),
+                        // Unpaid Sessions Section - Real-time Stream
+                        StreamBuilder<List<Map<String, dynamic>>>(
+                          stream: _polygonMiningService.streamUnpaidMiningSessions(),
+                          builder: (context, snapshot) {
+                            // Handle loading state
+                            if (snapshot.connectionState == ConnectionState.waiting) {
+                              return Column(
+                                children: [
+                                  SizedBox(height: isDesktop ? 48.0 : 40.0),
+                                  const Center(child: CircularProgressIndicator()),
+                                ],
+                              );
+                            }
 
-                          Text(
-                            'Unpaid Mining Sessions',
-                            textAlign: TextAlign.center,
-                            style:
-                                (isDesktop
-                                        ? AppTheme.headingMedium.copyWith(
-                                            fontSize: 24,
-                                          )
-                                        : AppTheme.headingMedium)
-                                    .copyWith(color: AppTheme.primaryGold),
-                          ).animate().fadeIn(
-                            duration: const Duration(milliseconds: 600),
-                            delay: const Duration(milliseconds: 200),
-                          ),
+                            // Handle error state
+                            if (snapshot.hasError) {
+                              print('❌ Stream error: ${snapshot.error}');
+                              return const SizedBox.shrink();
+                            }
 
-                          SizedBox(height: isDesktop ? 24.0 : 16.0),
+                            // Get unpaid sessions from stream
+                            final unpaidSessions = snapshot.data ?? [];
+                            
+                            // Log session count for debugging
+                            if (unpaidSessions.isNotEmpty) {
+                              print('📊 Displaying ${unpaidSessions.length} unpaid sessions');
+                            }
 
-                          if (_isLoadingUnpaidSessions)
-                            const Center(child: CircularProgressIndicator())
-                          else
-                            ListView.builder(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              itemCount: _unpaidSessions.length,
-                              itemBuilder: (context, index) {
-                                final session = _unpaidSessions[index];
-                                final sessionStart =
-                                    (session['sessionStart'] as Timestamp)
-                                        .toDate();
-                                final sessionEnd =
-                                    (session['sessionEnd'] as Timestamp)
-                                        .toDate();
-                                final minedTokens =
-                                    session['minedTokens'] as double;
+                            // Only show section if there are unpaid sessions
+                            if (unpaidSessions.isEmpty) {
+                              return const SizedBox.shrink();
+                            }
 
-                                return Container(
-                                  margin: const EdgeInsets.only(bottom: 16),
-                                  constraints: BoxConstraints(
-                                    maxWidth: isDesktop
-                                        ? 500
-                                        : isTablet
-                                        ? 400
-                                        : double.infinity,
+                            return Column(
+                              children: [
+                                SizedBox(height: isDesktop ? 48.0 : 40.0),
+
+                                Text(
+                                  'Unclaimed Mining Rewards',
+                                  textAlign: TextAlign.center,
+                                  style:
+                                      (isDesktop
+                                              ? AppTheme.headingMedium.copyWith(
+                                                  fontSize: 24,
+                                                )
+                                              : AppTheme.headingMedium)
+                                          .copyWith(color: AppTheme.primaryGold),
+                                ).animate().fadeIn(
+                                  duration: const Duration(milliseconds: 600),
+                                  delay: const Duration(milliseconds: 200),
+                                ),
+
+                                const SizedBox(height: 8),
+                                
+                                // Info badge
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 6,
                                   ),
-                                  child: Card(
-                                    color: AppTheme.darkGrey.withOpacity(0.8),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(
+                                      color: Colors.orange.withOpacity(0.5),
+                                      width: 1,
                                     ),
-                                    elevation: 4,
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(20),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.spaceBetween,
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.schedule,
+                                        color: Colors.orange[300],
+                                        size: 16,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        '${unpaidSessions.length} session${unpaidSessions.length > 1 ? 's' : ''} pending',
+                                        style: TextStyle(
+                                          color: Colors.orange[200],
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+
+                                SizedBox(height: isDesktop ? 24.0 : 16.0),
+
+                                // List of unpaid sessions
+                                ListView.builder(
+                                  shrinkWrap: true,
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  itemCount: unpaidSessions.length,
+                                  itemBuilder: (context, index) {
+                                    final session = unpaidSessions[index];
+                                    final sessionStart =
+                                        (session['sessionStart'] as Timestamp)
+                                            .toDate();
+                                    final minedTokens =
+                                        session['minedTokens'] as double;
+                                    final blockchain = session['blockchain'] ?? 'polygon';
+
+                                    return Container(
+                                      margin: const EdgeInsets.only(bottom: 16),
+                                      constraints: BoxConstraints(
+                                        maxWidth: isDesktop
+                                            ? 500
+                                            : isTablet
+                                            ? 400
+                                            : double.infinity,
+                                      ),
+                                      child: Card(
+                                        color: AppTheme.darkGrey.withOpacity(0.8),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        elevation: 4,
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(20),
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
                                             children: [
-                                              Text(
-                                                'Session ${index + 1}',
-                                                style: AppTheme.labelLarge
-                                                    .copyWith(
-                                                      color:
-                                                          AppTheme.primaryGold,
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                    ),
+                                              Row(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.spaceBetween,
+                                                children: [
+                                                  Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment.start,
+                                                    children: [
+                                                      Text(
+                                                        'Session ${index + 1}',
+                                                        style: AppTheme.labelLarge
+                                                            .copyWith(
+                                                              color:
+                                                                  AppTheme.primaryGold,
+                                                              fontWeight:
+                                                                  FontWeight.w600,
+                                                            ),
+                                                      ),
+                                                      const SizedBox(height: 4),
+                                                      Container(
+                                                        padding: const EdgeInsets.symmetric(
+                                                          horizontal: 8,
+                                                          vertical: 2,
+                                                        ),
+                                                        decoration: BoxDecoration(
+                                                          color: blockchain == 'polygon'
+                                                              ? Colors.purple.withOpacity(0.2)
+                                                              : Colors.blue.withOpacity(0.2),
+                                                          borderRadius: BorderRadius.circular(8),
+                                                        ),
+                                                        child: Text(
+                                                          blockchain.toUpperCase(),
+                                                          style: TextStyle(
+                                                            color: blockchain == 'polygon'
+                                                                ? Colors.purple[300]
+                                                                : Colors.blue[300],
+                                                            fontSize: 10,
+                                                            fontWeight: FontWeight.w600,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  Text(
+                                                    '${minedTokens.toStringAsFixed(6)} AKOFA',
+                                                    style: AppTheme.bodyLarge
+                                                        .copyWith(
+                                                          color: AppTheme.white,
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                        ),
+                                                  ),
+                                                ],
                                               ),
+                                              const SizedBox(height: 12),
                                               Text(
-                                                '${minedTokens.toStringAsFixed(6)} AKOFA',
-                                                style: AppTheme.bodyLarge
-                                                    .copyWith(
-                                                      color: AppTheme.white,
-                                                      fontWeight:
-                                                          FontWeight.w600,
+                                                'Completed: ${sessionStart.toString().split(' ')[0]}',
+                                                style: AppTheme.caption.copyWith(
+                                                  color: AppTheme.grey.withOpacity(
+                                                    0.8,
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(height: 16),
+                                              SizedBox(
+                                                width: double.infinity,
+                                                child: ElevatedButton(
+                                                  onPressed: _claimingSessionIds
+                                                          .contains(session['id'])
+                                                      ? null
+                                                      : () => _claimSession(
+                                                            session['id'],
+                                                          ),
+                                                  style: ElevatedButton.styleFrom(
+                                                    backgroundColor:
+                                                        _claimingSessionIds.contains(
+                                                                session['id'])
+                                                            ? AppTheme.grey
+                                                                .withOpacity(0.3)
+                                                            : AppTheme.primaryGold,
+                                                    foregroundColor:
+                                                        _claimingSessionIds.contains(
+                                                                session['id'])
+                                                            ? AppTheme.grey
+                                                            : AppTheme.black,
+                                                    disabledBackgroundColor:
+                                                        AppTheme.grey
+                                                            .withOpacity(0.3),
+                                                    disabledForegroundColor:
+                                                        AppTheme.grey,
+                                                    textStyle:
+                                                        AppTheme.buttonMedium,
+                                                    shape: RoundedRectangleBorder(
+                                                      borderRadius:
+                                                          BorderRadius.circular(8),
                                                     ),
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 24,
+                                                          vertical: 12,
+                                                        ),
+                                                  ),
+                                                  child: _claimingSessionIds
+                                                          .contains(session['id'])
+                                                      ? const Row(
+                                                          mainAxisAlignment:
+                                                              MainAxisAlignment
+                                                                  .center,
+                                                          children: [
+                                                            SizedBox(
+                                                              width: 16,
+                                                              height: 16,
+                                                              child:
+                                                                  CircularProgressIndicator(
+                                                                strokeWidth: 2,
+                                                                valueColor:
+                                                                    AlwaysStoppedAnimation<
+                                                                            Color>(
+                                                                        Colors
+                                                                            .white),
+                                                              ),
+                                                            ),
+                                                            SizedBox(width: 8),
+                                                            Text('Claiming...'),
+                                                          ],
+                                                        )
+                                                      : const Text(
+                                                          'Claim Rewards',
+                                                        ),
+                                                ),
                                               ),
                                             ],
                                           ),
-                                          const SizedBox(height: 12),
-                                          Text(
-                                            'Completed: ${sessionStart.toString().split(' ')[0]}',
-                                            style: AppTheme.caption.copyWith(
-                                              color: AppTheme.grey.withOpacity(
-                                                0.8,
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(height: 16),
-                                          SizedBox(
-                                            width: double.infinity,
-                                            child: ElevatedButton(
-                                              onPressed: _claimingSessionIds
-                                                      .contains(session['id'])
-                                                  ? null
-                                                  : () => _claimSession(
-                                                        session['id'],
-                                                      ),
-                                              style: ElevatedButton.styleFrom(
-                                                backgroundColor:
-                                                    _claimingSessionIds.contains(
-                                                            session['id'])
-                                                        ? AppTheme.grey
-                                                            .withOpacity(0.3)
-                                                        : AppTheme.primaryGold,
-                                                foregroundColor:
-                                                    _claimingSessionIds.contains(
-                                                            session['id'])
-                                                        ? AppTheme.grey
-                                                        : AppTheme.black,
-                                                disabledBackgroundColor:
-                                                    AppTheme.grey
-                                                        .withOpacity(0.3),
-                                                disabledForegroundColor:
-                                                    AppTheme.grey,
-                                                textStyle:
-                                                    AppTheme.buttonMedium,
-                                                shape: RoundedRectangleBorder(
-                                                  borderRadius:
-                                                      BorderRadius.circular(8),
-                                                ),
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 24,
-                                                      vertical: 12,
-                                                    ),
-                                              ),
-                                              child: _claimingSessionIds
-                                                      .contains(session['id'])
-                                                  ? const Row(
-                                                      mainAxisAlignment:
-                                                          MainAxisAlignment
-                                                              .center,
-                                                      children: [
-                                                        SizedBox(
-                                                          width: 16,
-                                                          height: 16,
-                                                          child:
-                                                              CircularProgressIndicator(
-                                                            strokeWidth: 2,
-                                                            valueColor:
-                                                                AlwaysStoppedAnimation<
-                                                                        Color>(
-                                                                    Colors
-                                                                        .white),
-                                                          ),
-                                                        ),
-                                                        SizedBox(width: 8),
-                                                        Text('Claiming...'),
-                                                      ],
-                                                    )
-                                                  : const Text(
-                                                      'Claim Rewards',
-                                                    ),
-                                            ),
-                                          ),
-                                        ],
+                                        ),
                                       ),
-                                    ),
-                                  ),
-                                ).animate().fadeIn(
-                                  duration: const Duration(milliseconds: 600),
-                                  delay: Duration(
-                                    milliseconds: 300 + (index * 100),
-                                  ),
-                                );
-                              },
-                            ),
-                        ],
+                                    ).animate().fadeIn(
+                                      duration: const Duration(milliseconds: 600),
+                                      delay: Duration(
+                                        milliseconds: 300 + (index * 100),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ],
+                            );
+                          },
+                        ),
                       ],
                     ),
                   ),

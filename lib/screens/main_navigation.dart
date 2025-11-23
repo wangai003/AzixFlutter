@@ -7,18 +7,14 @@ import 'explore_screen.dart';
 import 'marketplace/new_marketplace.dart';
 
 import 'vendor/functional_vendor_dashboard.dart';
-import 'notifications_screen.dart';
-import '../services/notification_service.dart';
 import 'community_screen.dart';
 import 'settings_screen.dart';
 import 'enhanced_wallet_screen.dart';
-import 'all_transactions_screen.dart';
 import 'referral_screen.dart';
-import 'tag_resolver_screen.dart';
 import 'mining_screen.dart';
 import 'raffle/raffle_hub_screen.dart';
 import 'raffle/my_raffles_screen.dart';
-import 'bridge_screen.dart';
+import 'token_analytics_screen.dart';
 import '../widgets/app_logo.dart';
 import '../providers/admin_provider.dart';
 
@@ -74,22 +70,38 @@ class _MainNavigationState extends State<MainNavigation> {
                 userRole == 'service_vendor';
             final isAdmin = userRole == 'admin' || userRole == 'super_admin';
 
-            // Build screens list
-            final List<Widget> screens = [
-              const MiningScreen(),
-              const ExploreScreen(),
-              const WebViewPage(),
-              if (isVendor) const FunctionalVendorDashboard(),
-              const EnhancedWalletScreen(),
-              const BridgeScreen(),
-              const ReferralScreen(),
-              const RaffleHubScreen(),
-              if (isAdmin) const MyRafflesScreen(),
-              const CommunityScreen(),
-              const AllTransactionsScreen(),
-              const SettingsScreen(),
-              const TagResolverScreen(),
-            ];
+            // Build screens list - use builders to prevent premature initialization
+            Widget _buildScreen(int index) {
+              final List<Widget Function()> screenBuilders = [
+                () => const MiningScreen(),
+                () => const ExploreScreen(),
+                () => const WebViewPage(),
+                if (isVendor) () => const FunctionalVendorDashboard(),
+                () => const EnhancedWalletScreen(), // Only built when navigated to
+                () => const TokenAnalyticsScreen(), // Token analytics
+                () => const ReferralScreen(),
+                () => const RaffleHubScreen(),
+                if (isAdmin) () => const MyRafflesScreen(),
+                () => const CommunityScreen(),
+                () => const SettingsScreen(),
+              ];
+              return screenBuilders[index]();
+            }
+            
+            // For compatibility with existing code
+            final int screensLength = [
+              1, // MiningScreen
+              1, // ExploreScreen
+              1, // WebViewPage
+              if (isVendor) 1, // FunctionalVendorDashboard
+              1, // EnhancedWalletScreen
+              1, // TokenAnalyticsScreen
+              1, // ReferralScreen
+              1, // RaffleHubScreen
+              if (isAdmin) 1, // MyRafflesScreen
+              1, // CommunityScreen
+              1, // SettingsScreen
+            ].length;
 
             // Calculate indices for all screens
             final int miningIndex = 0;
@@ -97,28 +109,23 @@ class _MainNavigationState extends State<MainNavigation> {
             final int marketIndex = 2;
             final int vendorIndex = isVendor ? 3 : -1;
             final int walletIndex = isVendor ? 4 : 3;
-            final int bridgeIndex = isVendor ? 5 : 4;
+            final int analyticsIndex = isVendor ? 5 : 4;
             final int referralIndex = isVendor ? 6 : 5;
             final int raffleHubIndex = isVendor ? 7 : 6;
-            final int myRafflesIndex = isAdmin ? (isVendor ? 7 : 6) : -1;
+            final int myRafflesIndex = isAdmin ? (isVendor ? 8 : 7) : -1;
             final int communityIndex = isAdmin
-                ? (isVendor ? 8 : 7)
-                : (isVendor ? 7 : 6);
-            final int transactionsIndex = isAdmin
                 ? (isVendor ? 9 : 8)
                 : (isVendor ? 8 : 7);
             final int settingsIndex = isAdmin
                 ? (isVendor ? 10 : 9)
                 : (isVendor ? 9 : 8);
-            final int tagResolverIndex = isAdmin
-                ? (isVendor ? 11 : 10)
-                : (isVendor ? 10 : 9);
 
             return LayoutBuilder(
               builder: (context, constraints) {
                 final bool isMobile = constraints.maxWidth < 768;
                 return _buildResponsiveLayout(
-                  screens,
+                  _buildScreen,
+                  screensLength,
                   isVendor,
                   isAdmin,
                   miningIndex,
@@ -126,14 +133,12 @@ class _MainNavigationState extends State<MainNavigation> {
                   marketIndex,
                   vendorIndex,
                   walletIndex,
-                  bridgeIndex,
+                  analyticsIndex,
                   referralIndex,
                   raffleHubIndex,
                   myRafflesIndex,
                   communityIndex,
-                  transactionsIndex,
                   settingsIndex,
-                  tagResolverIndex,
                   isMobile,
                 );
               },
@@ -145,7 +150,8 @@ class _MainNavigationState extends State<MainNavigation> {
   }
 
   Widget _buildResponsiveLayout(
-    List<Widget> screens,
+    Widget Function(int) buildScreen,
+    int screensLength,
     bool isVendor,
     bool isAdmin,
     int miningIndex,
@@ -153,14 +159,12 @@ class _MainNavigationState extends State<MainNavigation> {
     int marketIndex,
     int vendorIndex,
     int walletIndex,
-    int bridgeIndex,
+    int analyticsIndex,
     int referralIndex,
     int raffleHubIndex,
     int myRafflesIndex,
     int communityIndex,
-    int transactionsIndex,
     int settingsIndex,
-    int tagResolverIndex,
     bool isMobile,
   ) {
     // Use collapsible side navigation for both mobile and desktop
@@ -175,14 +179,12 @@ class _MainNavigationState extends State<MainNavigation> {
             marketIndex,
             vendorIndex,
             walletIndex,
-            bridgeIndex,
+            analyticsIndex,
             referralIndex,
             raffleHubIndex,
             myRafflesIndex,
             communityIndex,
-            transactionsIndex,
             settingsIndex,
-            tagResolverIndex,
             isMobile,
           ),
           Expanded(
@@ -190,7 +192,7 @@ class _MainNavigationState extends State<MainNavigation> {
               children: [
                 isMobile ? _buildMobileAppBar() : _buildDesktopAppBar(),
                 Expanded(
-                  child: IndexedStack(index: _selectedIndex, children: screens),
+                  child: buildScreen(_selectedIndex), // Only build the selected screen
                 ),
               ],
             ),
@@ -249,12 +251,10 @@ class _MainNavigationState extends State<MainNavigation> {
     int marketIndex,
     int vendorIndex,
     int walletIndex,
-    int bridgeIndex,
     int referralIndex,
     int raffleHubIndex,
     int myRafflesIndex,
     int communityIndex,
-    int transactionsIndex,
     int settingsIndex,
   ) {
     return Drawer(
@@ -298,11 +298,6 @@ class _MainNavigationState extends State<MainNavigation> {
                     'Wallet',
                     walletIndex,
                   ),
-                  _buildDrawerItem(
-                    Icons.swap_horiz,
-                    'Bridge',
-                    bridgeIndex,
-                  ),
                   _buildDrawerItem(Icons.share, 'Referrals', referralIndex),
                   _buildDrawerItem(
                     Icons.local_activity,
@@ -316,12 +311,6 @@ class _MainNavigationState extends State<MainNavigation> {
                       myRafflesIndex,
                     ),
                   _buildDrawerItem(Icons.people, 'Community', communityIndex),
-                  _buildDrawerItem(
-                    Icons.history,
-                    'Transactions',
-                    transactionsIndex,
-                  ),
-                  _buildNotificationDrawerItem(),
                   _buildDrawerItem(Icons.settings, 'Settings', settingsIndex),
                 ],
               ),
@@ -341,14 +330,12 @@ class _MainNavigationState extends State<MainNavigation> {
     int marketIndex,
     int vendorIndex,
     int walletIndex,
-    int bridgeIndex,
+    int analyticsIndex,
     int referralIndex,
     int raffleHubIndex,
     int myRafflesIndex,
     int communityIndex,
-    int transactionsIndex,
     int settingsIndex,
-    int tagResolverIndex,
     bool isMobile,
   ) {
     final double width = _isDrawerOpen
@@ -407,9 +394,9 @@ class _MainNavigationState extends State<MainNavigation> {
                   walletIndex,
                 ),
                 _buildCollapsibleNavItem(
-                  Icons.swap_horiz,
-                  'Bridge',
-                  bridgeIndex,
+                  Icons.analytics,
+                  'Analytics',
+                  analyticsIndex,
                 ),
                 _buildCollapsibleNavItem(
                   Icons.share,
@@ -433,20 +420,9 @@ class _MainNavigationState extends State<MainNavigation> {
                   communityIndex,
                 ),
                 _buildCollapsibleNavItem(
-                  Icons.history,
-                  'Transactions',
-                  transactionsIndex,
-                ),
-                _buildCollapsibleNotificationItem(),
-                _buildCollapsibleNavItem(
                   Icons.settings,
                   'Settings',
                   settingsIndex,
-                ),
-                _buildCollapsibleNavItem(
-                  Icons.search,
-                  'Tag Resolver',
-                  tagResolverIndex,
                 ),
               ],
             ),
@@ -527,237 +503,5 @@ class _MainNavigationState extends State<MainNavigation> {
     }
 
     return listTile;
-  }
-
-  // Notification item for mobile drawer
-  Widget _buildNotificationDrawerItem() {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      return Container(
-        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-        child: ListTile(
-          leading: Icon(Icons.notifications, color: Colors.grey.shade600),
-          title: Text(
-            'Notifications',
-            style: TextStyle(color: Colors.grey.shade700),
-          ),
-          onTap: () {
-            Navigator.pop(context); // Close drawer
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const NotificationsScreen()),
-            );
-          },
-        ),
-      );
-    }
-
-    return StreamBuilder<int>(
-      stream: NotificationService.getUnreadCount(user.uid),
-      builder: (context, snapshot) {
-        final unreadCount = snapshot.data ?? 0;
-
-        return IntrinsicHeight(
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(
-              color: unreadCount > 0 ? Colors.yellow.withOpacity(0.2) : null,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: ListTile(
-              dense: true,
-              leading: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Icon(
-                    Icons.notifications,
-                    color: unreadCount > 0
-                        ? Colors.black
-                        : Colors.grey.shade600,
-                  ),
-                  if (unreadCount > 0)
-                    Positioned(
-                      right: -2,
-                      top: -2,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 4,
-                          vertical: 2,
-                        ),
-                        decoration: const BoxDecoration(
-                          color: Colors.red,
-                          shape: BoxShape.circle,
-                        ),
-                        constraints: const BoxConstraints(
-                          minWidth: 14,
-                          minHeight: 14,
-                        ),
-                        child: Text(
-                          unreadCount > 9 ? '9+' : unreadCount.toString(),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              title: Text(
-                unreadCount > 0
-                    ? 'Notifications ($unreadCount)'
-                    : 'Notifications',
-                style: TextStyle(
-                  color: unreadCount > 0 ? Colors.black : Colors.grey.shade700,
-                  fontWeight: unreadCount > 0
-                      ? FontWeight.w600
-                      : FontWeight.normal,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-              onTap: () {
-                Navigator.pop(context); // Close drawer
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const NotificationsScreen(),
-                  ),
-                );
-              },
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  // Notification item for collapsible desktop navigation
-  Widget _buildCollapsibleNotificationItem() {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      return Container(
-        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-        child: ListTile(
-          contentPadding: EdgeInsets.symmetric(
-            horizontal: _isDrawerOpen ? 16 : 8,
-            vertical: 0,
-          ),
-          leading: const Icon(
-            Icons.notifications,
-            color: Colors.white70,
-            size: 24,
-          ),
-          title: _isDrawerOpen
-              ? const Text(
-                  'Notifications',
-                  style: TextStyle(color: Colors.white70, fontSize: 14),
-                )
-              : null,
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const NotificationsScreen()),
-          ),
-        ),
-      );
-    }
-
-    return StreamBuilder<int>(
-      stream: NotificationService.getUnreadCount(user.uid),
-      builder: (context, snapshot) {
-        final unreadCount = snapshot.data ?? 0;
-
-        Widget notificationItem = IntrinsicHeight(
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(
-              color: unreadCount > 0 ? Colors.yellow.withOpacity(0.2) : null,
-              borderRadius: BorderRadius.circular(8),
-              border: unreadCount > 0
-                  ? Border.all(color: Colors.yellow, width: 1)
-                  : null,
-            ),
-            child: ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.symmetric(
-                horizontal: _isDrawerOpen ? 16 : 8,
-                vertical: 0,
-              ),
-              leading: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Icon(
-                    Icons.notifications,
-                    color: unreadCount > 0 ? Colors.yellow : Colors.white70,
-                    size: 24,
-                  ),
-                  if (unreadCount > 0)
-                    Positioned(
-                      right: -2,
-                      top: -2,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 3,
-                          vertical: 1,
-                        ),
-                        decoration: const BoxDecoration(
-                          color: Colors.red,
-                          shape: BoxShape.circle,
-                        ),
-                        constraints: const BoxConstraints(
-                          minWidth: 12,
-                          minHeight: 12,
-                        ),
-                        child: Text(
-                          unreadCount > 9 ? '9+' : unreadCount.toString(),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 8,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              title: _isDrawerOpen
-                  ? Text(
-                      unreadCount > 0
-                          ? 'Notifications ($unreadCount)'
-                          : 'Notifications',
-                      style: TextStyle(
-                        color: unreadCount > 0 ? Colors.yellow : Colors.white70,
-                        fontWeight: unreadCount > 0
-                            ? FontWeight.w600
-                            : FontWeight.normal,
-                        fontSize: 14,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    )
-                  : null,
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const NotificationsScreen()),
-              ),
-            ),
-          ),
-        );
-
-        // Add tooltip when collapsed
-        if (!_isDrawerOpen) {
-          return Tooltip(
-            message: unreadCount > 0
-                ? 'Notifications ($unreadCount)'
-                : 'Notifications',
-            preferBelow: false,
-            child: notificationItem,
-          );
-        }
-
-        return notificationItem;
-      },
-    );
   }
 }

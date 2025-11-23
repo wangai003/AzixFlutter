@@ -612,6 +612,11 @@ class EnhancedWalletProvider extends ChangeNotifier {
         throw Exception('No wallet found');
       }
 
+      final user = _auth.currentUser;
+      if (user == null) {
+        throw Exception('User not authenticated');
+      }
+
       // For MATIC (native token)
       if (asset.code == 'MATIC' || asset.isNative) {
         return await sendMatic(
@@ -621,12 +626,33 @@ class EnhancedWalletProvider extends ChangeNotifier {
         );
       }
 
-      // For ERC-20 tokens (like AKOFA), implement ERC-20 transfer
-      // This requires contract interaction
+      // For ERC-20 tokens (like AKOFA)
+      if (asset.contractAddress != null && asset.contractAddress!.isNotEmpty) {
+        debugPrint('🔄 Sending ERC-20 token: ${asset.symbol}');
+        debugPrint('📍 Contract: ${asset.contractAddress}');
+        
+        final result = await PolygonWalletService.sendERC20TokenWithAuth(
+          userId: user.uid,
+          password: password,
+          tokenContractAddress: asset.contractAddress!,
+          toAddress: recipientAddress,
+          amount: amount,
+        );
+
+        if (result['success'] == true) {
+          // Refresh balances and transactions after successful transaction
+          await Future.wait([loadBalances(), loadTransactions(forceRefresh: true)]);
+        }
+
+        _setLoading(false);
+        return result;
+      }
+
+      // No contract address provided for non-native token
       _setLoading(false);
       return {
         'success': false,
-        'error': 'ERC-20 token transfers not yet implemented. Currently only MATIC transfers are supported.',
+        'error': 'No contract address configured for ${asset.symbol}. Please contact support.',
       };
     } catch (e, stackTrace) {
       debugPrint('❌ Error sending ${asset.symbol}: $e');

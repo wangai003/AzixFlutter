@@ -21,6 +21,7 @@ import 'providers/search_provider.dart';
 import 'providers/wishlist_provider.dart';
 import 'providers/marketplace/marketplace_provider.dart';
 import 'providers/enhanced_wallet_provider.dart';
+import 'providers/wallet_session_provider.dart';
 import 'wallet/providers/wallet_provider.dart';
 import 'wallet/providers/wallet_auth_provider.dart';
 import 'bridge/providers/bridge_provider.dart';
@@ -177,6 +178,8 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => WalletAuthProvider()),
         // Enhanced wallet provider with real-time monitoring
         ChangeNotifierProvider(create: (_) => EnhancedWalletProvider()),
+        // Wallet session management provider
+        ChangeNotifierProvider(create: (_) => WalletSessionProvider()),
         ChangeNotifierProvider(create: (_) => BridgeProvider()),
         // Enhanced marketplace provider with Stellar integration
         ChangeNotifierProxyProvider<

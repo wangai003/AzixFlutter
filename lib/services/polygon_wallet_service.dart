@@ -894,6 +894,103 @@ class PolygonWalletService {
     }
   }
 
+  /// Estimate gas fee for MATIC transfer
+  static Future<Map<String, dynamic>> estimateMaticGasFee({
+    required String fromAddress,
+    required String toAddress,
+    required double amountMatic,
+  }) async {
+    try {
+      final client = web3dart.Web3Client(_currentRpcUrl, http.Client());
+      
+      try {
+        // Get current gas price
+        final gasPrice = await client.getGasPrice();
+        
+        // Standard gas limit for MATIC transfer
+        const gasLimit = 21000;
+        
+        // Calculate total gas fee in MATIC
+        final gasFeeWei = gasPrice.getInWei * BigInt.from(gasLimit);
+        final gasFeeMatic = gasFeeWei.toDouble() / 1e18;
+        
+        // Get current MATIC balance
+        final balanceResult = await getPolygonBalance(fromAddress);
+        final currentBalance = balanceResult['balance'] as double? ?? 0.0;
+        
+        // Calculate total required (amount + gas)
+        final totalRequired = amountMatic + gasFeeMatic;
+        final hasEnough = currentBalance >= totalRequired;
+        
+        return {
+          'success': true,
+          'gasFee': gasFeeMatic,
+          'gasPrice': gasPrice.getInWei.toString(),
+          'gasLimit': gasLimit,
+          'totalRequired': totalRequired,
+          'currentBalance': currentBalance,
+          'hasEnoughForGas': hasEnough,
+          'insufficientAmount': hasEnough ? 0.0 : (totalRequired - currentBalance),
+        };
+      } finally {
+        await client.dispose();
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+        'gasFee': 0.0,
+      };
+    }
+  }
+  
+  /// Estimate gas fee for ERC-20 token transfer
+  static Future<Map<String, dynamic>> estimateERC20GasFee({
+    required String fromAddress,
+    required String tokenContractAddress,
+  }) async {
+    try {
+      final client = web3dart.Web3Client(_currentRpcUrl, http.Client());
+      
+      try {
+        // Get current gas price
+        final gasPrice = await client.getGasPrice();
+        
+        // Standard gas limit for ERC-20 transfer (higher than native transfer)
+        const gasLimit = 100000;
+        
+        // Calculate total gas fee in MATIC
+        final gasFeeWei = gasPrice.getInWei * BigInt.from(gasLimit);
+        final gasFeeMatic = gasFeeWei.toDouble() / 1e18;
+        
+        // Get current MATIC balance
+        final balanceResult = await getPolygonBalance(fromAddress);
+        final currentBalance = balanceResult['balance'] as double? ?? 0.0;
+        
+        // For ERC-20, we only need gas fee (not sending MATIC)
+        final hasEnough = currentBalance >= gasFeeMatic;
+        
+        return {
+          'success': true,
+          'gasFee': gasFeeMatic,
+          'gasPrice': gasPrice.getInWei.toString(),
+          'gasLimit': gasLimit,
+          'currentBalance': currentBalance,
+          'hasEnoughForGas': hasEnough,
+          'insufficientAmount': hasEnough ? 0.0 : (gasFeeMatic - currentBalance),
+        };
+      } finally {
+        await client.dispose();
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+        'gasFee': 0.0,
+      };
+    }
+  }
+
   /// Get transaction receipt
   static Future<Map<String, dynamic>> getTransactionReceipt(
     String txHash,
@@ -1233,5 +1330,190 @@ class PolygonWalletService {
       }
     } catch (_) {}
     return null;
+  }
+
+  /// Send ERC-20 Token Transaction
+  /// Used for sending AKOFA or other ERC-20 tokens on Polygon
+  static Future<Map<String, dynamic>> sendERC20Token({
+    required String tokenContractAddress,
+    required String toAddress,
+    required double amount,
+    required String distributorPrivateKey,
+    int? gasLimit,
+    int? gasPrice,
+  }) async {
+    try {
+      print('🔄 [ERC20] Starting ERC-20 token transfer...');
+      print('📍 [ERC20] Token contract: $tokenContractAddress');
+      print('📍 [ERC20] To address: $toAddress');
+      print('💰 [ERC20] Amount: $amount');
+
+      // Create web3dart client
+      final client = web3dart.Web3Client(_currentRpcUrl, http.Client());
+      
+      try {
+        // Clean and prepare private key
+        String cleanKey = distributorPrivateKey.trim();
+        if (cleanKey.startsWith('0x') || cleanKey.startsWith('0X')) {
+          cleanKey = cleanKey.substring(2);
+        }
+        
+        // Create credentials from distributor private key
+        final privateKeyBytes = web3crypto.hexToBytes(cleanKey);
+        final credentials = web3dart.EthPrivateKey(privateKeyBytes);
+        final fromAddress = credentials.address.hex;
+        
+        print('📍 [ERC20] From address (distributor): $fromAddress');
+
+        // ERC-20 Transfer function signature: transfer(address,uint256)
+        // Function selector: 0xa9059cbb (first 4 bytes of keccak256("transfer(address,uint256)"))
+        final transferFunctionSelector = '0xa9059cbb';
+        
+        // Encode recipient address (remove 0x and pad to 32 bytes)
+        final recipientAddressEncoded = toAddress
+            .toLowerCase()
+            .replaceFirst('0x', '')
+            .padLeft(64, '0');
+        
+        // Convert amount to smallest unit (assuming 18 decimals for AKOFA, like most ERC-20 tokens)
+        // You can adjust the decimals based on your token configuration
+        const decimals = 18;
+        final amountInSmallestUnit = BigInt.from(amount * pow(10, decimals));
+        
+        // Encode amount (pad to 32 bytes)
+        final amountEncoded = amountInSmallestUnit
+            .toRadixString(16)
+            .padLeft(64, '0');
+        
+        // Combine function selector + encoded parameters
+        final data = transferFunctionSelector + recipientAddressEncoded + amountEncoded;
+        
+        print('📦 [ERC20] Encoded data: ${data.substring(0, 20)}...');
+        
+        // Get nonce
+        final nonce = await client.getTransactionCount(credentials.address);
+        print('🔢 [ERC20] Nonce: $nonce');
+        
+        // Get gas price
+        final currentGasPrice = gasPrice != null
+            ? web3dart.EtherAmount.fromBigInt(web3dart.EtherUnit.gwei, BigInt.from(gasPrice))
+            : await client.getGasPrice();
+        
+        // ERC-20 transfers typically need more gas than simple transfers
+        final currentGasLimit = gasLimit ?? 100000; // Higher gas limit for contract interaction
+        
+        print('⛽ [ERC20] Gas price: ${currentGasPrice.getInWei}');
+        print('⛽ [ERC20] Gas limit: $currentGasLimit');
+        
+        // Create transaction for contract interaction
+        final transaction = web3dart.Transaction(
+          to: web3dart.EthereumAddress.fromHex(tokenContractAddress),
+          value: web3dart.EtherAmount.zero(), // No MATIC being sent, just token transfer
+          gasPrice: currentGasPrice,
+          maxGas: currentGasLimit,
+          nonce: nonce,
+          data: web3crypto.hexToBytes(data.replaceFirst('0x', '')),
+        );
+        
+        print('📤 [ERC20] Signing and sending transaction...');
+        
+        // Sign and send transaction
+        final txHash = await client.sendTransaction(
+          credentials,
+          transaction,
+          chainId: _chainId,
+        );
+        
+        await client.dispose();
+
+        print('✅ [ERC20] Token transfer transaction sent!');
+        print('📋 [ERC20] Transaction hash: $txHash');
+
+        return {
+          'success': true,
+          'txHash': txHash,
+          'from': fromAddress,
+          'to': toAddress,
+          'amount': amount,
+          'tokenContract': tokenContractAddress,
+          'gasUsed': currentGasLimit,
+          'message': 'ERC-20 token transaction sent successfully',
+          'explorerUrl': _isTestnet
+              ? 'https://amoy.polygonscan.com/tx/$txHash'
+              : 'https://polygonscan.com/tx/$txHash',
+        };
+      } finally {
+        await client.dispose();
+      }
+    } catch (e, stackTrace) {
+      print('❌ [ERC20] Error sending ERC-20 token: $e');
+      print('❌ [ERC20] Stack trace: $stackTrace');
+      
+      String errorMessage = e.toString();
+      
+      // Parse common errors
+      if (errorMessage.contains('insufficient funds') ||
+          errorMessage.contains('INSUFFICIENT_BALANCE')) {
+        errorMessage = 'Insufficient balance in distributor wallet for gas fees or tokens.';
+      } else if (errorMessage.contains('gas')) {
+        errorMessage = 'Gas estimation failed. Please check the token contract and try again.';
+      } else if (errorMessage.contains('nonce')) {
+        errorMessage = 'Transaction nonce error. Please try again.';
+      } else if (errorMessage.contains('network') ||
+                 errorMessage.contains('connection')) {
+        errorMessage = 'Network error. Please check your connection and try again.';
+      }
+      
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': errorMessage,
+      };
+    }
+  }
+
+  /// Send ERC-20 Token with User Authentication
+  /// This version requires user password to decrypt their wallet
+  static Future<Map<String, dynamic>> sendERC20TokenWithAuth({
+    required String userId,
+    required String password,
+    required String tokenContractAddress,
+    required String toAddress,
+    required double amount,
+    int? gasLimit,
+    int? gasPrice,
+  }) async {
+    try {
+      // Authenticate and decrypt wallet
+      final authResult = await authenticateAndDecryptPolygonWallet(
+        userId,
+        password,
+      );
+
+      if (!authResult['success']) {
+        throw Exception('Authentication failed: ${authResult['error']}');
+      }
+
+      final privateKey = authResult['privateKey'] as String;
+      final fromAddress = authResult['address'] as String;
+
+      print('🔐 [ERC20] User authenticated: ${fromAddress.substring(0, 10)}...');
+
+      // Use the main sendERC20Token method with user's private key
+      return await sendERC20Token(
+        tokenContractAddress: tokenContractAddress,
+        toAddress: toAddress,
+        amount: amount,
+        distributorPrivateKey: privateKey,
+        gasLimit: gasLimit,
+        gasPrice: gasPrice,
+      );
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Failed to send ERC-20 token',
+      };
+    }
   }
 }

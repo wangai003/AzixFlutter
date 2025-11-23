@@ -11,7 +11,8 @@ class AssetConfig {
   final bool isStablecoin;
   final String? peggedCurrency;
   final String? description;
-  final bool isNative; // For XLM
+  final bool isNative; // For XLM or MATIC
+  final String? contractAddress; // For Polygon ERC-20 tokens
 
   const AssetConfig({
     required this.code,
@@ -24,6 +25,7 @@ class AssetConfig {
     this.peggedCurrency,
     this.description,
     this.isNative = false,
+    this.contractAddress,
   });
 
   /// Create asset from Stellar Asset object
@@ -97,14 +99,15 @@ class AssetConfigs {
     description: 'The native cryptocurrency of the Stellar network',
   );
 
-  /// AKOFA token
+  /// AKOFA token (Polygon ERC-20)
   static const AssetConfig akofa = AssetConfig(
     code: 'AKOFA',
     issuer: 'GAXGCEV2XGCUORUWQ4B2NTRVLKUVDCOQT2EL5C3GY3X72LFR2G3QKSKW',
     name: 'AKOFA Token',
     symbol: 'AKOFA',
-    decimals: 7,
-    description: 'AKOFA ecosystem token',
+    decimals: 18, // ERC-20 tokens typically use 18 decimals
+    description: 'AKOFA ecosystem token on Polygon',
+    contractAddress: '0xf1266ACCf0f757c61e4DFDD9EBBcaC05D2Ee375F', // AKOFA contract on Polygon Amoy testnet
   );
 
   /// USD Coin (USDC) on Stellar
