@@ -6,7 +6,6 @@ import 'package:crypto/crypto.dart';
 import 'dart:convert';
 import '../../providers/auth_provider.dart';
 import '../../theme/app_theme.dart';
-import '../../widgets/google_sign_in_button.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'dart:ui';
 
@@ -81,14 +80,6 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
         _passwordController.text,
       );
     }
-
-    // Success is handled by the Wrapper routing
-    // No need to show success message or navigate manually
-  }
-
-  Future<void> _handleGoogleSignIn() async {
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final success = await authProvider.signInWithGoogle();
 
     // Success is handled by the Wrapper routing
     // No need to show success message or navigate manually
@@ -426,45 +417,6 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
                                 ),
                               ],
                             ),
-                          ),
-
-                          const SizedBox(height: 24),
-
-                          // Divider
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Divider(
-                                  color: Colors.white.withOpacity(0.3),
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                ),
-                                child: Text(
-                                  'OR',
-                                  style: TextStyle(
-                                    color: Colors.white.withOpacity(0.7),
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                child: Divider(
-                                  color: Colors.white.withOpacity(0.3),
-                                ),
-                              ),
-                            ],
-                          ),
-
-                          const SizedBox(height: 24),
-
-                          // Google Sign In Button
-                          GoogleSignInButton(
-                            onPressed: authProvider.isLoading
-                                ? () {}
-                                : _handleGoogleSignIn,
-                            isLoading: authProvider.isLoading,
                           ),
 
                           const SizedBox(height: 24),

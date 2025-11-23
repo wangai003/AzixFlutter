@@ -118,44 +118,6 @@ class _WebViewPageState extends State<WebViewPage> {
               ],
             ),
           ),
-          bottomNavigationBar: Consumer<EnhancedWalletProvider>(
-            builder: (context, walletProvider, child) {
-              if (!walletProvider.hasWallet) return const SizedBox.shrink();
-
-              return Container(
-                height: 60,
-                decoration: BoxDecoration(
-                  color: Colors.transparent,
-                  border: Border(
-                    top: BorderSide(
-                      color: AppTheme.primaryGold.withOpacity(0.3),
-                      width: 1,
-                    ),
-                  ),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    _buildBottomNavItem(
-                      icon: Icons.payment,
-                      label: 'Pay',
-                      onTap: () => _showSendOptions(context, walletProvider),
-                    ),
-                    _buildBottomNavItem(
-                      icon: Icons.qr_code_scanner,
-                      label: 'Receive',
-                      onTap: () => _showReceiveQR(context, walletProvider),
-                    ),
-                    _buildBottomNavItem(
-                      icon: Icons.account_balance_wallet,
-                      label: 'Balance',
-                      onTap: () => _showQuickBalance(context, walletProvider),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
         );
       },
     );
@@ -740,32 +702,6 @@ class _WebViewPageState extends State<WebViewPage> {
           ],
         );
       },
-    );
-  }
-
-  Widget _buildBottomNavItem({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return Expanded(
-      child: InkWell(
-        onTap: onTap,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: AppTheme.primaryGold, size: 24),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: AppTheme.bodySmall.copyWith(
-                color: AppTheme.white,
-                fontSize: 10,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
