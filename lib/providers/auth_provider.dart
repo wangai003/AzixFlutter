@@ -65,6 +65,11 @@ class AuthProvider extends ChangeNotifier {
       final user = userCredential.user;
 
       if (user != null) {
+        // Immediately reflect authenticated state to avoid relying on a page reload
+        _user = user;
+        _authState = AuthState.authenticated;
+        _error = null;
+
         // Check if user document exists
         final userDoc = await _authService.getUserDocument(user.uid);
 
@@ -129,6 +134,11 @@ class AuthProvider extends ChangeNotifier {
       final user = userCredential.user;
 
       if (user != null) {
+        // Immediately reflect authenticated state so Wrapper can advance without a reload
+        _user = user;
+        _authState = AuthState.authenticated;
+        _error = null;
+
         // Send email verification
         await _authService.sendEmailVerification();
 
@@ -182,6 +192,11 @@ class AuthProvider extends ChangeNotifier {
       final user = userCredential.user;
 
       if (user != null) {
+        // Immediately reflect authenticated state for navigation
+        _user = user;
+        _authState = AuthState.authenticated;
+        _error = null;
+
         // Check if user document exists
         final userDoc = await _authService.getUserDocument(user.uid);
 

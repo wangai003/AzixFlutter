@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../models/raffle_model.dart';
 import '../../services/raffle_service.dart';
 import '../../providers/admin_provider.dart';
@@ -22,30 +21,23 @@ class _RaffleCreationScreenState extends State<RaffleCreationScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
-  final _detailedDescriptionController = TextEditingController();
   final _maxEntriesController = TextEditingController();
   final _prizeValueController = TextEditingController();
   final _prizeDescriptionController = TextEditingController();
-  final _entryCostController = TextEditingController();
-  final _minBalanceController = TextEditingController();
+  final _imageUrlController = TextEditingController(); // Image URL input
 
   DateTime? _startDate;
   DateTime? _endDate;
-  bool _isPublic = true;
-  EntryRequirement _entryType = EntryRequirement.free;
-  File? _selectedImage;
   bool _isLoading = false;
 
   @override
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
-    _detailedDescriptionController.dispose();
     _maxEntriesController.dispose();
     _prizeValueController.dispose();
     _prizeDescriptionController.dispose();
-    _entryCostController.dispose();
-    _minBalanceController.dispose();
+    _imageUrlController.dispose();
     super.dispose();
   }
 
@@ -55,127 +47,147 @@ class _RaffleCreationScreenState extends State<RaffleCreationScreen> {
     final isDesktop = ResponsiveLayout.isDesktop(context);
     final isTablet = ResponsiveLayout.isTablet(context);
 
-    // Check if user is admin
-    if (!adminProvider.isAdmin) {
-      return Scaffold(
-        backgroundColor: AppTheme.black,
-        appBar: AppBar(
-          backgroundColor: AppTheme.black,
-          title: Text(
-            'Access Denied',
-            style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
-          ),
-          elevation: 0,
-        ),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.admin_panel_settings,
-                color: AppTheme.primaryGold,
-                size: 64,
+    // Strict admin check - refresh status first
+    return FutureBuilder<bool>(
+      future: _verifyAdminStatus(adminProvider),
+      builder: (context, snapshot) {
+        // Show loading while checking
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Scaffold(
+            backgroundColor: AppTheme.black,
+            appBar: AppBar(
+              backgroundColor: AppTheme.black,
+              title: Text(
+                'Verifying Access...',
+                style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
               ),
-              const SizedBox(height: 24),
-              Text(
-                'Admin Access Required',
-                style: AppTheme.headingLarge.copyWith(color: AppTheme.white),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Only administrators can create raffles.',
-                style: AppTheme.bodyLarge.copyWith(color: AppTheme.grey),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 32),
-              CustomButton(
-                text: 'Go Back',
-                onPressed: () => Navigator.pop(context),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return Scaffold(
-      backgroundColor: AppTheme.black,
-      appBar: isDesktop ? null : _buildMobileAppBar(),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: ResponsiveLayout.getValueForScreenType<double>(
-              context: context,
-              mobile: 24.0,
-              tablet: 48.0,
-              desktop: 64.0,
-              largeDesktop: 80.0,
+              elevation: 0,
             ),
-            vertical: 24.0,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Desktop header
-              if (isDesktop) _buildDesktopHeader(),
+            body: const Center(
+              child: CircularProgressIndicator(color: AppTheme.primaryGold),
+            ),
+          );
+        }
 
-              // Form
-              Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Basic Information
-                    _buildSectionHeader('Basic Information'),
-                    const SizedBox(height: 16),
-                    _buildBasicInfoSection(),
-
-                    const SizedBox(height: 32),
-
-                    // Dates and Settings
-                    _buildSectionHeader('Dates & Settings'),
-                    const SizedBox(height: 16),
-                    _buildDatesAndSettingsSection(),
-
-                    const SizedBox(height: 32),
-
-                    // Entry Requirements
-                    _buildSectionHeader('Entry Requirements'),
-                    const SizedBox(height: 16),
-                    _buildEntryRequirementsSection(),
-
-                    const SizedBox(height: 32),
-
-                    // Prize Details
-                    _buildSectionHeader('Prize Details'),
-                    const SizedBox(height: 16),
-                    _buildPrizeDetailsSection(),
-
-                    const SizedBox(height: 32),
-
-                    // Image Upload
-                    _buildSectionHeader('Raffle Image (Optional)'),
-                    const SizedBox(height: 16),
-                    _buildImageUploadSection(),
-
-                    const SizedBox(height: 48),
-
-                    // Create Button
-                    CustomButton(
-                      text: 'Create Raffle',
-                      onPressed: _isLoading ? null : () => _createRaffle(),
-                      isLoading: _isLoading,
-                      width: double.infinity,
-                    ),
-
-                    const SizedBox(height: 24),
-                  ],
-                ),
+        // Check if user is admin
+        final isAdmin = snapshot.data ?? false;
+        if (!isAdmin) {
+          return Scaffold(
+            backgroundColor: AppTheme.black,
+            appBar: AppBar(
+              backgroundColor: AppTheme.black,
+              title: Text(
+                'Access Denied',
+                style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
               ),
-            ],
+              elevation: 0,
+            ),
+            body: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.admin_panel_settings,
+                    color: AppTheme.red,
+                    size: 64,
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Admin Access Required',
+                    style: AppTheme.headingLarge.copyWith(color: AppTheme.white),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Only administrators can create raffles.\n\nYour current role does not have permission to access this feature.',
+                    style: AppTheme.bodyLarge.copyWith(color: AppTheme.grey),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 32),
+                  CustomButton(
+                    text: 'Go Back',
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        // User is admin - show creation form
+        return Scaffold(
+          backgroundColor: AppTheme.black,
+          appBar: isDesktop ? null : _buildMobileAppBar(),
+          body: SingleChildScrollView(
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: ResponsiveLayout.getValueForScreenType<double>(
+                  context: context,
+                  mobile: 24.0,
+                  tablet: 48.0,
+                  desktop: 64.0,
+                  largeDesktop: 80.0,
+                ),
+                vertical: 24.0,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Desktop header
+                  if (isDesktop) _buildDesktopHeader(),
+
+                  // Form
+                  Form(
+                    key: _formKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Basic Information
+                        _buildSectionHeader('Raffle Information'),
+                        const SizedBox(height: 16),
+                        _buildBasicInfoSection(),
+
+                        const SizedBox(height: 32),
+
+                        // Prize Details
+                        _buildSectionHeader('Prize Details (Gift Voucher)'),
+                        const SizedBox(height: 16),
+                        _buildPrizeDetailsSection(),
+
+                        const SizedBox(height: 32),
+
+                        // Dates and Settings
+                        _buildSectionHeader('Raffle Duration'),
+                        const SizedBox(height: 16),
+                        _buildDatesAndSettingsSection(),
+
+                        const SizedBox(height: 32),
+
+                        // Image URL
+                        _buildSectionHeader('Raffle Image (Optional)'),
+                        const SizedBox(height: 16),
+                        _buildImageUrlSection(),
+
+                        const SizedBox(height: 48),
+
+                        // Create Button
+                        CustomButton(
+                          text: 'Create Raffle',
+                          onPressed: _isLoading ? null : () => _createRaffle(),
+                          isLoading: _isLoading,
+                          width: double.infinity,
+                          icon: Icons.add_circle,
+                        ),
+
+                        const SizedBox(height: 24),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -261,15 +273,6 @@ class _RaffleCreationScreenState extends State<RaffleCreationScreen> {
           const SizedBox(height: 16),
 
           CustomTextField(
-            controller: _detailedDescriptionController,
-            label: 'Detailed Description (Optional)',
-            hint: 'Provide additional details, rules, or terms',
-            maxLines: 5,
-          ),
-
-          const SizedBox(height: 16),
-
-          CustomTextField(
             controller: _maxEntriesController,
             label: 'Maximum Entries',
             hint: 'Maximum number of participants (e.g., 1000)',
@@ -321,123 +324,35 @@ class _RaffleCreationScreenState extends State<RaffleCreationScreen> {
             firstDate: _startDate ?? DateTime.now(),
           ),
 
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
 
-          // Public/Private Toggle
-          Row(
-            children: [
-              Text(
-                'Make Raffle Public',
-                style: AppTheme.bodyLarge.copyWith(color: AppTheme.white),
-              ),
-              const Spacer(),
-              Switch(
-                value: _isPublic,
-                onChanged: (value) => setState(() => _isPublic = value),
-                activeColor: AppTheme.primaryGold,
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 8),
-
-          Text(
-            _isPublic
-                ? 'Anyone can see and enter this raffle'
-                : 'Only invited users can see and enter this raffle',
-            style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEntryRequirementsSection() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppTheme.darkGrey,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        children: [
-          // Entry Type
-          Text(
-            'Entry Type',
-            style: AppTheme.labelLarge.copyWith(color: AppTheme.white),
-          ),
-
-          const SizedBox(height: 12),
-
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: EntryRequirement.values.map((type) {
-              return ChoiceChip(
-                label: Text(
-                  _getEntryTypeDisplayName(type),
-                  style: AppTheme.bodyMedium.copyWith(
-                    color: _entryType == type ? AppTheme.black : AppTheme.white,
+          // Info: All raffles are public
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryGold.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppTheme.primaryGold.withOpacity(0.3)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, color: AppTheme.primaryGold, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'All raffles are public and visible to everyone',
+                    style: AppTheme.bodySmall.copyWith(color: AppTheme.white),
                   ),
                 ),
-                selected: _entryType == type,
-                onSelected: (selected) {
-                  if (selected) {
-                    setState(() => _entryType = type);
-                  }
-                },
-                selectedColor: AppTheme.primaryGold,
-                backgroundColor: AppTheme.grey.withOpacity(0.2),
-              );
-            }).toList(),
+              ],
+            ),
           ),
-
-          const SizedBox(height: 24),
-
-          // Conditional fields based on entry type
-          if (_entryType == EntryRequirement.purchase)
-            CustomTextField(
-              controller: _entryCostController,
-              label: 'Entry Cost (AKOFA)',
-              hint: 'Amount of AKOFA required to enter',
-              keyboardType: TextInputType.numberWithOptions(decimal: true),
-              validator: (value) {
-                if (_entryType == EntryRequirement.purchase) {
-                  if (value == null || value.isEmpty) {
-                    return 'Entry cost is required';
-                  }
-                  final cost = double.tryParse(value);
-                  if (cost == null || cost <= 0) {
-                    return 'Please enter a valid amount';
-                  }
-                }
-                return null;
-              },
-            ),
-
-          if (_entryType == EntryRequirement.walletBalance)
-            CustomTextField(
-              controller: _minBalanceController,
-              label: 'Minimum Balance (AKOFA)',
-              hint: 'Minimum AKOFA balance required',
-              keyboardType: TextInputType.numberWithOptions(decimal: true),
-              validator: (value) {
-                if (_entryType == EntryRequirement.walletBalance) {
-                  if (value == null || value.isEmpty) {
-                    return 'Minimum balance is required';
-                  }
-                  final balance = double.tryParse(value);
-                  if (balance == null || balance <= 0) {
-                    return 'Please enter a valid amount';
-                  }
-                }
-                return null;
-              },
-            ),
         ],
       ),
     );
   }
+
+  // Removed _buildEntryRequirementsSection - entry is always free now
 
   Widget _buildPrizeDetailsSection() {
     return Container(
@@ -450,16 +365,12 @@ class _RaffleCreationScreenState extends State<RaffleCreationScreen> {
         children: [
           CustomTextField(
             controller: _prizeValueController,
-            label: 'Prize Value (AKOFA)',
-            hint: 'Total value of the prize in AKOFA',
-            keyboardType: TextInputType.numberWithOptions(decimal: true),
+            label: 'Prize Value',
+            hint: 'e.g., \$50 Amazon Gift Card, \$100 Voucher',
+            keyboardType: TextInputType.text,
             validator: (value) {
               if (value == null || value.isEmpty) {
                 return 'Prize value is required';
-              }
-              final prizeValue = double.tryParse(value);
-              if (prizeValue == null || prizeValue <= 0) {
-                return 'Please enter a valid prize value';
               }
               return null;
             },
@@ -470,7 +381,7 @@ class _RaffleCreationScreenState extends State<RaffleCreationScreen> {
           CustomTextField(
             controller: _prizeDescriptionController,
             label: 'Prize Description',
-            hint: 'Describe what the winner will receive',
+            hint: 'Describe the gift voucher details',
             maxLines: 3,
             validator: (value) {
               if (value == null || value.isEmpty) {
@@ -487,7 +398,7 @@ class _RaffleCreationScreenState extends State<RaffleCreationScreen> {
     );
   }
 
-  Widget _buildImageUploadSection() {
+  Widget _buildImageUrlSection() {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -496,85 +407,64 @@ class _RaffleCreationScreenState extends State<RaffleCreationScreen> {
       ),
       child: Column(
         children: [
-          if (_selectedImage != null)
+          CustomTextField(
+            controller: _imageUrlController,
+            label: 'Image URL',
+            hint: 'Paste image URL here (e.g., https://example.com/image.jpg)',
+            keyboardType: TextInputType.url,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Tip: Upload your image to a service like Imgur or use a direct image link',
+            style: AppTheme.bodySmall.copyWith(
+              color: AppTheme.grey,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+          if (_imageUrlController.text.isNotEmpty) ...[
+            const SizedBox(height: 16),
             Container(
               height: 200,
-              width: double.infinity,
-              decoration: BoxDecoration(
+              child: ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                image: DecorationImage(
-                  image: FileImage(_selectedImage!),
+                child: Image.network(
+                  _imageUrlController.text,
                   fit: BoxFit.cover,
-                ),
-              ),
-              child: Stack(
-                children: [
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: IconButton(
-                      onPressed: () => setState(() => _selectedImage = null),
-                      icon: const Icon(Icons.close, color: AppTheme.white),
-                      style: IconButton.styleFrom(
-                        backgroundColor: AppTheme.black.withOpacity(0.7),
+                  errorBuilder: (context, error, stackTrace) {
+                    return Container(
+                      color: AppTheme.black,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.error_outline, color: AppTheme.red, size: 48),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Invalid Image URL',
+                            style: AppTheme.bodyMedium.copyWith(color: AppTheme.red),
+                          ),
+                        ],
                       ),
-                    ),
-                  ),
-                ],
-              ),
-            )
-          else
-            Container(
-              height: 120,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                border: Border.all(color: AppTheme.grey.withOpacity(0.3)),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.image, color: AppTheme.grey, size: 48),
-                  const SizedBox(height: 8),
-                  Text(
-                    'No image selected',
-                    style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
-                  ),
-                ],
+                    );
+                  },
+                  loadingBuilder: (context, child, loadingProgress) {
+                    if (loadingProgress == null) return child;
+                    return Container(
+                      color: AppTheme.black,
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          color: AppTheme.primaryGold,
+                          value: loadingProgress.expectedTotalBytes != null
+                              ? loadingProgress.cumulativeBytesLoaded /
+                                  loadingProgress.expectedTotalBytes!
+                              : null,
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ),
             ),
-
-          const SizedBox(height: 16),
-
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _pickImage(ImageSource.gallery),
-                  icon: const Icon(Icons.photo_library),
-                  label: const Text('Gallery'),
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: AppTheme.primaryGold),
-                    foregroundColor: AppTheme.primaryGold,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _pickImage(ImageSource.camera),
-                  icon: const Icon(Icons.camera_alt),
-                  label: const Text('Camera'),
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: AppTheme.primaryGold),
-                    foregroundColor: AppTheme.primaryGold,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                ),
-              ),
-            ],
-          ),
+          ],
         ],
       ),
     );
@@ -662,7 +552,7 @@ class _RaffleCreationScreenState extends State<RaffleCreationScreen> {
                   const SizedBox(height: 4),
                   Text(
                     selectedDate != null
-                        ? '${selectedDate.day}/${selectedDate.month}/${selectedDate.year} ${selectedDate.hour}:${selectedDate.minute.toString().padLeft(2, '0')}'
+                        ? _formatDateTime(selectedDate)
                         : 'Select date and time',
                     style: AppTheme.bodyMedium.copyWith(
                       color: selectedDate != null
@@ -680,27 +570,20 @@ class _RaffleCreationScreenState extends State<RaffleCreationScreen> {
     );
   }
 
-  Future<void> _pickImage(ImageSource source) async {
-    try {
-      final picker = ImagePicker();
-      final pickedFile = await picker.pickImage(
-        source: source,
-        maxWidth: 1920,
-        maxHeight: 1080,
-        imageQuality: 85,
-      );
-
-      if (pickedFile != null) {
-        setState(() => _selectedImage = File(pickedFile.path));
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to pick image: $e'),
-          backgroundColor: AppTheme.red,
-        ),
-      );
-    }
+  /// Format DateTime to show date and time in readable format with AM/PM
+  String _formatDateTime(DateTime dateTime) {
+    final months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    
+    // Convert to 12-hour format
+    final hour12 = dateTime.hour % 12;
+    final hour = hour12 == 0 ? 12 : hour12;
+    final amPm = dateTime.hour < 12 ? 'AM' : 'PM';
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    
+    return '${dateTime.day} ${months[dateTime.month - 1]} ${dateTime.year} at ${hour}:${minute} $amPm';
   }
 
   Future<void> _createRaffle() async {
@@ -732,53 +615,30 @@ class _RaffleCreationScreenState extends State<RaffleCreationScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // Prepare entry requirements
-      final entryRequirements = <String, dynamic>{
-        'type': _entryType.toString().split('.').last,
-      };
-
-      if (_entryType == EntryRequirement.purchase &&
-          _entryCostController.text.isNotEmpty) {
-        entryRequirements['cost'] = double.parse(_entryCostController.text);
-      }
-
-      if (_entryType == EntryRequirement.walletBalance &&
-          _minBalanceController.text.isNotEmpty) {
-        entryRequirements['minBalance'] = double.parse(
-          _minBalanceController.text,
-        );
-      }
-
-      // Prepare prize details
+      // Prepare prize details for gift voucher
       final prizeDetails = <String, dynamic>{
-        'type': 'akofa',
-        'value': double.parse(_prizeValueController.text),
+        'type': 'gift_voucher',
+        'value': _prizeValueController.text,
         'description': _prizeDescriptionController.text,
+        'totalValue': _prizeValueController.text,
       };
 
-      // Upload image if selected
-      String? imageUrl;
-      if (_selectedImage != null) {
-        // TODO: Implement image upload to Firebase Storage
-        // imageUrl = await RaffleService.uploadRaffleImage(...);
-      }
+      // Get image URL if provided
+      final imageUrl = _imageUrlController.text.trim().isNotEmpty
+          ? _imageUrlController.text.trim()
+          : null;
 
-      // Create the raffle
+      // Create the raffle (simplified - entry is always free)
       final raffleId = await RaffleService.createRaffle(
         creatorId: user.uid,
         creatorName: user.displayName ?? 'Anonymous',
         title: _titleController.text,
         description: _descriptionController.text,
-        entryRequirements: entryRequirements,
         prizeDetails: prizeDetails,
         maxEntries: int.parse(_maxEntriesController.text),
         startDate: _startDate!,
         endDate: _endDate!,
-        detailedDescription: _detailedDescriptionController.text.isNotEmpty
-            ? _detailedDescriptionController.text
-            : null,
         imageUrl: imageUrl,
-        isPublic: _isPublic,
       );
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -802,18 +662,37 @@ class _RaffleCreationScreenState extends State<RaffleCreationScreen> {
     }
   }
 
-  String _getEntryTypeDisplayName(EntryRequirement type) {
-    switch (type) {
-      case EntryRequirement.free:
-        return 'Free';
-      case EntryRequirement.purchase:
-        return 'Purchase';
-      case EntryRequirement.referral:
-        return 'Referral';
-      case EntryRequirement.socialShare:
-        return 'Social Share';
-      case EntryRequirement.walletBalance:
-        return 'Wallet Balance';
+  /// Verify admin status with server-side check
+  Future<bool> _verifyAdminStatus(AdminProvider adminProvider) async {
+    try {
+      // Refresh admin status first
+      await adminProvider.refreshAdminStatus();
+      
+      // Double-check with provider
+      if (!adminProvider.isAdmin) {
+        return false;
+      }
+
+      // Additional server-side verification
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return false;
+
+      // Check user role directly from Firestore
+      final userDoc = await FirebaseFirestore.instance
+          .collection('USER')
+          .doc(user.uid)
+          .get();
+
+      if (!userDoc.exists) return false;
+
+      final userData = userDoc.data() as Map<String, dynamic>?;
+      final role = userData?['role'] as String?;
+
+      // Strict check: Only admin or super_admin (NOT vendor)
+      return role == 'admin' || role == 'super_admin';
+    } catch (e) {
+      print('Error verifying admin status: $e');
+      return false;
     }
   }
 }

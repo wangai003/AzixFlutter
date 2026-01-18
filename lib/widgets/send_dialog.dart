@@ -77,6 +77,9 @@ class _SendDialogState extends State<SendDialog> {
           'balance': token['balance'].toString(),
           'name': token['name'] ?? entry.key,
           'blockchain': 'polygon',
+          'contractAddress': token['contractAddress'],
+          'decimals': token['decimals'],
+          'isNative': token['isNative'] ?? false,
         });
       }
     }
@@ -117,6 +120,7 @@ class _SendDialogState extends State<SendDialog> {
                   'blockchain': 'polygon',
                   'contractAddress': token['contractAddress'],
                   'decimals': token['decimals'],
+                  'isNative': token['isNative'] ?? false,
                 });
               }
             }
@@ -713,13 +717,43 @@ class _SendDialogState extends State<SendDialog> {
           final user = authProvider.user;
 
           if (user != null) {
-            // Send Polygon transaction
-            final result = await PolygonWalletService.sendMaticTransaction(
-              userId: user.uid,
-              password: password,
-              toAddress: destinationAddress,
-              amountMatic: double.parse(amount),
+            // Determine asset details
+            final selectedAsset = _availableAssets.firstWhere(
+              (asset) => asset['code'] == _selectedAssetCode,
+              orElse: () => {
+                'code': _selectedAssetCode,
+                'isNative': _selectedAssetCode.toUpperCase() == 'MATIC',
+                'contractAddress': '',
+              },
             );
+            final isNative = selectedAsset['isNative'] == true ||
+                _selectedAssetCode.toUpperCase() == 'MATIC';
+            final contractAddress =
+                (selectedAsset['contractAddress'] ?? '').toString();
+
+            if (!isNative && contractAddress.isEmpty) {
+              setState(() {
+                _isLoading = false;
+                _error = 'Token contract not found for $_selectedAssetCode';
+              });
+              return;
+            }
+
+            // Send Polygon transaction (MATIC vs ERC-20)
+            final result = isNative
+                ? await PolygonWalletService.sendMaticTransaction(
+                    userId: user.uid,
+                    password: password,
+                    toAddress: destinationAddress,
+                    amountMatic: double.parse(amount),
+                  )
+                : await PolygonWalletService.sendERC20TokenWithAuth(
+                    userId: user.uid,
+                    password: password,
+                    tokenContractAddress: contractAddress,
+                    toAddress: destinationAddress,
+                    amount: double.parse(amount),
+                  );
 
             if (result['success'] == true) {
               if (mounted) {
@@ -730,6 +764,32 @@ class _SendDialogState extends State<SendDialog> {
                     backgroundColor: Colors.green,
                   ),
                 );
+
+                // Surface gas sponsor details for QA visibility (if applicable)
+                if (result['maticToppedUp'] == true) {
+                  final feeToken = result['feeToken'] as String?;
+                  final feeCharged = result['feeCharged'] as double?;
+                  final feeTxHash = result['feeTxHash'] as String?;
+                  final topUpTxHash = result['topUpTxHash'] as String?;
+
+                  final details = <String>[
+                    if (feeCharged != null && feeToken != null)
+                      'Fee: ${feeCharged.toStringAsFixed(6)} $feeToken',
+                    if (feeTxHash != null && feeTxHash.isNotEmpty)
+                      'Fee Tx: ${feeTxHash.substring(0, 8)}...',
+                    if (topUpTxHash != null && topUpTxHash.isNotEmpty)
+                      'Top-up Tx: ${topUpTxHash.substring(0, 8)}...',
+                  ].join(' | ');
+
+                  if (details.isNotEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Gas sponsored. $details'),
+                        backgroundColor: Colors.orange,
+                      ),
+                    );
+                  }
+                }
               }
             } else {
               setState(() {

@@ -1,0 +1,217 @@
+const { ethers } = require('ethers');
+const { 
+  createSmartAccountClient,
+  BiconomySmartAccountV2,
+  PaymasterMode 
+} = require('@biconomy/account');
+
+/**
+ * Biconomy SDK Service for TRUE Gasless Transactions
+ * Handles all Biconomy SDK integration
+ */
+class BiconomySDKService {
+  constructor() {
+    this.provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+    this.chainId = parseInt(process.env.CHAIN_ID);
+    
+    // Server signer (keeps private key secure on backend)
+    // This is YOUR wallet that sponsors transactions
+    this.serverSigner = new ethers.Wallet(
+      process.env.SERVER_PRIVATE_KEY, // Your backend wallet private key
+      this.provider
+    );
+    
+    console.log('✅ Biconomy SDK Service initialized');
+    console.log(`📍 Server address: ${this.serverSigner.address}`);
+  }
+
+  /**
+   * Create or get Smart Account for user
+   * Uses Biconomy Smart Account for gasless transactions
+   */
+  async getSmartAccount(userAddress) {
+    try {
+      // Create Smart Account client with Biconomy SDK
+      const smartAccount = await createSmartAccountClient({
+        signer: this.serverSigner, // Backend signer
+        bundlerUrl: process.env.BICONOMY_BUNDLER_URL,
+        biconomyPaymasterApiKey: process.env.BICONOMY_API_KEY,
+        rpcUrl: process.env.RPC_URL,
+      });
+
+      console.log(`✅ Smart Account created for user: ${userAddress}`);
+      
+      return smartAccount;
+    } catch (error) {
+      console.error('❌ Error creating Smart Account:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Send gasless ERC-20 transaction using Biconomy
+   * TRUE GASLESS - User pays $0, you pay gas
+   */
+  async sendGaslessERC20({
+    userAddress,
+    tokenAddress,
+    toAddress,
+    amount,
+    decimals = 18
+  }) {
+    try {
+      console.log('🚀 [BICONOMY SDK] Preparing gasless transaction...');
+      
+      // Get Smart Account
+      const smartAccount = await this.getSmartAccount(userAddress);
+      
+      // Get Smart Account address
+      const smartAccountAddress = await smartAccount.getAccountAddress();
+      console.log(`📍 Smart Account: ${smartAccountAddress}`);
+
+      // Create ERC-20 contract interface
+      const tokenContract = new ethers.Contract(
+        tokenAddress,
+        [
+          'function transfer(address to, uint256 amount) returns (bool)',
+          'function balanceOf(address) view returns (uint256)',
+          'function decimals() view returns (uint8)',
+          'function symbol() view returns (string)'
+        ],
+        this.provider
+      );
+
+      // Get token info
+      const symbol = await tokenContract.symbol();
+      console.log(`💰 Sending ${amount} ${symbol}`);
+
+      // Convert amount to token units
+      const amountInUnits = ethers.parseUnits(amount.toString(), decimals);
+
+      // Check Smart Account balance
+      const balance = await tokenContract.balanceOf(smartAccountAddress);
+      if (balance < amountInUnits) {
+        throw new Error(`Insufficient ${symbol} balance in Smart Account. Please fund the Smart Account first.`);
+      }
+
+      // Encode transfer function
+      const data = tokenContract.interface.encodeFunctionData('transfer', [
+        toAddress,
+        amountInUnits
+      ]);
+
+      // Create transaction
+      const transaction = {
+        to: tokenAddress,
+        data: data,
+        value: 0
+      };
+
+      console.log('📤 [BICONOMY SDK] Sending transaction with sponsored gas...');
+
+      // Send transaction with SPONSORED paymaster mode
+      const userOpResponse = await smartAccount.sendTransaction(transaction, {
+        paymasterServiceData: { mode: PaymasterMode.SPONSORED }
+      });
+
+      // Wait for transaction to be mined
+      const { transactionHash, receipt } = await userOpResponse.waitForTxHash();
+      
+      console.log('✅ [BICONOMY SDK] Gasless transaction successful!');
+      console.log(`📋 TX Hash: ${transactionHash}`);
+      console.log(`⛽ Gas paid by: Backend (User paid: $0.00)`);
+
+      return {
+        success: true,
+        txHash: transactionHash,
+        receipt: receipt,
+        smartAccount: smartAccountAddress,
+        isGasless: true,
+        gasPaymentMethod: 'Sponsored by backend',
+        userPaid: '0',
+      };
+
+    } catch (error) {
+      console.error('❌ [BICONOMY SDK] Error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Estimate gas cost (that will be sponsored)
+   */
+  async estimateGasCost({
+    userAddress,
+    tokenAddress,
+    toAddress,
+    amount,
+    decimals = 18
+  }) {
+    try {
+      const tokenContract = new ethers.Contract(
+        tokenAddress,
+        ['function transfer(address to, uint256 amount)'],
+        this.provider
+      );
+
+      const amountInUnits = ethers.parseUnits(amount.toString(), decimals);
+      const data = tokenContract.interface.encodeFunctionData('transfer', [
+        toAddress,
+        amountInUnits
+      ]);
+
+      // Estimate gas
+      const gasEstimate = await this.provider.estimateGas({
+        from: userAddress,
+        to: tokenAddress,
+        data: data
+      });
+
+      const feeData = await this.provider.getFeeData();
+      const gasCostWei = gasEstimate * feeData.gasPrice;
+      const gasCostMatic = ethers.formatEther(gasCostWei);
+
+      return {
+        gasLimit: gasEstimate.toString(),
+        gasPrice: feeData.gasPrice.toString(),
+        gasCostMatic: gasCostMatic,
+        gasCostUSD: (parseFloat(gasCostMatic) * 0.70).toFixed(6),
+        userPays: '0', // Sponsored!
+        sponsoredBy: 'Backend'
+      };
+
+    } catch (error) {
+      console.error('❌ Error estimating gas:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get Smart Account address for user
+   */
+  async getSmartAccountAddress(userAddress) {
+    try {
+      const smartAccount = await this.getSmartAccount(userAddress);
+      return await smartAccount.getAccountAddress();
+    } catch (error) {
+      console.error('❌ Error getting Smart Account address:', error);
+      throw error;
+    }
+  }
+}
+
+// Singleton instance
+let instance = null;
+
+/**
+ * Get Biconomy SDK Service instance
+ */
+function getBiconomyService() {
+  if (!instance) {
+    instance = new BiconomySDKService();
+  }
+  return instance;
+}
+
+module.exports = { getBiconomyService, BiconomySDKService };
+

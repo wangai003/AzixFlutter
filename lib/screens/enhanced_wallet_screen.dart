@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -15,18 +16,23 @@ import '../widgets/qr_code_display.dart';
 import '../widgets/token_sell_dialog.dart';
 import '../widgets/card_payment_dialog.dart';
 import '../widgets/bank_transfer_dialog.dart';
+import '../widgets/token_purchase_dialog.dart';
 import '../widgets/moonpay_purchase_dialog.dart';
 import '../widgets/moonpay_button.dart';
 import '../widgets/custom_thirdweb_onramp.dart';
 import '../widgets/wallet_auth_dialog.dart';
+import '../widgets/store_payment_dialog.dart';
 import 'buy_crypto_screen.dart';
+import 'wallet_connect_screen.dart';
 import '../services/secure_wallet_service.dart';
 import '../services/akofa_tag_service.dart';
 import '../services/biometric_service.dart';
 import '../services/polygon_wallet_service.dart';
+import '../services/biconomy_backend_service.dart';
 import '../providers/auth_provider.dart' as local_auth;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'secure_wallet_creation_screen.dart';
+import '../models/asset_config.dart';
 
 class EnhancedWalletScreen extends StatefulWidget {
   const EnhancedWalletScreen({super.key});
@@ -471,6 +477,8 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
   }
 
   Widget _buildOverviewTab(EnhancedWalletProvider walletProvider) {
+    // Overview tab displays assets from the derived user's wallet address
+    // The provider ensures the correct derived address is used for fetching balances
     return RefreshIndicator(
       onRefresh: _refreshWallet,
       color: AppTheme.primaryGold,
@@ -480,7 +488,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Wallet Assets Overview
+            // Wallet Assets Overview - displays assets from derived wallet address
             _buildWalletAssetsOverview(walletProvider),
 
             const SizedBox(height: 24),
@@ -511,6 +519,9 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
   }
 
   Widget _buildTransactionsTab(EnhancedWalletProvider walletProvider) {
+    // Transactions tab displays only transactions from the derived user's wallet address
+    // The provider ensures the correct derived address is used for fetching transactions
+    
     // Auto-load transactions when tab opens
     if (walletProvider.transactions.isEmpty && !walletProvider.isLoading) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -540,7 +551,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                     itemBuilder: (context, index) {
                       final tx = walletProvider.transactions[index];
                       
-                      // Extract data safely
+                      // Extract data safely - all from derived wallet address
                       final type = tx['type'] as String? ?? 'send';
                       final asset = tx['asset'] as String? ?? 'MATIC';
                       final value = (tx['value'] as num? ?? 0).toDouble();
@@ -784,9 +795,9 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
             const SizedBox(width: 12),
             Expanded(
               child: _buildActionButton(
-                'Buy AKOFA',
+                'Buy Tokens',
                 Icons.shopping_cart,
-                () => _showPurchaseDialog(walletProvider),
+                () => _showTokenPurchaseDialog(walletProvider),
                 disabled: false, // Polygon doesn't require trustlines
               ),
             ),
@@ -1117,6 +1128,71 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
           style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
         ),
         const SizedBox(height: 16),
+        
+        // Wallet Address Display (Derived Address)
+        if (walletProvider.address != null)
+          Container(
+            padding: const EdgeInsets.all(12),
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+              color: AppTheme.darkGrey.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: AppTheme.primaryGold.withOpacity(0.2),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.account_balance_wallet, 
+                  color: AppTheme.primaryGold.withOpacity(0.7), 
+                  size: 16
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Wallet Address (Derived)',
+                        style: TextStyle(
+                          color: AppTheme.grey,
+                          fontSize: 11,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _formatAddress(walletProvider.address!),
+                        style: TextStyle(
+                          color: AppTheme.white.withOpacity(0.9),
+                          fontSize: 12,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.copy, 
+                    color: AppTheme.primaryGold.withOpacity(0.7),
+                    size: 16
+                  ),
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: walletProvider.address!));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Address copied to clipboard'),
+                        backgroundColor: AppTheme.primaryGold,
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                  tooltip: 'Copy address',
+                ),
+              ],
+            ),
+          ),
+        
         Row(
           children: [
             Expanded(
@@ -1830,9 +1906,29 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                       );
                     }),
               ],
-              // Sell Tokens Option
+              // Store Payment Option
               const SizedBox(height: 24),
               Divider(color: AppTheme.primaryGold.withOpacity(0.3)),
+              const SizedBox(height: 12),
+              ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: Colors.orange,
+                  child: const Icon(Icons.shopping_cart, color: Colors.white, size: 20),
+                ),
+                title: Text(
+                  'Store Payment',
+                  style: TextStyle(color: AppTheme.white),
+                ),
+                subtitle: Text(
+                  'Pay for store orders with order ID',
+                  style: TextStyle(color: AppTheme.grey, fontSize: 12),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showStorePaymentDialog();
+                },
+              ),
+              // Sell Tokens Option
               const SizedBox(height: 12),
               ListTile(
                 leading: CircleAvatar(
@@ -1861,6 +1957,10 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
 
   void _showSendAkofaDialog(EnhancedWalletProvider walletProvider) {
     showDialog(context: context, builder: (context) => SendAkofaDialog());
+  }
+
+  void _showStorePaymentDialog() {
+    showStorePaymentDialog(context: context);
   }
 
   void _showSendAssetDialog(
@@ -2226,17 +2326,26 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                         final insufficientAmount = gasEstimate['insufficientAmount'] as double? ?? 0.0;
                         final currentBalance = gasEstimate['currentBalance'] as double? ?? 0.0;
                         
+                        // Check if gasless is available for non-MATIC assets
+                        final canUseGasless = !asset.isNative && asset.code != 'MATIC';
+                        
                         showDialog(
                           context: context,
                           builder: (context) => AlertDialog(
                             backgroundColor: AppTheme.darkGrey,
                             title: Row(
                               children: [
-                                Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+                                Icon(
+                                  canUseGasless ? Icons.bolt : Icons.warning_amber_rounded,
+                                  color: canUseGasless ? Colors.blue : Colors.orange,
+                                  size: 28,
+                                ),
                                 const SizedBox(width: 12),
                                 Text(
-                                  'Insufficient Gas',
-                                  style: TextStyle(color: Colors.orange),
+                                  canUseGasless ? 'Use Gasless Transaction' : 'Insufficient Gas',
+                                  style: TextStyle(
+                                    color: canUseGasless ? Colors.blue : Colors.orange,
+                                  ),
                                 ),
                               ],
                             ),
@@ -2245,16 +2354,20 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'You don\'t have enough MATIC to pay for gas fees.',
+                                  canUseGasless
+                                      ? 'You don\'t have enough MATIC for gas, but you can send this transaction for FREE!'
+                                      : 'You don\'t have enough MATIC to pay for gas fees.',
                                   style: TextStyle(color: AppTheme.white, fontSize: 15),
                                 ),
                                 const SizedBox(height: 16),
                                 Container(
                                   padding: const EdgeInsets.all(12),
                                   decoration: BoxDecoration(
-                                    color: Colors.orange.withOpacity(0.1),
+                                    color: (canUseGasless ? Colors.blue : Colors.orange).withOpacity(0.1),
                                     borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                                    border: Border.all(
+                                      color: (canUseGasless ? Colors.blue : Colors.orange).withOpacity(0.3),
+                                    ),
                                   ),
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -2263,15 +2376,42 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                                       const SizedBox(height: 8),
                                       _buildGasInfoRow('Your MATIC Balance:', '${currentBalance.toStringAsFixed(6)} MATIC'),
                                       const SizedBox(height: 8),
-                                      _buildGasInfoRow('Additional Needed:', '${insufficientAmount.toStringAsFixed(6)} MATIC', isHighlight: true),
+                                      if (!canUseGasless)
+                                        _buildGasInfoRow('Additional Needed:', '${insufficientAmount.toStringAsFixed(6)} MATIC', isHighlight: true),
+                                      if (canUseGasless)
+                                        _buildGasInfoRow('Your Cost (Gasless):', '0.00 MATIC ✨', isHighlight: true),
                                     ],
                                   ),
                                 ),
-                                const SizedBox(height: 16),
-                                Text(
-                                  'Please top up your wallet with MATIC to continue with this transaction.',
-                                  style: TextStyle(color: AppTheme.grey, fontSize: 13),
-                                ),
+                                if (canUseGasless) ...[
+                                  const SizedBox(height: 16),
+                                  Container(
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: Colors.green.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: Colors.green.withOpacity(0.3)),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.check_circle, color: Colors.green, size: 20),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            'Gasless transactions are powered by Biconomy. No MATIC needed!',
+                                            style: TextStyle(color: Colors.green, fontSize: 12),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ] else ...[
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    'Please top up your wallet with MATIC to continue.',
+                                    style: TextStyle(color: AppTheme.grey, fontSize: 13),
+                                  ),
+                                ],
                               ],
                             ),
                             actions: [
@@ -2279,19 +2419,105 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                                 onPressed: () => Navigator.of(context).pop(),
                                 child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
                               ),
-                              ElevatedButton.icon(
-                                onPressed: () {
-                                  Navigator.of(context).pop();
-                                  // Navigate to buy crypto screen or show buy options
-                                  _showBuyCryptoOptions();
-                                },
-                                icon: const Icon(Icons.add_circle_outline),
-                                label: const Text('Top Up'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.orange,
-                                  foregroundColor: Colors.white,
+                              if (canUseGasless)
+                                ElevatedButton.icon(
+                                  onPressed: () async {
+                                    Navigator.of(context).pop();
+                                    
+                                    // Show processing dialog
+                                    showDialog(
+                                      context: context,
+                                      barrierDismissible: false,
+                                      builder: (context) => AlertDialog(
+                                        backgroundColor: AppTheme.darkGrey,
+                                        content: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const CircularProgressIndicator(
+                                              color: Colors.blue,
+                                            ),
+                                            const SizedBox(height: 16),
+                                            Text(
+                                              'Sending gasless transaction...',
+                                              style: TextStyle(color: AppTheme.white),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                    
+                                    try {
+                                      // Send gasless transaction
+                                      final result = await walletProvider.sendAsset(
+                                        recipientAddress: resolvedAddress,
+                                        asset: asset,
+                                        amount: amount,
+                                        memo: memoController.text.trim(),
+                                        password: password,
+                                        forceGasless: true, // Force gasless
+                                      );
+                                      
+                                      // Close processing dialog
+                                      Navigator.of(context).pop();
+                                      
+                                      if (result['success'] == true) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Row(
+                                              children: [
+                                                Icon(Icons.check_circle, color: Colors.white),
+                                                const SizedBox(width: 8),
+                                                Expanded(
+                                                  child: Text(
+                                                    'Gasless transaction successful! ${asset.symbol} sent for FREE ✨',
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            backgroundColor: Colors.green,
+                                            duration: const Duration(seconds: 5),
+                                          ),
+                                        );
+                                      } else {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              'Transaction failed: ${result['error']}',
+                                            ),
+                                            backgroundColor: Colors.red,
+                                          ),
+                                        );
+                                      }
+                                    } catch (e) {
+                                      Navigator.of(context).pop();
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('Error: $e'),
+                                          backgroundColor: Colors.red,
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  icon: const Icon(Icons.bolt),
+                                  label: const Text('Send for FREE'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.blue,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                )
+                              else
+                                ElevatedButton.icon(
+                                  onPressed: () {
+                                    Navigator.of(context).pop();
+                                    _showBuyCryptoOptions();
+                                  },
+                                  icon: const Icon(Icons.add_circle_outline),
+                                  label: const Text('Top Up'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.orange,
+                                    foregroundColor: Colors.white,
+                                  ),
                                 ),
-                              ),
                             ],
                           ),
                         );
@@ -2784,17 +3010,26 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                         final insufficientAmount = gasEstimate['insufficientAmount'] as double? ?? 0.0;
                         final maticBalance = gasEstimate['currentBalance'] as double? ?? 0.0;
                         
+                        // Check if gasless is available for non-MATIC assets
+                        final canUseGasless = !isNative && symbol != 'MATIC';
+                        
                         showDialog(
                           context: context,
                           builder: (context) => AlertDialog(
                             backgroundColor: AppTheme.darkGrey,
                             title: Row(
                               children: [
-                                Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+                                Icon(
+                                  canUseGasless ? Icons.bolt : Icons.warning_amber_rounded,
+                                  color: canUseGasless ? Colors.blue : Colors.orange,
+                                  size: 28,
+                                ),
                                 const SizedBox(width: 12),
                                 Text(
-                                  'Insufficient Gas',
-                                  style: TextStyle(color: Colors.orange),
+                                  canUseGasless ? 'Use Gasless Transaction' : 'Insufficient Gas',
+                                  style: TextStyle(
+                                    color: canUseGasless ? Colors.blue : Colors.orange,
+                                  ),
                                 ),
                               ],
                             ),
@@ -2803,16 +3038,20 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'You don\'t have enough MATIC to pay for gas fees.',
+                                  canUseGasless
+                                      ? 'You don\'t have enough MATIC for gas, but you can send $symbol for FREE!'
+                                      : 'You don\'t have enough MATIC to pay for gas fees.',
                                   style: TextStyle(color: AppTheme.white, fontSize: 15),
                                 ),
                                 const SizedBox(height: 16),
                                 Container(
                                   padding: const EdgeInsets.all(12),
                                   decoration: BoxDecoration(
-                                    color: Colors.orange.withOpacity(0.1),
+                                    color: (canUseGasless ? Colors.blue : Colors.orange).withOpacity(0.1),
                                     borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                                    border: Border.all(
+                                      color: (canUseGasless ? Colors.blue : Colors.orange).withOpacity(0.3),
+                                    ),
                                   ),
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -2821,15 +3060,42 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                                       const SizedBox(height: 8),
                                       _buildGasInfoRow('Your MATIC Balance:', '${maticBalance.toStringAsFixed(6)} MATIC'),
                                       const SizedBox(height: 8),
-                                      _buildGasInfoRow('Additional Needed:', '${insufficientAmount.toStringAsFixed(6)} MATIC', isHighlight: true),
+                                      if (!canUseGasless)
+                                        _buildGasInfoRow('Additional Needed:', '${insufficientAmount.toStringAsFixed(6)} MATIC', isHighlight: true),
+                                      if (canUseGasless)
+                                        _buildGasInfoRow('Your Cost (Gasless):', '0.00 MATIC ✨', isHighlight: true),
                                     ],
                                   ),
                                 ),
-                                const SizedBox(height: 16),
-                                Text(
-                                  'Please top up your wallet with MATIC to continue with this transaction.',
-                                  style: TextStyle(color: AppTheme.grey, fontSize: 13),
-                                ),
+                                if (canUseGasless) ...[
+                                  const SizedBox(height: 16),
+                                  Container(
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: Colors.green.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: Colors.green.withOpacity(0.3)),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.check_circle, color: Colors.green, size: 20),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            'Gasless transactions are powered by Biconomy. No MATIC needed!',
+                                            style: TextStyle(color: Colors.green, fontSize: 12),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ] else ...[
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    'Please top up your wallet with MATIC to continue.',
+                                    style: TextStyle(color: AppTheme.grey, fontSize: 13),
+                                  ),
+                                ],
                               ],
                             ),
                             actions: [
@@ -2837,10 +3103,131 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                                 onPressed: () => Navigator.of(context).pop(),
                                 child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
                               ),
-                              ElevatedButton.icon(
-                                onPressed: () {
-                                  Navigator.of(context).pop();
-                                  _showBuyCryptoOptions();
+                              if (canUseGasless)
+                                ElevatedButton.icon(
+                                  onPressed: () async {
+                                    Navigator.of(context).pop();
+                                    
+                                    // Show processing dialog
+                                    showDialog(
+                                      context: context,
+                                      barrierDismissible: false,
+                                      builder: (context) => AlertDialog(
+                                        backgroundColor: AppTheme.darkGrey,
+                                        content: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const CircularProgressIndicator(
+                                              color: Colors.blue,
+                                            ),
+                                            const SizedBox(height: 16),
+                                            Text(
+                                              'Sending gasless transaction...',
+                                              style: TextStyle(color: AppTheme.white),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                    
+                                    try {
+                                      // Get contract address for ERC-20 tokens
+                                      final contractAddress = token['contractAddress'] as String?;
+                                      
+                                      // Send gasless transaction using provider method
+                                      final result = await walletProvider.sendGaslessERC20(
+                                        recipientAddress: recipientAddress,
+                                        asset: AssetConfig(
+                                          code: symbol,
+                                          symbol: symbol,
+                                          name: name,
+                                          issuer: '',
+                                          isNative: false,
+                                          decimals: 18,
+                                          contractAddress: contractAddress,
+                                        ),
+                                        amount: amount,
+                                        password: password,
+                                      );
+                                      
+                                      // Check if widget is still mounted before using context
+                                      if (!mounted) return;
+                                      
+                                      // Close processing dialog
+                                      Navigator.of(context).pop();
+                                      
+                                      if (result['success'] == true) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Row(
+                                              children: [
+                                                Icon(Icons.check_circle, color: Colors.white),
+                                                const SizedBox(width: 8),
+                                                Expanded(
+                                                  child: Text(
+                                                    'Gasless transaction successful! $symbol sent for FREE ✨',
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            backgroundColor: Colors.green,
+                                            duration: const Duration(seconds: 5),
+                                          ),
+                                        );
+                                      } else {
+                                        // Show specific error messages
+                                        String errorMessage = result['error'] ?? 'Transaction failed';
+                                        IconData errorIcon = Icons.error;
+                                        Color bgColor = Colors.red;
+                                        
+                                        if (result['needsWalletRecreation'] == true) {
+                                          errorIcon = Icons.warning_amber;
+                                        } else if (result['insufficientBalance'] == true) {
+                                          errorIcon = Icons.account_balance_wallet;
+                                          bgColor = Colors.orange;
+                                        }
+                                        
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Row(
+                                              children: [
+                                                Icon(errorIcon, color: Colors.white),
+                                                const SizedBox(width: 8),
+                                                Expanded(
+                                                  child: Text(errorMessage),
+                                                ),
+                                              ],
+                                            ),
+                                            backgroundColor: bgColor,
+                                            duration: const Duration(seconds: 7),
+                                          ),
+                                        );
+                                      }
+                                    } catch (e) {
+                                      // Check if widget is still mounted before using context
+                                      if (mounted) {
+                                        Navigator.of(context).pop();
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Text('Error: $e'),
+                                            backgroundColor: Colors.red,
+                                          ),
+                                        );
+                                      }
+                                    }
+                                  },
+                                  icon: const Icon(Icons.bolt),
+                                  label: const Text('Send for FREE'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.blue,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                )
+                              else
+                                ElevatedButton.icon(
+                                  onPressed: () {
+                                    Navigator.of(context).pop();
+                                    _showBuyCryptoOptions();
                                 },
                                 icon: const Icon(Icons.add_circle_outline),
                                 label: const Text('Top Up'),
@@ -2855,9 +3242,11 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                         return;
                       }
 
+                      if (!mounted) return;
                       Navigator.of(context).pop();
 
                       // Show loading
+                      if (!mounted) return;
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text('Sending $amount $symbol...'),
@@ -2865,8 +3254,10 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                         ),
                       );
 
+                      Map<String, dynamic> result;
+                      
                       try {
-                        final result = isNative
+                        result = isNative
                             ? await walletProvider.sendMatic(
                                 recipientAddress: recipientAddress,
                                 amount: amount,
@@ -2882,13 +3273,25 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
 
                         // Refresh balances
                         await walletProvider.loadBalances();
+                      } catch (e) {
+                        result = {
+                          'success': false,
+                          'error': e.toString(),
+                        };
+                      }
+                      
+                      // Check if widget is still mounted before showing dialogs
+                      if (!mounted) return;
+                      
+                      if (result['success'] == true) {
+                        final isGasless = result['isGasless'] == true || result['sponsored'] == true;
+                        final message = result['message'] as String?;
                         
-                        if (result['success'] == true) {
-                          // Show enhanced success dialog
-                          showDialog(
-                            context: context,
-                            barrierDismissible: true,
-                            builder: (context) => AlertDialog(
+                        // Show enhanced success dialog
+                        showDialog(
+                          context: context,
+                          barrierDismissible: true,
+                          builder: (context) => AlertDialog(
                               backgroundColor: AppTheme.darkGrey,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(16),
@@ -2905,8 +3308,8 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                                       color: Colors.green.withOpacity(0.2),
                                       shape: BoxShape.circle,
                                     ),
-                                    child: const Icon(
-                                      Icons.check_circle,
+                                    child: Icon(
+                                      isGasless ? Icons.flash_on : Icons.check_circle,
                                       color: Colors.green,
                                       size: 32,
                                     ),
@@ -2914,7 +3317,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                                   const SizedBox(width: 12),
                                   Expanded(
                                     child: Text(
-                                      'Transaction Sent!',
+                                      isGasless ? 'Gasless Transaction Sent!' : 'Transaction Sent!',
                                       style: TextStyle(
                                         color: Colors.green,
                                         fontWeight: FontWeight.bold,
@@ -2927,6 +3330,33 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                                 mainAxisSize: MainAxisSize.min,
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
+                                  // Gasless badge if applicable
+                                  if (isGasless) ...[
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.withOpacity(0.2),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: Colors.blue.withOpacity(0.5)),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.stars, color: Colors.blue, size: 18),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            'Gas Sponsored - You Paid \$0.00!',
+                                            style: TextStyle(
+                                              color: Colors.blue,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(height: 16),
+                                  ],
                                   Container(
                                     padding: const EdgeInsets.all(16),
                                     decoration: BoxDecoration(
@@ -2942,6 +3372,10 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                                         _buildGasInfoRow('Amount:', '$amount $symbol'),
                                         const SizedBox(height: 8),
                                         _buildGasInfoRow('To:', '${recipientAddress.substring(0, 10)}...${recipientAddress.substring(recipientAddress.length - 8)}'),
+                                        if (isGasless) ...[
+                                          const SizedBox(height: 8),
+                                          _buildGasInfoRow('Gas Cost:', '\$0.00 (Sponsored)'),
+                                        ],
                                         if (result['txHash'] != null) ...[
                                           const SizedBox(height: 8),
                                           _buildGasInfoRow('TX Hash:', '${(result['txHash'] as String).substring(0, 10)}...'),
@@ -2951,12 +3385,22 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                                   ),
                                   const SizedBox(height: 16),
                                   Text(
-                                    'Your transaction has been broadcast to the network. It may take a few moments to confirm.',
+                                    message ?? 'Your transaction has been broadcast to the network. It may take a few moments to confirm.',
                                     style: TextStyle(color: AppTheme.grey, fontSize: 13),
                                   ),
                                 ],
                               ),
                               actions: [
+                                if (result['txHash'] != null)
+                                  TextButton(
+                                    onPressed: () {
+                                      // Open block explorer
+                                      final txHash = result['txHash'] as String;
+                                      print('View on explorer: https://amoy.polygonscan.com/tx/$txHash');
+                                      // TODO: Add url_launcher to open in browser
+                                    },
+                                    child: Text('View on Explorer', style: TextStyle(color: Colors.blue)),
+                                  ),
                                 ElevatedButton(
                                   onPressed: () => Navigator.of(context).pop(),
                                   style: ElevatedButton.styleFrom(
@@ -2968,12 +3412,12 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                               ],
                             ),
                           );
-                        } else {
-                          // Show enhanced error dialog
-                          showDialog(
-                            context: context,
-                            barrierDismissible: true,
-                            builder: (context) => AlertDialog(
+                      } else {
+                        // Show enhanced error dialog
+                        showDialog(
+                          context: context,
+                          barrierDismissible: true,
+                          builder: (context) => AlertDialog(
                               backgroundColor: AppTheme.darkGrey,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(16),
@@ -3071,36 +3515,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                             ),
                           );
                         }
-                      } catch (e) {
-                        showDialog(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            backgroundColor: AppTheme.darkGrey,
-                            title: Row(
-                              children: [
-                                Icon(Icons.error_outline, color: Colors.red, size: 28),
-                                const SizedBox(width: 12),
-                                Text('Error', style: TextStyle(color: Colors.red)),
-                              ],
-                            ),
-                            content: Text(
-                              'Failed to send $symbol: $e',
-                              style: TextStyle(color: AppTheme.white),
-                            ),
-                            actions: [
-                              ElevatedButton(
-                                onPressed: () => Navigator.of(context).pop(),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.red,
-                                  foregroundColor: Colors.white,
-                                ),
-                                child: const Text('Close'),
-                              ),
-                            ],
-                          ),
-                        );
-                      }
-                    },
+                      },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primaryGold,
                 foregroundColor: AppTheme.black,
@@ -3133,7 +3548,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
         );
       }
       
-      // For ERC-20 tokens
+      // For ERC-20 tokens - use Biconomy sponsorship if available
       final contractAddress = token['contractAddress'] as String?;
       if (contractAddress == null || contractAddress.isEmpty) {
         return {
@@ -3142,6 +3557,73 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
         };
       }
       
+      final userAddress = walletProvider.address;
+      if (userAddress == null) {
+        return {
+          'success': false,
+          'error': 'Wallet address not available',
+        };
+      }
+      
+      // Try to use gasless (backend relay) transaction
+      print('🔄 Attempting gasless transaction via backend relay...');
+      
+      try {
+        // Import needed for transaction signing
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          // Get user's private key to sign the transaction
+          final signedTx = await PolygonWalletService.createSignedERC20Transaction(
+            userId: user.uid,
+            password: password,
+            tokenContractAddress: contractAddress,
+            toAddress: recipientAddress,
+            amount: amount,
+          );
+          
+          if (signedTx['success'] == true) {
+            print('✅ Transaction signed by user');
+            
+            // Send signed transaction to backend for relay
+            final gaslessResult = await BiconomyBackendService.sendGaslessTransaction(
+              signedTransaction: signedTx['signedTransaction'],
+              userAddress: userAddress,
+            );
+            
+            if (gaslessResult['success'] == true) {
+              print('✅ Gasless relay successful!');
+              print('💰 User paid: \$0.00 (gas paid by backend)');
+              print('📋 TX Hash: ${gaslessResult['txHash']}');
+              
+              // Refresh balances and transactions after successful transaction
+              await Future.wait([
+                walletProvider.loadBalances(),
+                walletProvider.loadTransactions(forceRefresh: true),
+              ]);
+              
+              return {
+                'success': true,
+                'txHash': gaslessResult['txHash'],
+                'message': 'Transaction relayed successfully! Gas paid by backend - you paid \$0.00',
+                'isGasless': true,
+                'sponsored': true,
+              };
+            } else {
+              print('⚠️  Backend relay failed: ${gaslessResult['error']}');
+              print('🔄 Falling back to regular transaction...');
+            }
+          } else {
+            print('⚠️  Failed to sign transaction: ${signedTx['error']}');
+            print('🔄 Falling back to regular transaction...');
+          }
+        }
+      } catch (backendError) {
+        print('⚠️  Gasless relay error: $backendError');
+        print('🔄 Falling back to regular transaction...');
+      }
+      
+      // Fallback to regular transaction if gasless fails
+      print('📤 Sending regular transaction...');
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
         return {
@@ -3150,7 +3632,6 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
         };
       }
       
-      // Send ERC-20 token
       final result = await PolygonWalletService.sendERC20TokenWithAuth(
         userId: user.uid,
         password: password,
@@ -3274,7 +3755,87 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
   void _showPurchaseDialog(EnhancedWalletProvider walletProvider) {
     showDialog(
       context: context,
-      builder: (context) => MpesaPurchaseDialog(walletProvider: walletProvider),
+      builder: (context) => _PaymentMethodSelectionDialog(
+        onMpesaSelected: () {
+          Navigator.pop(context);
+          _showMpesaPurchaseDialog(walletProvider);
+        },
+        onCardSelected: () {
+          Navigator.pop(context);
+          _showCardPaymentDialog(walletProvider);
+        },
+      ),
+    );
+  }
+  
+  /// Show multi-token purchase dialog with real-time pricing
+  /// Supports AKOFA, USDC, USDT with Coinbase-style price locking
+  void _showTokenPurchaseDialog(EnhancedWalletProvider walletProvider) {
+    showDialog(
+      context: context,
+      builder: (context) => TokenPurchaseDialog(
+        onProceedToPayment: (result) {
+          // Show payment method selection after token selection
+          _showPaymentMethodForToken(walletProvider, result);
+        },
+      ),
+    );
+  }
+  
+  /// Show payment method selection for a specific token purchase
+  void _showPaymentMethodForToken(
+    EnhancedWalletProvider walletProvider,
+    TokenPurchaseResult tokenPurchase,
+  ) {
+    showDialog(
+      context: context,
+      builder: (context) => _TokenPaymentMethodDialog(
+        tokenPurchase: tokenPurchase,
+        onMpesaSelected: () {
+          Navigator.pop(context);
+          _showMpesaPurchaseDialogWithToken(walletProvider, tokenPurchase);
+        },
+        onCardSelected: () {
+          Navigator.pop(context);
+          _showCardPaymentDialogWithToken(walletProvider, tokenPurchase);
+        },
+      ),
+    );
+  }
+  
+  /// Show M-Pesa purchase dialog with pre-selected token
+  void _showMpesaPurchaseDialogWithToken(
+    EnhancedWalletProvider walletProvider,
+    TokenPurchaseResult tokenPurchase,
+  ) {
+    showDialog(
+      context: context,
+      builder: (context) => MpesaPurchaseDialog(
+        walletProvider: walletProvider,
+        tokenSymbol: tokenPurchase.tokenSymbol,
+        tokenAmount: tokenPurchase.tokenAmount,
+        amountKES: tokenPurchase.amountKES,
+        pricePerTokenKES: tokenPurchase.pricePerTokenKES,
+        priceLockId: tokenPurchase.priceLockId,
+      ),
+    );
+  }
+  
+  /// Show card payment dialog with pre-selected token
+  void _showCardPaymentDialogWithToken(
+    EnhancedWalletProvider walletProvider,
+    TokenPurchaseResult tokenPurchase,
+  ) {
+    showDialog(
+      context: context,
+      builder: (context) => CardPaymentDialog(
+        walletProvider: walletProvider,
+        tokenSymbol: tokenPurchase.tokenSymbol,
+        tokenAmount: tokenPurchase.tokenAmount,
+        amountKES: tokenPurchase.amountKES,
+        pricePerTokenKES: tokenPurchase.pricePerTokenKES,
+        priceLockId: tokenPurchase.priceLockId,
+      ),
     );
   }
 
@@ -3510,9 +4071,10 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
 
       if (result['success'] == true) {
         // Get Polygon address and private key
+        // ALWAYS use the derived address (from private key) as authoritative
         final address = result['address'] ?? result['publicKey'] ?? '';
         final privateKey = result['privateKey'] ?? result['secretKey'] ?? '';
-        final derivedAddress = result['derivedAddress'] as String?;
+        final storedAddress = result['storedAddress'] as String?;
         final addressesMatch = result['addressesMatch'] as bool? ?? true;
         
         // Validate that we have valid credentials
@@ -3526,11 +4088,16 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
           return;
         }
         
-        // Show credentials dialog with Polygon address and private key
+        print('📍 [CREDS] Displaying wallet credentials:');
+        print('   Authoritative address (from key): $address');
+        print('   Previously stored address: $storedAddress');
+        print('   Addresses match: $addressesMatch');
+        
+        // Show credentials dialog with DERIVED address and private key
         _showCredentialsDialog(
-          publicKey: address,
+          publicKey: address,  // This is now the derived address (authoritative)
           secretKey: privateKey,
-          derivedAddress: derivedAddress,
+          derivedAddress: storedAddress,  // Show old stored address for reference
           addressesMatch: addressesMatch,
         );
       } else {
@@ -3618,8 +4185,8 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'The private key derives to a different address than what is stored. '
-                        'This indicates a data inconsistency. Consider using the wallet recovery feature.',
+                        'Your wallet data was automatically corrected. The address shown above is the correct one (derived from your private key). '
+                        'If you had tokens at the old address below, you need to transfer them to your current address.',
                         style: TextStyle(color: Colors.red, fontSize: 11),
                       ),
                     ],
@@ -3629,7 +4196,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
               ],
               
               Text(
-                'Stored Address:',
+                'Wallet Address:',
                 style: TextStyle(
                   color: AppTheme.white,
                   fontWeight: FontWeight.bold,
@@ -3637,8 +4204,8 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
               ),
               const SizedBox(height: 4),
               Text(
-                'Address stored in database',
-                style: TextStyle(color: AppTheme.grey, fontSize: 11),
+                '✅ Authoritative address (derived from your private key)',
+                style: TextStyle(color: Colors.green, fontSize: 11),
               ),
               const SizedBox(height: 8),
               Container(
@@ -3670,7 +4237,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                         Clipboard.setData(ClipboardData(text: publicKey));
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                            content: Text('Stored address copied to clipboard'),
+                            content: Text('Wallet address copied to clipboard'),
                             backgroundColor: Colors.green,
                           ),
                         );
@@ -3681,10 +4248,10 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
               ),
               const SizedBox(height: 16),
               
-              // Show derived address if it differs
+              // Show old stored address if it differs from current address
               if (derivedAddress != null && !addressesMatch) ...[
                 Text(
-                  'Derived Address (from private key):',
+                  'Previous Stored Address:',
                   style: TextStyle(
                     color: AppTheme.white,
                     fontWeight: FontWeight.bold,
@@ -3692,7 +4259,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Address calculated from the decrypted private key',
+                  '⚠️ Old address from database (now corrected)',
                   style: TextStyle(color: Colors.orange, fontSize: 11),
                 ),
                 const SizedBox(height: 8),
@@ -3717,7 +4284,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                           Clipboard.setData(ClipboardData(text: derivedAddress));
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                              content: Text('Derived address copied to clipboard'),
+                              content: Text('Old address copied to clipboard'),
                               backgroundColor: Colors.orange,
                             ),
                           );
@@ -3725,6 +4292,11 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                       ),
                     ],
                   ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'If you had tokens at this address, transfer them to your current wallet address above.',
+                  style: TextStyle(color: Colors.orange.withOpacity(0.8), fontSize: 10, fontStyle: FontStyle.italic),
                 ),
                 const SizedBox(height: 16),
               ],
@@ -4789,14 +5361,26 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
       );
 
       if (result['success'] == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Purchase initiated! Check your phone for M-Pesa prompt.',
+        final checkoutRequestId = result['checkoutRequestId'] as String?;
+        if (checkoutRequestId != null && checkoutRequestId.isNotEmpty) {
+          _showQuickMpesaPendingDialog(
+            walletProvider: walletProvider,
+            checkoutRequestId: checkoutRequestId,
+            amountKes: amount,
+            tokenAmount: (result['akofaAmount'] as num?)?.toDouble() ??
+                (amount * 0.01),
+            tokenSymbol: result['tokenSymbol'] as String? ?? 'AKOFA',
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Purchase initiated, but no checkout ID returned.',
+              ),
+              backgroundColor: Colors.orange,
             ),
-            backgroundColor: Colors.green,
-          ),
-        );
+          );
+        }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -4806,6 +5390,617 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
         );
       }
     }
+  }
+
+  void _showQuickMpesaPendingDialog({
+    required EnhancedWalletProvider walletProvider,
+    required String checkoutRequestId,
+    required double amountKes,
+    required double tokenAmount,
+    required String tokenSymbol,
+  }) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _QuickMpesaPendingDialog(
+        walletProvider: walletProvider,
+        checkoutRequestId: checkoutRequestId,
+        amountKes: amountKes,
+        tokenAmount: tokenAmount,
+        tokenSymbol: tokenSymbol,
+      ),
+    );
+  }
+}
+
+class _QuickMpesaPendingDialog extends StatefulWidget {
+  final EnhancedWalletProvider walletProvider;
+  final String checkoutRequestId;
+  final double amountKes;
+  final double tokenAmount;
+  final String tokenSymbol;
+
+  const _QuickMpesaPendingDialog({
+    required this.walletProvider,
+    required this.checkoutRequestId,
+    required this.amountKes,
+    required this.tokenAmount,
+    required this.tokenSymbol,
+  });
+
+  @override
+  State<_QuickMpesaPendingDialog> createState() =>
+      _QuickMpesaPendingDialogState();
+}
+
+class _QuickMpesaPendingDialogState extends State<_QuickMpesaPendingDialog> {
+  Timer? _pollTimer;
+  bool _isCheckingStatus = false;
+  int _pollCount = 0;
+  String _statusMessage = 'Waiting for M-Pesa prompt...';
+  static const int _maxPollAttempts = 20;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(const Duration(seconds: 5), () {
+      if (mounted) {
+        _startAutoPolling();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startAutoPolling() {
+    _pollTimer = Timer.periodic(const Duration(seconds: 6), (timer) async {
+      if (_pollCount >= _maxPollAttempts) {
+        timer.cancel();
+        if (mounted) {
+          setState(() {
+            _statusMessage = 'Auto-check stopped. Use manual check.';
+          });
+        }
+        return;
+      }
+      _pollCount++;
+      await _checkStatus(isAutoCheck: true);
+    });
+  }
+
+  Future<void> _checkStatus({bool isAutoCheck = false}) async {
+    if (_isCheckingStatus) return;
+
+    setState(() {
+      _isCheckingStatus = true;
+      if (!isAutoCheck) {
+        _statusMessage = 'Checking status...';
+      }
+    });
+
+    try {
+      final status = await widget.walletProvider.checkPaymentStatus(
+        widget.checkoutRequestId,
+      );
+
+      if (!mounted) return;
+
+      if (status['success'] == true && status['status'] == 'completed') {
+        _pollTimer?.cancel();
+        Navigator.pop(context);
+
+        final tokenAmount = (status['tokenAmount'] as num?)?.toDouble() ??
+            (status['akofaAmount'] as num?)?.toDouble() ??
+            widget.tokenAmount;
+        final tokenSymbol = status['tokenSymbol'] as String? ??
+            widget.tokenSymbol;
+        final decimals = tokenSymbol == 'AKOFA' ? 2 : 6;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Payment successful! ${tokenAmount.toStringAsFixed(decimals)} $tokenSymbol credited.',
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else if (status['status'] == 'failed' ||
+          status['resultCode'] != null && status['resultCode'] != '0') {
+        _pollTimer?.cancel();
+        final message = status['resultDesc'] ??
+            status['message'] ??
+            'Payment failed';
+        setState(() {
+          _statusMessage = message;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            backgroundColor: Colors.red,
+          ),
+        );
+      } else {
+        if (!isAutoCheck) {
+          setState(() {
+            _statusMessage = 'Still pending. Auto-checking...';
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Payment still pending. Please approve the M-Pesa prompt on your phone.',
+              ),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (!isAutoCheck && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error checking status: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isCheckingStatus = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final decimals = widget.tokenSymbol == 'AKOFA' ? 2 : 6;
+    return AlertDialog(
+      backgroundColor: AppTheme.darkGrey,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      title: Text(
+        'Payment Initiated',
+        style: TextStyle(color: AppTheme.primaryGold),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.phone_android, color: AppTheme.primaryGold, size: 48),
+          const SizedBox(height: 12),
+          Text(
+            'Check your phone for the M-Pesa payment prompt.',
+            style: TextStyle(color: AppTheme.white),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppTheme.black.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              children: [
+                Text(
+                  'KES ${widget.amountKes.toInt()}',
+                  style: TextStyle(
+                    color: AppTheme.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  '→ ${widget.tokenAmount.toStringAsFixed(decimals)} ${widget.tokenSymbol}',
+                  style: TextStyle(color: AppTheme.primaryGold),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            _statusMessage,
+            style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isCheckingStatus
+              ? null
+              : () => _checkStatus(isAutoCheck: false),
+          child: _isCheckingStatus
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppTheme.primaryGold,
+                  ),
+                )
+              : Text(
+                  'Check Now',
+                  style: TextStyle(color: AppTheme.primaryGold),
+                ),
+        ),
+        TextButton(
+          onPressed: () {
+            _pollTimer?.cancel();
+            Navigator.pop(context);
+          },
+          child: const Text(
+            'Close',
+            style: TextStyle(color: Colors.red),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Payment method selection dialog for buying AKOFA
+/// Allows users to choose between M-Pesa and Card (PesaPal) payments
+class _PaymentMethodSelectionDialog extends StatelessWidget {
+  final VoidCallback onMpesaSelected;
+  final VoidCallback onCardSelected;
+
+  const _PaymentMethodSelectionDialog({
+    required this.onMpesaSelected,
+    required this.onCardSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: AppTheme.darkGrey,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryGold.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.shopping_cart,
+                color: AppTheme.primaryGold,
+                size: 40,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Buy AKOFA Tokens',
+              style: AppTheme.headingMedium.copyWith(
+                color: AppTheme.primaryGold,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Choose your preferred payment method',
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.grey,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 32),
+
+            // M-Pesa Option
+            _buildPaymentOption(
+              context: context,
+              icon: Icons.phone_android,
+              title: 'M-Pesa',
+              subtitle: 'Pay with mobile money',
+              color: Colors.green,
+              onTap: onMpesaSelected,
+            ),
+
+            const SizedBox(height: 16),
+
+            // Card Option (PesaPal)
+            _buildPaymentOption(
+              context: context,
+              icon: Icons.credit_card,
+              title: 'Card Payment',
+              subtitle: 'Visa, Mastercard via PesaPal',
+              color: Colors.blue,
+              onTap: onCardSelected,
+            ),
+
+            const SizedBox(height: 24),
+
+            // Cancel button
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(
+                'Cancel',
+                style: TextStyle(color: AppTheme.grey),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPaymentOption({
+    required BuildContext context,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: color.withOpacity(0.3),
+              width: 1.5,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  icon,
+                  color: color,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: AppTheme.bodyLarge.copyWith(
+                        color: AppTheme.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.grey,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.arrow_forward_ios,
+                color: color,
+                size: 18,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Payment method selection dialog for multi-token purchases
+/// Shows purchase summary and payment method options
+class _TokenPaymentMethodDialog extends StatelessWidget {
+  final TokenPurchaseResult tokenPurchase;
+  final VoidCallback onMpesaSelected;
+  final VoidCallback onCardSelected;
+
+  const _TokenPaymentMethodDialog({
+    required this.tokenPurchase,
+    required this.onMpesaSelected,
+    required this.onCardSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: AppTheme.darkGrey,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Purchase Summary
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryGold.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: AppTheme.primaryGold.withOpacity(0.3),
+                ),
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    'Purchase Summary',
+                    style: AppTheme.bodyMedium.copyWith(
+                      color: AppTheme.grey,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '${tokenPurchase.tokenAmount.toStringAsFixed(tokenPurchase.tokenSymbol == 'AKOFA' ? 2 : 6)} ${tokenPurchase.tokenSymbol}',
+                    style: AppTheme.headingMedium.copyWith(
+                      color: AppTheme.primaryGold,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'KES ${tokenPurchase.amountKES.toStringAsFixed(2)}',
+                    style: AppTheme.bodyLarge.copyWith(
+                      color: AppTheme.white,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (tokenPurchase.priceLockId != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.lock, color: Colors.green, size: 14),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Price Locked',
+                            style: TextStyle(
+                              color: Colors.green,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            Text(
+              'Select Payment Method',
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.grey,
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // M-Pesa Option
+            _buildPaymentMethodButton(
+              context: context,
+              icon: Icons.phone_android,
+              title: 'M-Pesa',
+              subtitle: 'Pay with mobile money',
+              color: Colors.green,
+              onTap: onMpesaSelected,
+            ),
+
+            const SizedBox(height: 12),
+
+            // Card Option (PesaPal)
+            _buildPaymentMethodButton(
+              context: context,
+              icon: Icons.credit_card,
+              title: 'Card Payment',
+              subtitle: 'Visa, Mastercard via PesaPal',
+              color: Colors.blue,
+              onTap: onCardSelected,
+            ),
+
+            const SizedBox(height: 20),
+
+            // Cancel button
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(
+                'Cancel',
+                style: TextStyle(color: AppTheme.grey),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPaymentMethodButton({
+    required BuildContext context,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: color.withOpacity(0.3),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: color, size: 24),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: AppTheme.bodyLarge.copyWith(
+                        color: AppTheme.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      subtitle,
+                      style: AppTheme.bodySmall.copyWith(
+                        color: AppTheme.grey,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.arrow_forward_ios, color: color, size: 16),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

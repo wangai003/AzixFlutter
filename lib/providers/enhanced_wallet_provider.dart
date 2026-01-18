@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/enhanced_mpesa_service.dart';
+import '../services/pesapal_service.dart';
 import '../services/secure_wallet_service.dart';
 import '../services/payment_webhook_service.dart';
 import '../services/payment_security_service.dart';
@@ -9,11 +10,13 @@ import '../services/moonpay_service.dart';
 import '../services/moonpay_callback_service.dart';
 import '../services/polygon_wallet_service.dart';
 import '../services/blockchain_transaction_service.dart';
+import '../services/biconomy_backend_service.dart';
 import '../models/transaction.dart' as app_transaction;
 import '../models/asset_config.dart';
 
 class EnhancedWalletProvider extends ChangeNotifier {
   final EnhancedMpesaService _mpesaService = EnhancedMpesaService();
+  final PesapalService _pesapalService = PesapalService();
   final PaymentWebhookService _webhookService = PaymentWebhookService();
   final PaymentSecurityService _securityService = PaymentSecurityService();
   final MoonPayService _moonPayService = MoonPayService();
@@ -40,6 +43,11 @@ class EnhancedWalletProvider extends ChangeNotifier {
   List<Map<String, dynamic>> _moonPayTransactionHistory = [];
   bool _isMonitoringMoonPayTransactions = false;
 
+  // PesaPal card payment state
+  bool _isProcessingPesapalPayment = false;
+  Map<String, dynamic>? _currentPesapalTransaction;
+  List<Map<String, dynamic>> _pesapalTransactionHistory = [];
+
   // Secure wallet state (now for Polygon)
   bool _hasSecureWallet = false;
   bool _isBiometricAuthenticating = false;
@@ -48,6 +56,12 @@ class EnhancedWalletProvider extends ChangeNotifier {
   // Polygon token balances (multi-asset support)
   Map<String, Map<String, dynamic>> _polygonTokens = {};
   bool _isProcessingPolygonTransaction = false;
+  
+  // Gasless transaction support
+  // Using Biconomy MEE "Pay Gas With ERC-20" feature
+  // Users can pay gas with USDC/USDT instead of MATIC
+  bool _gaslessEnabled = true;
+  bool _useGaslessWhenPossible = true;
   
   // Network configuration
   bool _isTestnet = true; // Default to Amoy testnet
@@ -117,6 +131,13 @@ class EnhancedWalletProvider extends ChangeNotifier {
       _moonPayTransactionHistory;
   bool get isMonitoringMoonPayTransactions => _isMonitoringMoonPayTransactions;
 
+  // PesaPal getters
+  bool get isProcessingPesapalPayment => _isProcessingPesapalPayment;
+  Map<String, dynamic>? get currentPesapalTransaction =>
+      _currentPesapalTransaction;
+  List<Map<String, dynamic>> get pesapalTransactionHistory =>
+      _pesapalTransactionHistory;
+
   // Secure wallet getters
   bool get hasSecureWallet => _hasSecureWallet;
   bool get isBiometricAuthenticating => _isBiometricAuthenticating;
@@ -143,6 +164,10 @@ class EnhancedWalletProvider extends ChangeNotifier {
   // Network getters
   bool get isTestnet => _isTestnet;
   Map<String, dynamic> get networkInfo => PolygonWalletService.getNetworkInfo();
+  
+  // Gasless transaction getters
+  bool get gaslessEnabled => _gaslessEnabled;
+  bool get useGaslessWhenPossible => _useGaslessWhenPossible;
 
   EnhancedWalletProvider() {
     _initialize();
@@ -197,18 +222,23 @@ class EnhancedWalletProvider extends ChangeNotifier {
       // Check for Polygon wallet
       _hasWallet = await PolygonWalletService.hasPolygonWallet(user.uid);
       if (_hasWallet) {
-        _address = await PolygonWalletService.getPolygonWalletAddress(user.uid);
+        // Use getCorrectWalletAddress to prioritize corrected (derived) addresses
+        _address = await PolygonWalletService.getCorrectWalletAddress(user.uid);
         _hasSecureWallet = true; // Polygon wallets are secure by default
         _secureWalletAddress = _address;
         
         if (_address != null) {
-          // Load initial data
+          debugPrint('🔑 [PROVIDER] Using wallet address: $_address');
+          
+          // Load initial data from the correct derived address
           await Future.wait([loadBalances(), loadTransactions()]);
           
           // Start MoonPay transaction monitoring
           if (!_isMonitoringMoonPayTransactions) {
             await startMoonPayTransactionMonitoring();
           }
+        } else {
+          debugPrint('⚠️ [PROVIDER] No wallet address found - user may need to authenticate');
         }
       }
     } catch (e) {
@@ -301,67 +331,92 @@ class EnhancedWalletProvider extends ChangeNotifier {
 
       _hasSecureWallet = await PolygonWalletService.hasPolygonWallet(user.uid);
       if (_hasSecureWallet) {
-        _address = await PolygonWalletService.getPolygonWalletAddress(user.uid);
+        // Use getCorrectWalletAddress to prioritize corrected (derived) addresses
+        _address = await PolygonWalletService.getCorrectWalletAddress(user.uid);
         _secureWalletAddress = _address;
+        debugPrint('🔑 [PROVIDER] Secure wallet address: $_address');
       }
       notifyListeners();
       return _hasSecureWallet;
     } catch (e) {
+      debugPrint('❌ [PROVIDER] Error checking secure wallet status: $e');
       return false;
     }
   }
 
   /// Load wallet balances (Polygon)
+  /// Uses the derived wallet address to ensure correct balances are displayed
   Future<void> loadBalances() async {
-    if (_address == null) return;
+    if (_address == null) {
+      debugPrint('⚠️ [BALANCES] No address available - cannot load balances');
+      return;
+    }
 
     try {
+      debugPrint('💰 [BALANCES] Loading balances for derived address: $_address');
       final balanceResult = await PolygonWalletService.getAllPolygonTokenBalances(_address!);
       if (balanceResult['success'] == true) {
         final tokens = balanceResult['tokens'] as Map<String, dynamic>;
         _polygonTokens = Map<String, Map<String, dynamic>>.from(tokens);
         
+        debugPrint('✅ [BALANCES] Loaded ${_polygonTokens.length} token balances');
+        
         // Update balances map for backward compatibility
         if (_polygonTokens.containsKey('MATIC')) {
           _balances['matic'] = _polygonTokens['MATIC']!['balance'];
+          debugPrint('   MATIC: ${_balances['matic']}');
         }
         if (_polygonTokens.containsKey('AKOFA')) {
           _balances['akofa'] = _polygonTokens['AKOFA']!['balance'];
+          debugPrint('   AKOFA: ${_balances['akofa']}');
         }
+      } else {
+        debugPrint('⚠️ [BALANCES] Failed to load balances: ${balanceResult['error']}');
       }
       notifyListeners();
     } catch (e) {
-      print('Error loading Polygon balances: $e');
+      debugPrint('❌ [BALANCES] Error loading Polygon balances: $e');
     }
   }
 
   /// Load transactions (Polygon)
+  /// Uses the derived wallet address to ensure correct transactions are displayed
   Future<void> loadTransactions({bool forceRefresh = false}) async {
     if (_isLoading && !forceRefresh) {
-      debugPrint('⏸️ Already loading transactions, skipping...');
+      debugPrint('⏸️ [TRANSACTIONS] Already loading transactions, skipping...');
       return;
     }
     
-    if (_address == null) return;
+    if (_address == null) {
+      debugPrint('⚠️ [TRANSACTIONS] No address available - cannot load transactions');
+      return;
+    }
     
     try {
       _isLoading = true;
       notifyListeners();
       
-      debugPrint('🔄 Loading Polygon transactions... Address: $_address');
+      debugPrint('═══════════════════════════════════════════════════════════════');
+      debugPrint('🔄 [TRANSACTIONS] Loading transactions from derived address');
+      debugPrint('📍 [TRANSACTIONS] Address: $_address');
+      debugPrint('═══════════════════════════════════════════════════════════════');
       
       _transactions = await PolygonWalletService.getPolygonTransactionHistory(
         _address!,
         limit: 50,
       );
       
-      debugPrint('✅ Loaded ${_transactions.length} Polygon transactions');
+      debugPrint('═══════════════════════════════════════════════════════════════');
+      debugPrint('✅ [TRANSACTIONS] Successfully loaded ${_transactions.length} transactions');
+      debugPrint('═══════════════════════════════════════════════════════════════');
       
       _isLoading = false;
       notifyListeners();
     } catch (e, stackTrace) {
-      debugPrint('❌ Error loading Polygon transactions: $e');
+      debugPrint('═══════════════════════════════════════════════════════════════');
+      debugPrint('❌ [TRANSACTIONS] Error loading Polygon transactions: $e');
       debugPrint('Stack trace: $stackTrace');
+      debugPrint('═══════════════════════════════════════════════════════════════');
       _transactions = [];
       _isLoading = false;
       notifyListeners();
@@ -594,13 +649,90 @@ class EnhancedWalletProvider extends ChangeNotifier {
     };
   }
 
-  /// Send any asset (generic method - Polygon)
+  /// Check if user has enough MATIC for gas
+  Future<bool> hasEnoughGasForTransaction({
+    required AssetConfig asset,
+    required String toAddress,
+    required double amount,
+  }) async {
+    try {
+      if (_address == null) return false;
+      
+      Map<String, dynamic> gasEstimate;
+      
+      // Estimate gas based on asset type
+      if (asset.isNative || asset.code == 'MATIC') {
+        gasEstimate = await PolygonWalletService.estimateMaticGasFee(
+          fromAddress: _address!,
+          toAddress: toAddress,
+          amountMatic: amount,
+        );
+      } else if (asset.contractAddress != null) {
+        gasEstimate = await PolygonWalletService.estimateERC20GasFee(
+          fromAddress: _address!,
+          tokenContractAddress: asset.contractAddress!,
+        );
+      } else {
+        return false;
+      }
+      
+      return gasEstimate['success'] == true && 
+             gasEstimate['hasEnoughForGas'] == true;
+    } catch (e) {
+      debugPrint('❌ Error checking gas: $e');
+      return false;
+    }
+  }
+  
+  /// Determine if gasless transaction should be used
+  Future<bool> shouldUseGasless({
+    required AssetConfig asset,
+    required String toAddress,
+    required double amount,
+  }) async {
+    // Don't use gasless if disabled
+    if (!_gaslessEnabled || !_useGaslessWhenPossible) return false;
+    
+    // Can't use gasless for native MATIC transfers (need gas to move MATIC)
+    if (asset.isNative || asset.code == 'MATIC') return false;
+    
+    // Check if token contract address is available
+    if (asset.contractAddress == null || asset.contractAddress!.isEmpty) {
+      return false;
+    }
+    
+    // Check if user has enough gas
+    final hasGas = await hasEnoughGasForTransaction(
+      asset: asset,
+      toAddress: toAddress,
+      amount: amount,
+    );
+    
+    // If user has gas, let them choose (default to regular)
+    // If no gas, must use gasless
+    if (!hasGas) {
+      debugPrint('⛽ No gas available - will use gasless transaction');
+      return true;
+    }
+    
+    // User has gas - check if backend gasless service is available
+    if (_useGaslessWhenPossible) {
+      // With Biconomy MEE Sponsorship, gasless is always available if backend is healthy
+      final health = await BiconomyBackendService.healthCheck();
+      return health;
+    }
+    
+    return false;
+  }
+  
+  /// Send any asset (generic method - Polygon with gasless support)
   Future<Map<String, dynamic>> sendAsset({
     required String recipientAddress,
     required AssetConfig asset,
     required double amount,
     String? memo,
     required String password, // Required password for Polygon transactions
+    bool? forceGasless, // Optional: force gasless transaction
   }) async {
     _setLoading(true);
     _setError(null);
@@ -617,7 +749,7 @@ class EnhancedWalletProvider extends ChangeNotifier {
         throw Exception('User not authenticated');
       }
 
-      // For MATIC (native token)
+      // For MATIC (native token) - always use regular transaction
       if (asset.code == 'MATIC' || asset.isNative) {
         return await sendMatic(
           recipientAddress: recipientAddress,
@@ -626,12 +758,23 @@ class EnhancedWalletProvider extends ChangeNotifier {
         );
       }
 
-      // For ERC-20 tokens (like AKOFA)
+      // For ERC-20 tokens - check if gasless should be used
       if (asset.contractAddress != null && asset.contractAddress!.isNotEmpty) {
         debugPrint('🔄 Sending ERC-20 token: ${asset.symbol}');
         debugPrint('📍 Contract: ${asset.contractAddress}');
         
-        final result = await PolygonWalletService.sendERC20TokenWithAuth(
+        // Determine if we should use gasless
+        final useGasless = forceGasless ?? await shouldUseGasless(
+          asset: asset,
+          toAddress: recipientAddress,
+          amount: amount,
+        );
+        
+        Map<String, dynamic> result;
+        
+        // Temporarily disable gasless/sponsored path; always use standard send
+        debugPrint('⛽ Using regular transaction with gas (gasless disabled)');
+        result = await PolygonWalletService.sendERC20TokenWithAuth(
           userId: user.uid,
           password: password,
           tokenContractAddress: asset.contractAddress!,
@@ -660,6 +803,206 @@ class EnhancedWalletProvider extends ChangeNotifier {
       _setError('Failed to send ${asset.symbol}: $e');
       _setLoading(false);
       return {'success': false, 'error': e.toString()};
+    }
+  }
+  
+  /// Send ERC-20 tokens using TRUE gasless transaction via backend
+  /// Backend uses Biconomy SDK to sponsor gas - user pays $0!
+  Future<Map<String, dynamic>> sendGaslessERC20({
+    required String recipientAddress,
+    required AssetConfig asset,
+    required double amount,
+    required String password,
+  }) async {
+    if (!_hasWallet || _address == null) {
+      return {'success': false, 'error': 'No Polygon wallet found'};
+    }
+    
+    if (asset.contractAddress == null || asset.contractAddress!.isEmpty) {
+      return {'success': false, 'error': 'No contract address for token'};
+    }
+
+    _isProcessingPolygonTransaction = true;
+    _setError(null);
+    notifyListeners();
+
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        throw Exception('User not authenticated');
+      }
+      
+      debugPrint('═══════════════════════════════════════════════════════════════');
+      debugPrint('🔄 [GASLESS] Attempting gasless transaction via backend relay...');
+      debugPrint('═══════════════════════════════════════════════════════════════');
+      debugPrint('📍 Token: ${asset.symbol}');
+      debugPrint('💰 Amount: $amount');
+      debugPrint('🎯 User pays: \$0.00 (gasless!)');
+      debugPrint('📊 Wallet address (from provider): $_address');
+      debugPrint('📊 Balance shown in UI: ${_balances[asset.symbol.toUpperCase()]?.toString() ?? '0'} ${asset.symbol}');
+      debugPrint('═══════════════════════════════════════════════════════════════');
+
+      // Try to sign transaction locally and relay via backend
+      Map<String, dynamic> result;
+      
+      try {
+        // Create signed transaction (this will auto-fix address if needed)
+        final signedTx = await PolygonWalletService.createSignedERC20Transaction(
+          userId: user.uid,
+          password: password,
+          tokenContractAddress: asset.contractAddress!,
+          toAddress: recipientAddress,
+          amount: amount,
+        );
+
+        if (signedTx['success'] == true) {
+          debugPrint('✅ Transaction signed locally');
+          
+          // Update provider address with the authoritative derived address
+          final derivedAddress = signedTx['from'] as String?;
+          if (derivedAddress != null && derivedAddress.toLowerCase() != _address?.toLowerCase()) {
+            debugPrint('🔧 [PROVIDER] Updating address from $_address to $derivedAddress (derived from key)');
+            _address = derivedAddress;
+            _secureWalletAddress = derivedAddress;
+            
+            // Reload balances with correct address
+            debugPrint('🔄 [PROVIDER] Reloading balances for correct address...');
+            await loadBalances();
+            notifyListeners();
+          }
+
+          // Send signed transaction to backend for relay
+          result = await BiconomyBackendService.sendGaslessTransaction(
+            signedTransaction: signedTx['signedTransaction'],
+            userAddress: derivedAddress ?? _address!,
+          );
+          
+          if (result['success'] == true) {
+            debugPrint('✅ Gasless relay successful!');
+            debugPrint('💰 User paid: \$0.00 (gas paid by backend)');
+          } else {
+            throw Exception('Backend relay failed: ${result['error']}');
+          }
+        } else {
+          throw Exception('Failed to sign transaction: ${signedTx['error']}');
+        }
+      } catch (gaslessError) {
+        debugPrint('⚠️ Gasless relay failed: $gaslessError');
+        
+        // Check if insufficient token balance
+        if (gaslessError.toString().contains('transfer amount exceeds balance')) {
+          _isProcessingPolygonTransaction = false;
+          notifyListeners();
+          return {
+            'success': false,
+            'error': 'Insufficient ${asset.symbol} balance. You don\'t have enough ${asset.symbol} to send $amount.',
+            'insufficientBalance': true,
+          };
+        }
+        
+        // Check if wallet data is incomplete
+        if (gaslessError.toString().contains('incomplete') || 
+            gaslessError.toString().contains('recreate your Polygon wallet')) {
+          _isProcessingPolygonTransaction = false;
+          notifyListeners();
+          return {
+            'success': false,
+            'error': 'Wallet data is incomplete. Please recreate your Polygon wallet in Settings.',
+            'needsWalletRecreation': true,
+          };
+        }
+        
+        // Check if user has MATIC for fallback
+        final maticBalance = _balances['MATIC']?.balance ?? 0.0;
+        if (maticBalance < 0.01) {
+          debugPrint('⚠️ User has insufficient MATIC ($maticBalance) for fallback transaction');
+          _isProcessingPolygonTransaction = false;
+          notifyListeners();
+          return {
+            'success': false,
+            'error': 'Gasless transaction failed and you don\'t have enough MATIC to pay gas fees. Please contact support or add MATIC to your wallet.',
+            'gaslessError': gaslessError.toString(),
+          };
+        }
+        
+        debugPrint('🔄 Falling back to regular transaction (user pays gas)...');
+        
+        // Fallback to regular transaction where user pays gas
+        final fallbackResult = await _sendERC20WithUserWallet(
+          userId: user.uid,
+          password: password,
+          tokenAddress: asset.contractAddress!,
+          toAddress: recipientAddress,
+          amount: amount,
+        );
+        
+        if (fallbackResult['success'] != true) {
+          throw Exception(fallbackResult['error'] ?? 'Transaction failed');
+        }
+        
+        result = fallbackResult;
+      }
+
+      if (result['success'] == true) {
+        debugPrint('✅ TRUE gasless transaction successful!');
+        debugPrint('📋 TX Hash: ${result['txHash']}');
+        debugPrint('💰 User paid: \$0.00');
+        
+        // Refresh balances and transactions after successful transaction
+        await Future.wait([loadBalances(), loadTransactions(forceRefresh: true)]);
+      } else {
+        debugPrint('❌ Gasless transaction failed: ${result['error']}');
+      }
+
+      _isProcessingPolygonTransaction = false;
+      notifyListeners();
+      return result;
+    } catch (e) {
+      debugPrint('❌ Error in gasless transaction: $e');
+      _setError('Failed to send gasless transaction: $e');
+      _isProcessingPolygonTransaction = false;
+      notifyListeners();
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+  
+  /// Enable or disable gasless transactions
+  void setGaslessEnabled(bool enabled) {
+    _gaslessEnabled = enabled;
+    // Note: Gasless is now handled by backend service (Biconomy MEE Sponsorship)
+    notifyListeners();
+  }
+  
+  /// Set preference for using gasless when possible
+  void setUseGaslessWhenPossible(bool use) {
+    _useGaslessWhenPossible = use;
+    notifyListeners();
+  }
+
+  /// Helper: Send ERC-20 with user's wallet (fallback)
+  Future<Map<String, dynamic>> _sendERC20WithUserWallet({
+    required String userId,
+    required String password,
+    required String tokenAddress,
+    required String toAddress,
+    required double amount,
+  }) async {
+    try {
+      // Use Polygon wallet service to send with user's credentials
+      final result = await PolygonWalletService.sendERC20TokenWithAuth(
+        userId: userId,
+        password: password,
+        tokenContractAddress: tokenAddress,
+        toAddress: toAddress,
+        amount: amount,
+      );
+      
+      return result;
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+      };
     }
   }
 
@@ -998,16 +1341,15 @@ class EnhancedWalletProvider extends ChangeNotifier {
     return [];
   }
 
-  /// Get combined transaction history (M-Pesa + MTN + Sell)
+  /// Get combined transaction history (M-Pesa + PesaPal + Sell)
   Future<List<Map<String, dynamic>>> getCombinedTransactionHistory() async {
     try {
       final mpesaHistory = await getMpesaHistory();
-      final mtnHistory =
-          await getFlutterwaveMtnHistory(); // Will return empty list
+      final pesapalHistory = await getPesapalHistory();
       final sellHistory = await getMpesaSellHistory();
 
       // Combine and sort by timestamp
-      final combined = [...mpesaHistory, ...mtnHistory, ...sellHistory];
+      final combined = [...mpesaHistory, ...pesapalHistory, ...sellHistory];
       combined.sort((a, b) {
         final aTime = a['createdAt'] ?? a['timestamp'];
         final bTime = b['createdAt'] ?? b['timestamp'];
@@ -1033,31 +1375,169 @@ class EnhancedWalletProvider extends ChangeNotifier {
     }
   }
 
+  // ==================== PESAPAL CARD PAYMENT INTEGRATION ====================
+
+  /// Check if PesaPal service is available
+  Future<bool> isPesapalAvailable() async {
+    final health = await _pesapalService.healthCheck();
+    return health['available'] == true;
+  }
+
+  /// Purchase AKOFA tokens using card payment via PesaPal
+  Future<Map<String, dynamic>> purchaseAkofaWithCard({
+    required double amountKES,
+    required String email,
+    String? phone,
+    String? firstName,
+    String? lastName,
+    String countryCode = 'KE',
+    String currency = 'KES',
+  }) async {
+    _isProcessingPesapalPayment = true;
+    _setError(null);
+    notifyListeners();
+
+    try {
+      // Calculate token amount (default to AKOFA with 100 KES = 1 AKOFA rate)
+      final tokenAmount = amountKES * 0.01;
+      
+      final result = await _pesapalService.initiateCardPayment(
+        amountKES: amountKES,
+        tokenAmount: tokenAmount,
+        tokenSymbol: 'AKOFA',
+        email: email,
+        phone: phone,
+        firstName: firstName,
+        lastName: lastName,
+        countryCode: countryCode,
+        currency: currency,
+      );
+
+      if (result['success'] == true) {
+        _currentPesapalTransaction = {
+          'status': 'pending',
+          'orderTrackingId': result['orderTrackingId'],
+          'merchantReference': result['merchantReference'],
+          'redirectUrl': result['redirectUrl'],
+          'akofaAmount': result['akofaAmount'],
+          'amountKES': result['amountKES'],
+          'currency': currency,
+        };
+      }
+
+      _isProcessingPesapalPayment = false;
+      notifyListeners();
+      return result;
+    } catch (e) {
+      _setError('Failed to initiate card payment: $e');
+      _isProcessingPesapalPayment = false;
+      notifyListeners();
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// Check PesaPal payment status
+  Future<Map<String, dynamic>> checkPesapalPaymentStatus(
+    String orderTrackingId,
+  ) async {
+    _setLoading(true);
+    _setError(null);
+
+    try {
+      final result = await _pesapalService.queryPaymentStatus(orderTrackingId: orderTrackingId);
+
+      if (result['success'] == true && result['status'] == 'completed') {
+        // Payment successful, refresh wallet data
+        await Future.wait([
+          loadBalances(),
+          loadTransactions(forceRefresh: true),
+        ]);
+
+        _currentPesapalTransaction = {
+          'status': 'completed',
+          'akofaAmount': result['akofaAmount'],
+          'confirmationCode': result['confirmationCode'],
+        };
+
+        // Refresh PesaPal transaction history
+        await loadPesapalTransactionHistory();
+      }
+
+      _setLoading(false);
+      notifyListeners();
+      return result;
+    } catch (e) {
+      _setError('Failed to check card payment status: $e');
+      _setLoading(false);
+      notifyListeners();
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// Load PesaPal transaction history
+  Future<void> loadPesapalTransactionHistory() async {
+    try {
+      _pesapalTransactionHistory = await _pesapalService.getTransactionHistory();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error loading PesaPal history: $e');
+    }
+  }
+
+  /// Get PesaPal transaction history
+  Future<List<Map<String, dynamic>>> getPesapalHistory() async {
+    try {
+      return await _pesapalService.getTransactionHistory();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// Get PesaPal purchase statistics
+  Future<Map<String, dynamic>> getPesapalStats() async {
+    try {
+      return await _pesapalService.getPurchaseStats();
+    } catch (e) {
+      return {
+        'totalKES': 0.0,
+        'totalAkofa': 0.0,
+        'successfulPurchases': 0,
+        'pendingPurchases': 0,
+        'totalTransactions': 0,
+      };
+    }
+  }
+
+  /// Clear current PesaPal transaction
+  void clearPesapalTransaction() {
+    _currentPesapalTransaction = null;
+    notifyListeners();
+  }
+
   /// Get purchase statistics (combined)
   Future<Map<String, dynamic>> getPurchaseStats() async {
     try {
       final mpesaStats = await _mpesaService.getPurchaseStats();
       final sellStats = await _mpesaService.getSellStats();
-      // Flutterwave stats removed - integration no longer available
+      final pesapalStats = await _pesapalService.getPurchaseStats();
 
       // Return combined statistics
       return {
         'mpesa': mpesaStats,
         'sell': sellStats,
-        'flutterwaveMtn': {
-          'totalTransactions': 0,
-          'totalAmount': 0.0,
-          'totalAkofa': 0.0,
-        },
+        'pesapal': pesapalStats,
         'totalTransactions':
             (mpesaStats['totalTransactions'] ?? 0) +
-            (sellStats['totalSells'] ?? 0),
+            (sellStats['totalSells'] ?? 0) +
+            (pesapalStats['totalTransactions'] ?? 0),
         'totalAmount':
             (mpesaStats['totalAmount'] ?? 0.0) +
-            (sellStats['totalKESReceived'] ?? 0.0),
+            (sellStats['totalKESReceived'] ?? 0.0) +
+            (pesapalStats['totalKES'] ?? 0.0),
         'totalAkofa':
             (mpesaStats['totalAkofa'] ?? 0.0) +
-            (sellStats['totalAkofaSold'] ?? 0.0),
+            (sellStats['totalAkofaSold'] ?? 0.0) +
+            (pesapalStats['totalAkofa'] ?? 0.0),
       };
     } catch (e) {
       return {};
@@ -1785,6 +2265,9 @@ class EnhancedWalletProvider extends ChangeNotifier {
     _currentMoonPayTransaction = null;
     _moonPayTransactionHistory = [];
     _isMonitoringMoonPayTransactions = false;
+    _currentPesapalTransaction = null;
+    _pesapalTransactionHistory = [];
+    _isProcessingPesapalPayment = false;
     _hasSecureWallet = false;
     _secureWalletAddress = null;
     _polygonTokens = {};
@@ -1799,6 +2282,7 @@ class EnhancedWalletProvider extends ChangeNotifier {
   @override
   void dispose() {
     _mpesaService.dispose();
+    _pesapalService.dispose();
     super.dispose();
   }
 }

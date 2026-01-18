@@ -723,6 +723,7 @@ class SecureWalletService {
 
       final address = polygonResult['address'] as String;
       print('✅ Polygon wallet created: ${address.substring(0, 10)}...');
+      print('📍 This is the DERIVED address (authoritative source from private key)');
 
       // Polygon doesn't require funding or trustlines - tokens are automatically available
       print('✅ Polygon wallet ready - no funding or trustlines needed');
@@ -832,7 +833,13 @@ class SecureWalletService {
             }
 
             // Link the tag (existing or new) to the wallet if we have one
+            // NOTE: 'address' here is the DERIVED address from createSecurePolygonWallet
+            // which was verified to match the private key during creation
             if (tagToLink != null) {
+              print('🏷️ Linking AKOFA tag to DERIVED wallet address...');
+              print('   Tag: $tagToLink');
+              print('   Address: $address (verified from private key)');
+              
               final linkResult = await AkofaTagService.linkTagToWallet(
                 userId: userId,
                 tag: tagToLink,
@@ -842,6 +849,7 @@ class SecureWalletService {
 
               if (linkResult['success']) {
                 print('✅ Akofa tag linked to wallet: $tagToLink -> $address');
+                print('✅ This tag now resolves to the CORRECT derived address');
 
                 // Update wallet data with tag info
                 await _firestore
@@ -1242,6 +1250,17 @@ class SecureWalletService {
     required String assetCode,
     required String memo, // Memo is now required
   }) async {
+    // Polygon assets use PolygonWalletService directly (password required)
+    if (_isPolygonAsset(assetCode)) {
+      return await _sendPolygonAssetWithPassword(
+        userId: userId,
+        password: password,
+        recipientAddress: recipientAddress,
+        amount: amount,
+        assetCode: assetCode,
+      );
+    }
+
     // Check if wallet has biometrics enabled
     final walletDoc = await _firestore
         .collection('secure_wallets')
@@ -1273,6 +1292,14 @@ class SecureWalletService {
     required String assetCode,
     required String memo, // Memo is now required
   }) async {
+    if (_isPolygonAsset(assetCode)) {
+      return {
+        'success': false,
+        'error': 'Biometric-only signing is not supported for Polygon assets.',
+        'message': 'Please use password authentication for Polygon transactions.',
+      };
+    }
+
     return await _signTransaction(
       userId: userId,
       password: '', // Not needed for biometric auth
@@ -1429,6 +1456,72 @@ class SecureWalletService {
         'message': 'Failed to sign transaction',
       };
     }
+  }
+
+  static bool _isPolygonAsset(String assetCode) {
+    switch (assetCode.toUpperCase()) {
+      case 'MATIC':
+      case 'AKOFA':
+      case 'USDC':
+      case 'USDT':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  static Future<Map<String, dynamic>> _sendPolygonAssetWithPassword({
+    required String userId,
+    required String password,
+    required String recipientAddress,
+    required double amount,
+    required String assetCode,
+  }) async {
+    if (amount <= 0) {
+      return {
+        'success': false,
+        'error': 'Amount must be greater than 0',
+      };
+    }
+
+    if (!recipientAddress.startsWith('0x') || recipientAddress.length != 42) {
+      return {
+        'success': false,
+        'error': 'Invalid Polygon address format',
+      };
+    }
+
+    final normalized = assetCode.toUpperCase();
+    if (normalized == 'MATIC') {
+      return await PolygonWalletService.sendMaticTransaction(
+        userId: userId,
+        password: password,
+        toAddress: recipientAddress,
+        amountMatic: amount,
+      );
+    }
+
+    const tokenContracts = {
+      'AKOFA': '0xf1266ACCf0f757c61e4DFDD9EBBcaC05D2Ee375F',
+      'USDC': '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',
+      'USDT': '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
+    };
+
+    final contractAddress = tokenContracts[normalized];
+    if (contractAddress == null) {
+      return {
+        'success': false,
+        'error': 'Unsupported Polygon token: $assetCode',
+      };
+    }
+
+    return await PolygonWalletService.sendERC20TokenWithAuth(
+      userId: userId,
+      password: password,
+      tokenContractAddress: contractAddress,
+      toAddress: recipientAddress,
+      amount: amount,
+    );
   }
 
   /// Record transaction for limits tracking

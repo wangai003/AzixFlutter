@@ -643,53 +643,121 @@ class _EnhancedPurchaseDialogState extends State<EnhancedPurchaseDialog> {
   }
 
   void _showPaymentPendingDialog(Map<String, dynamic> result, String provider) {
-    final akofaAmount = result['akofaAmount'] ?? 0.0;
+    final akofaAmount = (result['akofaAmount'] as double?) ??
+        _selectedAmount * 0.01; // fallback estimate
     final localAmount = result['localAmount'] ?? _selectedAmount;
     final currencySymbol = _getCurrencySymbol();
+    final checkoutRequestId = result['checkoutRequestId'] as String?;
 
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.darkGrey,
-        title: Text(
-          'Payment Initiated',
-          style: TextStyle(color: AppTheme.primaryGold),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.phone_android, color: AppTheme.primaryGold, size: 48),
-            const SizedBox(height: 16),
-            Text(
-              'Check your phone for the $provider payment prompt.',
-              style: TextStyle(color: AppTheme.white),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Amount: $currencySymbol ${localAmount.toInt()}',
-              style: TextStyle(color: AppTheme.grey),
-            ),
-            Text(
-              'Tokens: ${akofaAmount.toStringAsFixed(2)} AKOFA',
+      builder: (dialogContext) {
+        bool isCheckingStatus = false;
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            backgroundColor: AppTheme.darkGrey,
+            title: Text(
+              'Payment Initiated',
               style: TextStyle(color: AppTheme.primaryGold),
             ),
-            const SizedBox(height: 16),
-            Text(
-              'Payment should complete within 5-10 minutes.',
-              style: TextStyle(color: AppTheme.grey, fontSize: 12),
-              textAlign: TextAlign.center,
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 400),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.phone_android,
+                        color: AppTheme.primaryGold, size: 48),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Check your phone for the $provider payment prompt.',
+                      style: TextStyle(color: AppTheme.white),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Amount: $currencySymbol ${localAmount.toInt()}',
+                      style: TextStyle(color: AppTheme.grey),
+                    ),
+                    Text(
+                      'Tokens: ${akofaAmount.toStringAsFixed(2)} AKOFA',
+                      style: TextStyle(color: AppTheme.primaryGold),
+                    ),
+                    if (checkoutRequestId != null) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        'Tap refresh after approving the STK prompt to confirm.',
+                        style: TextStyle(color: AppTheme.grey, fontSize: 12),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('OK', style: TextStyle(color: AppTheme.primaryGold)),
+            actions: [
+              if (checkoutRequestId != null)
+                TextButton(
+                  onPressed: isCheckingStatus
+                      ? null
+                      : () async {
+                          setDialogState(() => isCheckingStatus = true);
+                          final status = await widget.walletProvider
+                              .checkPaymentStatus(checkoutRequestId);
+                          setDialogState(() => isCheckingStatus = false);
+
+                          if (!mounted) return;
+
+                          if (status['success'] == true &&
+                              status['status'] == 'completed') {
+                            Navigator.pop(dialogContext);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Payment successful! ${akofaAmount.toStringAsFixed(2)} AKOFA credited.',
+                                ),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                          } else {
+                            final message = status['message'] ??
+                                status['resultDesc'] ??
+                                'Still pending. Try again in a moment.';
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(message),
+                                backgroundColor: Colors.orange,
+                              ),
+                            );
+                          }
+                        },
+                  child: isCheckingStatus
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppTheme.primaryGold,
+                          ),
+                        )
+                      : Text(
+                          'Refresh Status',
+                          style: TextStyle(color: AppTheme.primaryGold),
+                        ),
+                ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: Text(
+                  'Close',
+                  style: TextStyle(color: AppTheme.primaryGold),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

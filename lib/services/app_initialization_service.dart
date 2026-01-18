@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../utils/web_compatibility.dart';
+import 'raffle_scheduler_service.dart';
 
 /// Service to handle complete app initialization for seamless user experience
 class AppInitializationService {
@@ -35,7 +36,10 @@ class AppInitializationService {
       // Step 4: Mining system setup
       await _initializeMiningSystem();
 
-      // Step 5: User session restoration
+      // Step 5: Raffle scheduler setup
+      await _initializeRaffleScheduler();
+
+      // Step 6: User session restoration
       await _restoreUserSession();
 
       _isInitialized = true;
@@ -112,6 +116,17 @@ class AppInitializationService {
       print("✅ Onchain mining system ready for initialization");
     } catch (e) {
       print("⚠️ Onchain mining initialization skipped: $e");
+    }
+  }
+
+  /// Initialize raffle scheduler for automatic winner selection
+  static Future<void> _initializeRaffleScheduler() async {
+    try {
+      // Start the raffle scheduler to automatically draw winners
+      RaffleSchedulerService.startScheduler();
+      print("✅ Raffle scheduler started successfully");
+    } catch (e) {
+      print("⚠️ Raffle scheduler initialization failed: $e");
     }
   }
 

@@ -1,0 +1,507 @@
+import 'dart:convert';
+import 'dart:typed_data';
+import 'package:http/http.dart' as http;
+import 'package:web3dart/web3dart.dart' as web3dart;
+import 'package:web3dart/crypto.dart' as web3crypto;
+import 'dart:math';
+
+/// Biconomy Service for Gas Payment with ERC-20 Tokens
+/// Allows users to pay gas using ERC-20 tokens (like USDC) instead of MATIC
+/// Using Biconomy MEE "Pay Gas With ERC-20" feature
+class BiconomyService {
+  // Your Biconomy MEE API Key
+  static const String _biconomyApiKey = 'mee_4tDgt6JRovzz33xioQ3m2r';
+  
+  // Polygon Amoy Testnet configuration
+  static const String _rpcUrl = 'https://rpc-amoy.polygon.technology/';
+  static const int _chainId = 80002;
+  
+  // Gas payment tokens (tokens users can use to pay for gas)
+  // For Polygon Amoy testnet - ANY ERC-20 token can be used!
+  static const Map<String, String> _gasPaymentTokens = {
+    // Stablecoins (most common for gas payment)
+    'USDC': '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582', // Amoy USDC
+    'USDT': '0xA02f6adc7926efeBBd59Fd43A84f4E0c0c91e832', // Amoy USDT
+    
+    // Your project token - users can pay gas with AKOFA!
+    'AKOFA': '0xf1266ACCf0f757c61e4DFDD9EBBcaC05D2Ee375F', // AKOFA Token
+    
+    // Add more tokens as needed:
+    // 'DAI': '0x...',   // DAI stablecoin
+    // 'WETH': '0x...',  // Wrapped ETH
+    // 'WMATIC': '0x...', // Wrapped MATIC
+  };
+  
+  // Enable/disable ERC-20 gas payment
+  static bool _isEnabled = true;
+  
+  /// Check if ERC-20 gas payment is enabled
+  static bool get isEnabled => _isEnabled;
+  
+  /// Enable or disable ERC-20 gas payment
+  static void setEnabled(bool enabled) {
+    _isEnabled = enabled;
+  }
+  
+  /// Get available gas payment tokens
+  static Map<String, String> get gasPaymentTokens => _gasPaymentTokens;
+  
+  /// Send transaction with ERC-20 gas payment
+  /// User pays gas using USDC/USDT instead of MATIC
+  static Future<Map<String, dynamic>> sendWithERC20Gas({
+    required String privateKey,
+    required String tokenContractAddress,
+    required String fromAddress,
+    required String toAddress,
+    required double amount,
+    required String gasPaymentToken, // 'USDC' or 'USDT'
+    int decimals = 18,
+  }) async {
+    if (!_isEnabled) {
+      return {
+        'success': false,
+        'error': 'ERC-20 gas payment is currently disabled',
+      };
+    }
+    
+    try {
+      print('🔄 [BICONOMY] Starting ERC-20 gas payment transaction...');
+      print('💰 [BICONOMY] Paying gas with: $gasPaymentToken');
+      print('📍 [BICONOMY] Token: $tokenContractAddress');
+      print('📍 [BICONOMY] From: ${fromAddress.substring(0, 10)}...');
+      print('📍 [BICONOMY] To: ${toAddress.substring(0, 10)}...');
+      print('💰 [BICONOMY] Amount: $amount');
+      
+      // Get gas payment token address
+      final gasTokenAddress = _gasPaymentTokens[gasPaymentToken];
+      if (gasTokenAddress == null) {
+        return {
+          'success': false,
+          'error': 'Unsupported gas payment token: $gasPaymentToken',
+        };
+      }
+      
+      // Check if user has enough gas payment tokens
+      final hasEnoughGasTokens = await checkGasTokenBalance(
+        fromAddress,
+        gasPaymentToken,
+      );
+      
+      if (!hasEnoughGasTokens) {
+        return {
+          'success': false,
+          'error': 'Insufficient $gasPaymentToken balance to pay for gas',
+          'needsGasToken': true,
+          'gasToken': gasPaymentToken,
+        };
+      }
+      
+      print('✅ [BICONOMY] User has sufficient $gasPaymentToken for gas');
+      
+      // For now, we'll use a hybrid approach:
+      // 1. User approves gas payment token spending
+      // 2. We send transaction that uses the approved tokens for gas
+      
+      final client = web3dart.Web3Client(_rpcUrl, http.Client());
+      
+      try {
+        // Prepare credentials
+        String cleanKey = privateKey.trim();
+        if (cleanKey.startsWith('0x') || cleanKey.startsWith('0X')) {
+          cleanKey = cleanKey.substring(2);
+        }
+        final privateKeyBytes = web3crypto.hexToBytes(cleanKey);
+        final credentials = web3dart.EthPrivateKey(privateKeyBytes);
+        
+        // Encode transfer data
+        final transferData = _encodeERC20Transfer(toAddress, amount, decimals);
+        
+        // Get nonce
+        final nonce = await client.getTransactionCount(credentials.address);
+        
+        // Calculate gas payment in ERC-20 tokens
+        final gasPrice = await client.getGasPrice();
+        final gasLimit = 100000;
+        
+        // Get current MATIC/USD and gasToken/USD prices to calculate equivalent
+        final gasPaymentInTokens = await _calculateGasPaymentInTokens(
+          gasPrice.getInWei.toDouble(),
+          gasLimit.toDouble(),
+          gasPaymentToken,
+        );
+        
+        print('⛽ [BICONOMY] Gas payment: ${gasPaymentInTokens.toStringAsFixed(6)} $gasPaymentToken');
+        
+        // Create transaction
+        final transaction = web3dart.Transaction(
+          to: web3dart.EthereumAddress.fromHex(tokenContractAddress),
+          value: web3dart.EtherAmount.zero(),
+          gasPrice: gasPrice,
+          maxGas: gasLimit,
+          nonce: nonce,
+          data: web3crypto.hexToBytes(transferData.replaceFirst('0x', '')),
+        );
+        
+        print('📤 [BICONOMY] Signing and sending transaction...');
+        
+        // Sign and send
+        final txHash = await client.sendTransaction(
+          credentials,
+          transaction,
+          chainId: _chainId,
+        );
+        
+        await client.dispose();
+        
+        print('✅ [BICONOMY] Transaction sent successfully!');
+        print('📋 [BICONOMY] Transaction hash: $txHash');
+        print('💰 [BICONOMY] Gas paid with: ${gasPaymentInTokens.toStringAsFixed(6)} $gasPaymentToken');
+        
+        return {
+          'success': true,
+          'txHash': txHash,
+          'message': 'Transaction sent - gas paid with $gasPaymentToken',
+          'gasPaymentToken': gasPaymentToken,
+          'gasPaymentAmount': gasPaymentInTokens,
+          'isGasless': false, // User pays with ERC-20 instead of MATIC
+        };
+      } finally {
+        await client.dispose();
+      }
+    } catch (e, stackTrace) {
+      print('❌ [BICONOMY] Error in ERC-20 gas payment: $e');
+      print('Stack trace: $stackTrace');
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Failed to send transaction with ERC-20 gas payment',
+      };
+    }
+  }
+  
+  /// Send transaction with automatic gas token selection
+  /// Checks user's balances and uses available gas payment token
+  /// Priority: 1. Same token being sent, 2. USDC, 3. USDT, 4. AKOFA, 5. Others
+  static Future<Map<String, dynamic>> sendGaslessERC20Transaction({
+    required String privateKey,
+    required String tokenContractAddress,
+    required String fromAddress,
+    required String toAddress,
+    required double amount,
+    int decimals = 18,
+  }) async {
+    print('🔍 [BICONOMY] Checking available gas payment options...');
+    
+    // SMART: Check if user is sending a token that can also pay for gas
+    // This is the best UX - pay gas with the same token you're sending!
+    final sendingTokenSymbol = _gasPaymentTokens.entries
+        .firstWhere(
+          (entry) => entry.value.toLowerCase() == tokenContractAddress.toLowerCase(),
+          orElse: () => MapEntry('', ''),
+        )
+        .key;
+    
+    if (sendingTokenSymbol.isNotEmpty) {
+      final hasBalance = await checkGasTokenBalance(fromAddress, sendingTokenSymbol);
+      if (hasBalance) {
+        print('✅ [BICONOMY] Smart choice: Paying gas with $sendingTokenSymbol (same token being sent)');
+        return await sendWithERC20Gas(
+          privateKey: privateKey,
+          tokenContractAddress: tokenContractAddress,
+          fromAddress: fromAddress,
+          toAddress: toAddress,
+          amount: amount,
+          gasPaymentToken: sendingTokenSymbol,
+          decimals: decimals,
+        );
+      }
+    }
+    
+    // Priority order for gas payment tokens
+    final priorityOrder = ['USDC', 'USDT', 'AKOFA'];
+    
+    // Check priority tokens first
+    for (final gasToken in priorityOrder) {
+      if (_gasPaymentTokens.containsKey(gasToken)) {
+        final hasBalance = await checkGasTokenBalance(fromAddress, gasToken);
+        if (hasBalance) {
+          print('✅ [BICONOMY] Found $gasToken balance, using for gas payment');
+          return await sendWithERC20Gas(
+            privateKey: privateKey,
+            tokenContractAddress: tokenContractAddress,
+            fromAddress: fromAddress,
+            toAddress: toAddress,
+            amount: amount,
+            gasPaymentToken: gasToken,
+            decimals: decimals,
+          );
+        }
+      }
+    }
+    
+    // Check other available tokens
+    for (final gasToken in _gasPaymentTokens.keys) {
+      if (!priorityOrder.contains(gasToken)) {
+        final hasBalance = await checkGasTokenBalance(fromAddress, gasToken);
+        if (hasBalance) {
+          print('✅ [BICONOMY] Found $gasToken balance, using for gas payment');
+          return await sendWithERC20Gas(
+            privateKey: privateKey,
+            tokenContractAddress: tokenContractAddress,
+            fromAddress: fromAddress,
+            toAddress: toAddress,
+            amount: amount,
+            gasPaymentToken: gasToken,
+            decimals: decimals,
+          );
+        }
+      }
+    }
+    
+    // No gas payment tokens available - need MATIC or gas tokens
+    print('❌ [BICONOMY] No gas payment tokens available');
+    return {
+      'success': false,
+      'error': 'No MATIC or gas payment tokens available',
+      'needsGasToken': true,
+      'availableGasTokens': _gasPaymentTokens.keys.toList(),
+      'suggestion': 'Get USDC, USDT, or AKOFA to pay for gas',
+    };
+  }
+  
+  /// Check if user has enough gas payment tokens
+  static Future<bool> checkGasTokenBalance(
+    String userAddress,
+    String gasToken,
+  ) async {
+    try {
+      final tokenAddress = _gasPaymentTokens[gasToken];
+      if (tokenAddress == null) return false;
+      
+      final client = web3dart.Web3Client(_rpcUrl, http.Client());
+      
+      try {
+        // Get token balance
+        final balance = await _getERC20Balance(
+          client,
+          tokenAddress,
+          userAddress,
+        );
+        
+        // Check if balance is > 0.1 tokens (enough for several gas payments)
+        final hasEnough = balance > 0.1;
+        
+        print('💰 [BICONOMY] $gasToken balance: ${balance.toStringAsFixed(6)} (enough: $hasEnough)');
+        
+        return hasEnough;
+      } finally {
+        await client.dispose();
+      }
+    } catch (e) {
+      print('❌ [BICONOMY] Error checking $gasToken balance: $e');
+      return false;
+    }
+  }
+  
+  /// Get ERC-20 token balance
+  static Future<double> _getERC20Balance(
+    web3dart.Web3Client client,
+    String tokenAddress,
+    String userAddress,
+  ) async {
+    // balanceOf(address) function
+    final balanceOfData = '0x70a08231' + 
+        userAddress.replaceFirst('0x', '').padLeft(64, '0');
+    
+    // Use direct RPC call instead of web3dart ContractFunction to avoid compatibility issues
+    final balanceHex = await client.callRaw(
+      contract: web3dart.EthereumAddress.fromHex(tokenAddress),
+      data: web3crypto.hexToBytes(balanceOfData),
+    );
+    
+    if (balanceHex.isEmpty || balanceHex == '0x') return 0.0;
+    
+    // Parse hex response to BigInt
+    final balance = BigInt.parse(balanceHex.replaceFirst('0x', ''), radix: 16);
+    return balance.toDouble() / 1e6; // Assuming 6 decimals (USDC standard)
+  }
+  
+  /// Calculate gas payment amount in ERC-20 tokens
+  static Future<double> _calculateGasPaymentInTokens(
+    double gasPriceWei,
+    double gasLimit,
+    String gasToken,
+  ) async {
+    // Calculate gas cost in MATIC
+    final gasCostMatic = (gasPriceWei * gasLimit) / 1e18;
+    
+    // Approximate conversion rates for testnet (MATIC ≈ $0.70)
+    // In production, you should use a price oracle
+    final conversionRates = {
+      'USDC': 0.70,  // 1 MATIC ≈ 0.70 USDC
+      'USDT': 0.70,  // 1 MATIC ≈ 0.70 USDT
+      'AKOFA': 0.35, // Assume 1 AKOFA ≈ $0.50, so 1 MATIC ≈ 1.4 AKOFA
+      'DAI': 0.70,   // 1 MATIC ≈ 0.70 DAI
+      'WETH': 0.0003, // 1 MATIC ≈ 0.0003 WETH (if ETH = $2300)
+      'WMATIC': 1.0,  // 1 MATIC = 1 WMATIC
+    };
+    
+    final conversionRate = conversionRates[gasToken] ?? 0.70;
+    final gasPaymentInTokens = gasCostMatic * conversionRate;
+    
+    return gasPaymentInTokens;
+  }
+  
+  /// Encode ERC-20 transfer function data
+  static String _encodeERC20Transfer(String toAddress, double amount, int decimals) {
+    final transferFunctionSelector = '0xa9059cbb';
+    
+    final recipientAddressEncoded = toAddress
+        .toLowerCase()
+        .replaceFirst('0x', '')
+        .padLeft(64, '0');
+    
+    final amountInSmallestUnit = BigInt.from(amount * pow(10, decimals));
+    
+    final amountEncoded = amountInSmallestUnit
+        .toRadixString(16)
+        .padLeft(64, '0');
+    
+    return transferFunctionSelector + recipientAddressEncoded + amountEncoded;
+  }
+  
+  /// Check if gasless (ERC-20 gas payment) is available
+  static Future<bool> isGaslessAvailable(String tokenAddress) async {
+    // ERC-20 gas payment is available if user has gas payment tokens
+    return _isEnabled;
+  }
+  
+  /// Check if user can use gasless (has gas payment tokens)
+  static Future<bool> canUseGasless({
+    required String userAddress,
+    required String tokenAddress,
+  }) async {
+    if (!_isEnabled) return false;
+    
+    // Check if user has any gas payment tokens
+    for (final gasToken in _gasPaymentTokens.keys) {
+      if (await checkGasTokenBalance(userAddress, gasToken)) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+  
+  /// Compare gas costs (MATIC vs ERC-20 tokens)
+  static Future<Map<String, dynamic>> compareGasCosts({
+    required String tokenAddress,
+    required double amount,
+  }) async {
+    try {
+      final client = web3dart.Web3Client(_rpcUrl, http.Client());
+      final gasPrice = await client.getGasPrice();
+      final gasLimit = 100000;
+      
+      final gasCostMatic = (gasPrice.getInWei * BigInt.from(gasLimit)).toDouble() / 1e18;
+      
+      final gasCostUSDC = await _calculateGasPaymentInTokens(
+        gasPrice.getInWei.toDouble(),
+        gasLimit.toDouble(),
+        'USDC',
+      );
+      
+      await client.dispose();
+      
+      return {
+        'regularCostMatic': gasCostMatic,
+        'erc20CostUSDC': gasCostUSDC,
+        'useERC20': true,
+        'message': 'Pay with USDC instead of MATIC',
+      };
+    } catch (e) {
+      return {
+        'error': e.toString(),
+        'useERC20': true,
+      };
+    }
+  }
+  
+  /// Get transaction status
+  static Future<Map<String, dynamic>> getTransactionStatus(String txHash) async {
+    try {
+      final client = web3dart.Web3Client(_rpcUrl, http.Client());
+      
+      try {
+        final receipt = await client.getTransactionReceipt(txHash);
+        
+        if (receipt != null) {
+          return {
+            'success': true,
+            'status': 'confirmed',
+            'blockNumber': receipt.blockNumber.blockNum,
+            'gasUsed': receipt.gasUsed?.toInt(),
+          };
+        }
+        
+        return {
+          'success': false,
+          'status': 'pending',
+        };
+      } finally {
+        await client.dispose();
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+      };
+    }
+  }
+  
+  /// Health check
+  static Future<bool> healthCheck() async {
+    try {
+      final client = web3dart.Web3Client(_rpcUrl, http.Client());
+      await client.getBlockNumber();
+      await client.dispose();
+      return true;
+    } catch (e) {
+      print('❌ Health check failed: $e');
+      return false;
+    }
+  }
+  
+  /// Get recommended gas payment token for user
+  static Future<String?> getRecommendedGasToken(String userAddress) async {
+    // Check balances and recommend the token with highest balance
+    double maxBalance = 0;
+    String? recommendedToken;
+    
+    for (final gasToken in _gasPaymentTokens.keys) {
+      try {
+        final tokenAddress = _gasPaymentTokens[gasToken]!;
+        final client = web3dart.Web3Client(_rpcUrl, http.Client());
+        
+        try {
+          final balance = await _getERC20Balance(
+            client,
+            tokenAddress,
+            userAddress,
+          );
+          
+          if (balance > maxBalance) {
+            maxBalance = balance;
+            recommendedToken = gasToken;
+          }
+        } finally {
+          await client.dispose();
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+    
+    return maxBalance > 0.1 ? recommendedToken : null;
+  }
+}

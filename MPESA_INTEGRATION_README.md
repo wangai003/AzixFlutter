@@ -82,7 +82,7 @@ Flutter App → Your Backend → M-Pesa API
    app.post('/mpesa/stkpush', async (req, res) => {
      try {
        const response = await axios.post(
-         'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest',
+         'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/process',
          req.body,
          {
            headers: {

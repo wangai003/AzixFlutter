@@ -131,6 +131,10 @@ class TransactionService {
     final user = _auth.currentUser;
     if (user == null) return;
 
+    final blockchain =
+        (additionalMetadata?['blockchain'] as String?)?.toLowerCase() ??
+            'stellar';
+
     // Resolve sender's Akofa tag and address
     String? senderAkofaTag;
     String? senderAddress;
@@ -138,7 +142,11 @@ class TransactionService {
       final tagResult = await AkofaTagService.getUserTag(user.uid);
       if (tagResult['success']) {
         senderAkofaTag = tagResult['tag'];
-        senderAddress = tagResult['publicKey'];
+        final addresses = tagResult['addresses'] as Map<String, dynamic>? ?? {};
+        senderAddress =
+            addresses[blockchain]?['address'] ??
+                tagResult['publicKey'] ??
+                tagResult['stellarAddress'];
       }
     } catch (e) {
       // If tag resolution fails, use user ID as fallback
@@ -153,25 +161,28 @@ class TransactionService {
       try {
         final tagResult = await AkofaTagService.resolveTag(
           recipientAkofaTag,
-          blockchain: 'stellar',
+          blockchain: blockchain,
         );
         if (tagResult['success']) {
-          resolvedRecipientAddress = tagResult['publicKey'];
+          resolvedRecipientAddress =
+              tagResult['publicKey'] ?? tagResult['address'];
         }
       } catch (e) {
         // Keep original recipientAddress if resolution fails
       }
     } else {
-      // If no recipient tag provided, try to resolve tag from address
-      try {
-        final recipientTagResult = await AkofaTagService.resolveTagByAddress(
-          recipientAddress,
-        );
-        if (recipientTagResult['success'] == true) {
-          recipientAkofaTag = recipientTagResult['tag'];
+      // If no recipient tag provided, try to resolve tag from address (stellar only)
+      if (blockchain == 'stellar') {
+        try {
+          final recipientTagResult = await AkofaTagService.resolveTagByAddress(
+            recipientAddress,
+          );
+          if (recipientTagResult['success'] == true) {
+            recipientAkofaTag = recipientTagResult['tag'];
+          }
+        } catch (e) {
+          // Keep recipientAkofaTag as null if resolution fails
         }
-      } catch (e) {
-        // Keep recipientAkofaTag as null if resolution fails
       }
     }
 

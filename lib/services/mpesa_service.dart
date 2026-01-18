@@ -11,7 +11,8 @@ class MpesaService {
   // M-Pesa API endpoints
   static const String _baseUrl = 'https://sandbox.safaricom.co.ke';
   static const String _authUrl = '$_baseUrl/oauth/v1/generate?grant_type=client_credentials';
-  static const String _stkPushUrl = '$_baseUrl/mpesa/stkpush/v1/processrequest';
+  // Daraja 3.0 uses the /process endpoint (processrequest was deprecated)
+  static const String _stkPushUrl = '$_baseUrl/mpesa/stkpush/v1/process';
   static const String _queryUrl = '$_baseUrl/mpesa/stkpushquery/v1/query';
   
   // M-Pesa credentials - in production, these should be stored securely
@@ -30,6 +31,7 @@ class MpesaService {
         Uri.parse(_authUrl),
         headers: {
           'Authorization': auth,
+          'Accept': 'application/json',
         },
       );
       
@@ -106,6 +108,7 @@ class MpesaService {
         headers: {
           'Authorization': 'Bearer $accessToken',
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
         body: json.encode(body),
       );
@@ -177,6 +180,7 @@ class MpesaService {
         headers: {
           'Authorization': 'Bearer $accessToken',
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
         body: json.encode(body),
       );

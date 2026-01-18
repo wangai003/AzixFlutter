@@ -586,22 +586,12 @@ class _MiningScreenState extends State<MiningScreen> {
                               padding: const EdgeInsets.all(20),
                               child: Column(
                                 children: [
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(
-                                        Icons.monetization_on,
-                                        color: AppTheme.primaryGold,
-                                        size: 24,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        'Mined AKOFA',
-                                        style: AppTheme.labelMedium.copyWith(
-                                          color: AppTheme.grey,
-                                        ),
-                                      ),
-                                    ],
+                                  Text(
+                                    'Mined AKOFA',
+                                    textAlign: TextAlign.center,
+                                    style: AppTheme.labelMedium.copyWith(
+                                      color: AppTheme.grey,
+                                    ),
                                   ),
                                   const SizedBox(height: 12),
                                   Text(

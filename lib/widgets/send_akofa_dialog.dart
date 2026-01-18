@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/akofa_tag_service.dart';
-import '../services/secure_wallet_service.dart';
+import '../services/polygon_wallet_service.dart';
 import '../theme/app_theme.dart';
 
 class SendAkofaDialog extends StatefulWidget {
@@ -143,15 +143,13 @@ class _SendAkofaDialogState extends State<SendAkofaDialog> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) throw Exception('User not authenticated');
 
-      final result = await SecureWalletService.signTransactionWithPassword(
+      const akofaContractAddress = '0xf1266ACCf0f757c61e4DFDD9EBBcaC05D2Ee375F';
+      final result = await PolygonWalletService.sendERC20TokenWithAuth(
         userId: user.uid,
         password: password,
-        recipientAddress: _resolvedAddress!,
+        tokenContractAddress: akofaContractAddress,
+        toAddress: _resolvedAddress!,
         amount: amount,
-        assetCode: 'AKOFA',
-        memo: _memoController.text.trim().isNotEmpty
-            ? _memoController.text.trim()
-            : 'AKOFA Transfer',
       );
 
       if (result['success']) {
@@ -159,6 +157,32 @@ class _SendAkofaDialogState extends State<SendAkofaDialog> {
           _successMessage =
               'Successfully sent $amount AKOFA to ${_resolvedName ?? _recipientController.text}';
         });
+
+        // Surface gas sponsor details for QA visibility (if applicable)
+        if (result['maticToppedUp'] == true) {
+          final feeToken = result['feeToken'] as String?;
+          final feeCharged = result['feeCharged'] as double?;
+          final feeTxHash = result['feeTxHash'] as String?;
+          final topUpTxHash = result['topUpTxHash'] as String?;
+
+          final details = <String>[
+            if (feeCharged != null && feeToken != null)
+              'Fee: ${feeCharged.toStringAsFixed(6)} $feeToken',
+            if (feeTxHash != null && feeTxHash.isNotEmpty)
+              'Fee Tx: ${feeTxHash.substring(0, 8)}...',
+            if (topUpTxHash != null && topUpTxHash.isNotEmpty)
+              'Top-up Tx: ${topUpTxHash.substring(0, 8)}...',
+          ].join(' | ');
+
+          if (details.isNotEmpty && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Gas sponsored. $details'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        }
 
         // Clear form after successful send
         _amountController.clear();

@@ -1,0 +1,124 @@
+===================================
+AZIXFLUTTER GASLESS BACKEND SETUP
+===================================
+
+QUICK START:
+-----------
+1. npm install
+2. Copy env.example to .env
+3. Fill in .env with your credentials
+4. npm run dev
+
+REQUIREMENTS:
+------------
+- Node.js 16+
+- Biconomy MEE API key (you have: mee_4tDgt6JRovzz33xioQ3m2r)
+- Bundler URL (from dashboard.biconomy.io)
+- Paymaster URL (from dashboard.biconomy.io)
+- Backend wallet with testnet MATIC
+- Firebase credentials
+
+STEPS IN DETAIL:
+---------------
+
+1. INSTALL DEPENDENCIES
+   npm install
+
+2. CREATE BACKEND WALLET
+   node -e "console.log(require('ethers').Wallet.createRandom().privateKey)"
+   
+   Save the private key!
+
+3. GET WALLET ADDRESS
+   node -e "console.log(new (require('ethers').Wallet)('YOUR_PRIVATE_KEY').address)"
+   
+   Fund this address with testnet MATIC at: https://faucet.polygon.technology/
+
+4. GET BICONOMY URLS
+   - Go to: https://dashboard.biconomy.io
+   - Select your MEE project
+   - Copy Bundler URL (looks like: https://bundler.biconomy.io/api/v2/80002/...)
+   - Copy Paymaster URL (looks like: https://paymaster.biconomy.io/api/v1/80002/...)
+
+5. CONFIGURE .ENV
+   cp env.example .env
+   nano .env (or use any text editor)
+   
+   Fill in ALL values:
+   - BICONOMY_API_KEY=mee_4tDgt6JRovzz33xioQ3m2r
+   - BICONOMY_BUNDLER_URL=your_bundler_url
+   - BICONOMY_PAYMASTER_URL=your_paymaster_url
+   - SERVER_PRIVATE_KEY=your_backend_wallet_private_key
+   - Firebase credentials
+   - All other values from template
+
+6. START SERVER
+   npm run dev
+   
+   You should see:
+   🚀 AzixFlutter Gasless Backend running on port 3000
+
+7. TEST
+   curl http://localhost:3000/health
+   
+   Should return JSON with status "ok"
+
+8. UPDATE FLUTTER APP
+   In lib/services/biconomy_backend_service.dart:
+   
+   For mobile testing, change:
+   static const String _backendUrl = 'http://YOUR_COMPUTER_IP:3000';
+   
+   Find your IP:
+   Mac: ifconfig | grep "inet "
+   Windows: ipconfig
+
+9. DEPLOY TO PRODUCTION (OPTIONAL)
+   
+   Heroku:
+   heroku create azixflutter-backend
+   heroku config:set BICONOMY_API_KEY=mee_...
+   (set all env vars)
+   git push heroku main
+   
+   Then update Flutter with production URL.
+
+COSTS:
+-----
+- Backend server: ~$5-7/month (Heroku/Railway)
+- Gas per transaction: ~$0.001-0.002 (you pay)
+- User pays: $0.00 (FREE!)
+
+TROUBLESHOOTING:
+---------------
+Backend won't start:
+  - Check Node.js version: node --version (need 16+)
+  - Check .env file exists and has all values
+  - Reinstall: rm -rf node_modules && npm install
+
+Biconomy SDK error:
+  - Verify Bundler URL is correct
+  - Verify Paymaster URL is correct
+  - Check backend wallet has MATIC
+  - Ensure CHAIN_ID=80002
+
+Flutter can't connect:
+  - Use your computer's IP (not localhost) for mobile
+  - Check backend is running
+  - Check firewall allows port 3000
+
+ENDPOINTS:
+---------
+POST /api/gasless/send-token - Send gasless ERC-20 transaction
+POST /api/gasless/estimate-gas - Estimate gas cost
+GET /api/gasless/transaction-status/:txHash - Get TX status
+POST /api/gasless/check-eligibility - Check user eligibility
+GET /health - Health check
+
+All endpoints except /health require Firebase authentication token in header:
+Authorization: Bearer <firebase-id-token>
+
+===================================
+Ready! Start with: npm install
+===================================
+

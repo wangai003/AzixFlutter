@@ -128,7 +128,7 @@ app.post('/mpesa/stkpush', async (req, res) => {
 
     // Make STK Push request
     const stkResponse = await axios.post(
-      'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest',
+      'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/process',
       req.body,
       {
         headers: {

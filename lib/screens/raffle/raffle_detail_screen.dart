@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../models/raffle_model.dart';
 import '../../services/raffle_service.dart';
-import '../../services/secure_wallet_service.dart';
+import '../../providers/admin_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/responsive_layout.dart';
 import '../../widgets/custom_button.dart';
@@ -38,11 +38,21 @@ class _RaffleDetailScreenState extends State<RaffleDetailScreen> {
   Future<void> _initializeData() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      // Load user's entries for this raffle
-      _userEntries = await RaffleService.getUserEntries(
-        raffleId: widget.raffle.id,
-        userId: user.uid,
+      // Check if user has entered this raffle
+      final hasEntered = await RaffleService.hasUserEnteredRaffle(
+        user.uid,
+        widget.raffle.id,
       );
+      
+      if (hasEntered) {
+        final entry = await RaffleService.getUserRaffleEntry(
+          user.uid,
+          widget.raffle.id,
+        );
+        if (entry != null) {
+          _userEntries = [entry];
+        }
+      }
     }
 
     // Set up real-time streams
@@ -366,68 +376,37 @@ class _RaffleDetailScreenState extends State<RaffleDetailScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Entry Requirements',
+          'How to Enter',
           style: AppTheme.headingMedium.copyWith(color: AppTheme.white),
         ),
         const SizedBox(height: 12),
         Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: AppTheme.darkGrey,
+            color: AppTheme.green.withOpacity(0.1),
             borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppTheme.green.withOpacity(0.3)),
           ),
-          child: Column(
-            children: _raffle.entryRequirements.entries.map((entry) {
-              return _buildRequirementItem(entry.key, entry.value);
-            }).toList(),
+          child: Row(
+            children: [
+              Icon(Icons.check_circle, color: AppTheme.green, size: 28),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  'Free Entry - Just Click "Enter Raffle" Button!',
+                  style: AppTheme.bodyLarge.copyWith(
+                    color: AppTheme.white,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ],
     );
   }
 
-  Widget _buildRequirementItem(String key, dynamic value) {
-    String displayText;
-    IconData icon;
-
-    switch (key) {
-      case 'type':
-        displayText = 'Entry Type: ${value.toString().toUpperCase()}';
-        icon = Icons.info;
-        break;
-      case 'cost':
-        displayText = 'Cost: $value AKOFA';
-        icon = Icons.attach_money;
-        break;
-      case 'minBalance':
-        displayText = 'Minimum Balance: $value AKOFA';
-        icon = Icons.account_balance_wallet;
-        break;
-      case 'referralRequired':
-        displayText = value == true
-            ? 'Referral Required'
-            : 'No Referral Needed';
-        icon = Icons.share;
-        break;
-      default:
-        displayText = '$key: $value';
-        icon = Icons.settings;
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Icon(icon, color: AppTheme.primaryGold, size: 20),
-          const SizedBox(width: 12),
-          Text(
-            displayText,
-            style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _buildPrizeDetails() {
     return Column(
@@ -460,16 +439,20 @@ class _RaffleDetailScreenState extends State<RaffleDetailScreen> {
 
     switch (key) {
       case 'type':
-        displayText = 'Prize Type: ${value.toString().toUpperCase()}';
-        icon = Icons.emoji_events;
+        displayText = 'Type: $value';
+        icon = Icons.card_giftcard;
         break;
       case 'value':
-        displayText = 'Value: $value AKOFA';
+        displayText = 'Value: $value';
         icon = Icons.attach_money;
         break;
       case 'description':
-        displayText = 'Description: $value';
+        displayText = value.toString();
         icon = Icons.description;
+        break;
+      case 'totalValue':
+        displayText = 'Total Value: $value';
+        icon = Icons.paid;
         break;
       default:
         displayText = '$key: $value';
@@ -477,10 +460,10 @@ class _RaffleDetailScreenState extends State<RaffleDetailScreen> {
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
-          Icon(icon, color: AppTheme.primaryGold, size: 20),
+          Icon(icon, color: AppTheme.primaryGold, size: 22),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
@@ -536,48 +519,80 @@ class _RaffleDetailScreenState extends State<RaffleDetailScreen> {
             width: double.infinity,
           ),
 
-        if (_raffle.creatorId == user.uid) ...[
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => _editRaffle(),
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: AppTheme.primaryGold),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                  child: Text(
-                    'Edit',
-                    style: AppTheme.buttonMedium.copyWith(
-                      color: AppTheme.primaryGold,
+        // Admin/Creator actions
+        Builder(
+          builder: (context) {
+            final adminProvider = Provider.of<AdminProvider>(context);
+            final isAdmin = adminProvider.isAdmin;
+            final isCreator = _raffle.creatorId == user.uid;
+            
+            if (!isAdmin && !isCreator) {
+              return const SizedBox.shrink();
+            }
+
+            return Column(
+              children: [
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    if (isCreator) ...[
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => _editRaffle(),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: AppTheme.primaryGold),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          child: Text(
+                            'Edit',
+                            style: AppTheme.buttonMedium.copyWith(
+                              color: AppTheme.primaryGold,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: _raffle.status == RaffleStatus.draft
+                              ? () => _activateRaffle()
+                              : null,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.green,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          child: Text(
+                            _raffle.status == RaffleStatus.draft
+                                ? 'Activate'
+                                : 'Active',
+                            style: AppTheme.buttonMedium.copyWith(
+                              color: AppTheme.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // Delete button (Admin or Creator)
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => _deleteRaffle(context, isAdmin),
+                    icon: const Icon(Icons.delete_outline, size: 20),
+                    label: const Text('Delete Raffle'),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: AppTheme.red),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      foregroundColor: AppTheme.red,
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: _raffle.status == RaffleStatus.draft
-                      ? () => _activateRaffle()
-                      : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.green,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                  child: Text(
-                    _raffle.status == RaffleStatus.draft
-                        ? 'Activate'
-                        : 'Active',
-                    style: AppTheme.buttonMedium.copyWith(
-                      color: AppTheme.white,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
+              ],
+            );
+          },
+        ),
       ],
     );
   }
@@ -671,38 +686,12 @@ class _RaffleDetailScreenState extends State<RaffleDetailScreen> {
     setState(() => _isEntering = true);
 
     try {
-      // Check wallet authentication
-      final authResult = await SecureWalletService.authenticateAndDecryptWallet(
-        user.uid,
-        '', // Password will be prompted by the service
-      );
-
-      if (!authResult['success']) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Wallet authentication failed: ${authResult['error']}',
-            ),
-            backgroundColor: AppTheme.red,
-          ),
-        );
-        return;
-      }
-
-      // Create entry verification data
-      final verificationData = {
-        'walletAuthenticated': true,
-        'timestamp': DateTime.now().toIso8601String(),
-        'entryMethod': 'wallet_auth',
-      };
-
-      // Enter the raffle
+      // Simple entry - just click to join!
       final entryId = await RaffleService.enterRaffle(
         raffleId: _raffle.id,
         userId: user.uid,
         userName: user.displayName ?? 'Anonymous',
-        userEmail: user.email,
-        verificationData: verificationData,
+        userEmail: user.email ?? 'no-email@example.com',
       );
 
       // Update local state
@@ -713,7 +702,10 @@ class _RaffleDetailScreenState extends State<RaffleDetailScreen> {
         userName: user.displayName ?? 'Anonymous',
         userEmail: user.email,
         entryDate: DateTime.now(),
-        verificationData: verificationData,
+        verificationData: {
+          'timestamp': DateTime.now().toIso8601String(),
+          'entryMethod': 'simple_click',
+        },
       );
 
       setState(() {
@@ -722,15 +714,17 @@ class _RaffleDetailScreenState extends State<RaffleDetailScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Successfully entered the raffle!'),
+          content: Text('🎉 You\'re in! Good luck!'),
           backgroundColor: AppTheme.green,
+          duration: Duration(seconds: 3),
         ),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to enter raffle: $e'),
+          content: Text(e.toString().replaceAll('Exception: ', '')),
           backgroundColor: AppTheme.red,
+          duration: const Duration(seconds: 4),
         ),
       );
     } finally {
@@ -780,6 +774,132 @@ class _RaffleDetailScreenState extends State<RaffleDetailScreen> {
           backgroundColor: AppTheme.red,
         ),
       );
+    }
+  }
+
+  Future<void> _deleteRaffle(BuildContext context, bool isAdmin) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.darkGrey,
+        title: Text(
+          'Delete Raffle?',
+          style: AppTheme.headingMedium.copyWith(color: AppTheme.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Are you sure you want to delete "${_raffle.title}"?',
+              style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
+            ),
+            const SizedBox(height: 12),
+            if (_raffle.currentEntries > 0)
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppTheme.red.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning, color: AppTheme.red, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'This raffle has ${_raffle.currentEntries} entries. All entries and winners will be permanently deleted.',
+                        style: AppTheme.bodySmall.copyWith(color: AppTheme.red),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 8),
+            Text(
+              'This action cannot be undone.',
+              style: AppTheme.bodySmall.copyWith(
+                color: AppTheme.grey,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              'Cancel',
+              style: AppTheme.buttonMedium.copyWith(color: AppTheme.grey),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.red,
+            ),
+            child: Text(
+              'Delete',
+              style: AppTheme.buttonMedium.copyWith(color: AppTheme.white),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    // Show loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(color: AppTheme.primaryGold),
+      ),
+    );
+
+    try {
+      await RaffleService.deleteRaffle(
+        raffleId: _raffle.id,
+        userId: user.uid,
+        isAdmin: isAdmin,
+      );
+
+      // Close loading dialog
+      if (context.mounted) Navigator.pop(context);
+
+      // Show success message
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Raffle deleted successfully'),
+            backgroundColor: AppTheme.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+
+      // Navigate back
+      if (context.mounted) Navigator.pop(context);
+    } catch (e) {
+      // Close loading dialog
+      if (context.mounted) Navigator.pop(context);
+
+      // Show error message
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to delete raffle: ${e.toString().replaceAll('Exception: ', '')}'),
+            backgroundColor: AppTheme.red,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
     }
   }
 

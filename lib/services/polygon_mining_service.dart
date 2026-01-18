@@ -44,8 +44,22 @@ class PolygonMiningService {
           .get();
 
       if (polygonWalletDoc.exists) {
-        final address = polygonWalletDoc.data()?['address'];
-        if (address != null) return address;
+        final data = polygonWalletDoc.data() ?? {};
+        final address = data['address'] as String?;
+        final previousAddress = data['previousAddress'] as String?;
+        final addressCorrected = data['addressCorrected'] == true;
+
+        if (address != null && address.isNotEmpty) {
+          // Always prefer the current stored (should already be the derived/authoritative address)
+          print('🏷️ [MINING] Using Polygon wallet address from polygon_wallets: $address');
+          if (previousAddress != null && previousAddress.isNotEmpty) {
+            print('ℹ️ [MINING] Previous wallet address (migrated): $previousAddress');
+          }
+          if (!addressCorrected && previousAddress != null && previousAddress.isNotEmpty) {
+            print('⚠️ [MINING] Warning: wallet was not flagged as corrected, but has previousAddress set.');
+          }
+          return address;
+        }
       }
 
       // Fallback to users collection
