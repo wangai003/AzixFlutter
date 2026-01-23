@@ -107,6 +107,7 @@ class PesapalService {
     required double tokenAmount,
     required String tokenSymbol,
     required String email,
+    required String walletAddress,
     String? phone,
     String? firstName,
     String? lastName,
@@ -180,6 +181,7 @@ class PesapalService {
         'amount': amountKES,
         'currency': currency,
         'email': email,
+      'walletAddress': walletAddress,
         'phone': phone,
         'firstName': firstName,
         'lastName': lastName,
@@ -310,41 +312,19 @@ class PesapalService {
           if (data['isCompleted'] == true) {
             debugPrint('✅ Payment completed: $orderTrackingId');
 
-            // Credit AKOFA tokens to user (via Polygon - same as mining)
-            final creditResult = await _creditAkofaTokens(orderTrackingId);
-            
-            if (creditResult['success'] == true) {
-              return {
-                'success': true,
-                'status': 'completed',
-                'confirmationCode': data['confirmationCode'],
-                'paymentMethod': data['paymentMethod'],
-                'amount': data['amount'],
-                'akofaAmount': creditResult['akofaAmount'] ?? data['akofaAmount'],
-                'txHash': creditResult['txHash'],
-                'explorerUrl': creditResult['explorerUrl'],
-                'message': 'Payment successful! ${creditResult['akofaAmount']?.toStringAsFixed(2) ?? ''} AKOFA tokens have been credited to your wallet.',
-              };
-            } else if (creditResult['alreadyCredited'] == true) {
-              return {
-                'success': true,
-                'status': 'completed',
-                'alreadyCredited': true,
-                'message': 'Payment was already processed. Tokens were credited earlier.',
-              };
-            } else if (creditResult['pending'] == true) {
-              return {
-                'success': true,
-                'status': 'pending_wallet',
-                'message': creditResult['error'] ?? 'Tokens will be credited when wallet is created.',
-              };
-            } else {
-              return {
-                'success': false,
-                'status': 'credit_failed',
-                'message': 'Payment received but token credit failed: ${creditResult['error']}',
-              };
-            }
+            return {
+              'success': true,
+              'status': 'completed',
+              'confirmationCode': data['confirmationCode'],
+              'paymentMethod': data['paymentMethod'],
+              'amount': data['amount'],
+              'tokenAmount': data['tokenAmount'],
+              'tokenSymbol': data['tokenSymbol'],
+              'txHash': data['txHash'],
+              'explorerUrl': data['explorerUrl'],
+              'message': data['message'] ??
+                  'Payment successful. Tokens are credited by the backend.',
+            };
           } else if (data['isFailed'] == true) {
             // Update transaction status to failed
             await _updateTransactionStatus(orderTrackingId, 'failed');

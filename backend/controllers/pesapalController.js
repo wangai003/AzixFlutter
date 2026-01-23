@@ -158,7 +158,7 @@ async function creditTokensIfNeeded(orderTrackingId, storedTx) {
     return { success: false, error: 'Backend wallet not configured' };
   }
 
-  const userAddress = await getUserPolygonAddress(userId);
+  const userAddress = storedTx.walletAddress || await getUserPolygonAddress(userId);
   if (!userAddress) {
     await upsertTransaction(orderTrackingId, {
       status: 'pending_wallet',
@@ -232,7 +232,9 @@ async function healthCheck(req, res) {
  */
 async function registerIPN(req, res) {
   try {
-    const result = await pesapalService.registerIPN();
+    const ipnUrl = req.body?.ipnUrl;
+    console.log('🧾 [PESAPAL] Registering IPN URL:', ipnUrl || process.env.PESAPAL_IPN_URL);
+    const result = await pesapalService.registerIPN(ipnUrl);
     res.json({
       success: true,
       ...result,
@@ -281,6 +283,7 @@ async function initiatePayment(req, res) {
       countryCode = 'KE',
       description,
       userId,
+      walletAddress,
       callbackUrl,
       tokenSymbol,
       tokenAmount,
@@ -300,6 +303,13 @@ async function initiatePayment(req, res) {
       return res.status(400).json({
         success: false,
         error: 'Email is required for card payments',
+      });
+    }
+
+    if (!walletAddress) {
+      return res.status(400).json({
+        success: false,
+        error: 'Wallet address is required for token purchases',
       });
     }
 
@@ -349,12 +359,14 @@ async function initiatePayment(req, res) {
       tokenSymbol: resolvedSymbol,
       email,
       userId,
+      walletAddress,
       status: 'pending',
       createdAt: new Date().toISOString(),
     });
 
     await upsertTransaction(result.orderTrackingId, {
       userId,
+      walletAddress,
       orderTrackingId: result.orderTrackingId,
       merchantReference,
       amountKES: amount,
@@ -425,11 +437,6 @@ async function queryStatus(req, res) {
       paymentStatus: status,
     });
 
-    let creditResult = null;
-    if (status.isCompleted) {
-      creditResult = await creditTokensIfNeeded(orderTrackingId, storedTx);
-    }
-
     res.json({
       success: true,
       ...status,
@@ -437,16 +444,10 @@ async function queryStatus(req, res) {
       tokenSymbol,
       originalAmount: storedTx?.amount ?? storedTx?.amountKES,
       originalCurrency: storedTx?.currency,
-      txHash: creditResult?.txHash ?? storedTx?.polygonTxHash,
-      explorerUrl: creditResult?.explorerUrl ?? storedTx?.polygonExplorerUrl,
-      creditStatus: creditResult?.success === true
-        ? 'credited'
-        : creditResult?.pending
-          ? 'pending_wallet'
-          : creditResult?.error
-            ? 'credit_failed'
-            : undefined,
-      creditError: creditResult?.error,
+      txHash: storedTx?.polygonTxHash,
+      explorerUrl: storedTx?.polygonExplorerUrl,
+      creditStatus: storedTx?.status,
+      creditError: storedTx?.creditError,
     });
   } catch (error) {
     console.error('Status query error:', error);
@@ -600,14 +601,7 @@ async function userCallback(req, res) {
 
     // For web redirect (when user is redirected from PesaPal)
     if (status.isCompleted) {
-      if (storedTx) {
-        const creditResult = await creditTokensIfNeeded(OrderTrackingId, storedTx);
-        if (creditResult.success) {
-          res.redirect(`/payment/success?trackingId=${OrderTrackingId}`);
-          return;
-        }
-      }
-      res.redirect(`/payment/pending?trackingId=${OrderTrackingId}`);
+      res.redirect(`/payment/success?trackingId=${OrderTrackingId}`);
     } else if (status.isFailed) {
       res.redirect(`/payment/failed?trackingId=${OrderTrackingId}&message=${encodeURIComponent(status.message || 'Payment failed')}`);
     } else {

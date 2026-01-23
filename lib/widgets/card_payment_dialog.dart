@@ -700,11 +700,18 @@ class _CardPaymentDialogState extends State<CardPaymentDialog> {
     setState(() => _isLoading = true);
 
     try {
+      final walletAddress = widget.walletProvider?.address as String?;
+      if (walletAddress == null || walletAddress.isEmpty) {
+        _showError('Please create a Polygon wallet before purchasing tokens.');
+        return;
+      }
+
       final result = await _pesapalService.initiateCardPayment(
         amountKES: _amountKES,
         tokenAmount: _tokenAmount,
         tokenSymbol: _selectedToken,
         email: _emailController.text.trim(),
+        walletAddress: walletAddress,
         phone: _phoneController.text.trim(),
         firstName: _firstNameController.text.trim(),
         lastName: _lastNameController.text.trim(),

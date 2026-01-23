@@ -83,14 +83,15 @@ async function getAccessToken() {
  * Register IPN (Instant Payment Notification) URL
  * This should be called once during setup
  */
-async function registerIPN() {
-  requireEnv('PESAPAL_IPN_URL', PESAPAL_IPN_URL);
+async function registerIPN(ipnUrlOverride) {
+  const ipnUrl = ipnUrlOverride || PESAPAL_IPN_URL;
+  requireEnv('PESAPAL_IPN_URL', ipnUrl);
 
   const token = await getAccessToken();
   const url = `${BASE_URL}/api/URLSetup/RegisterIPN`;
 
   const body = {
-    url: PESAPAL_IPN_URL,
+    url: ipnUrl,
     ipn_notification_type: 'POST',
   };
 

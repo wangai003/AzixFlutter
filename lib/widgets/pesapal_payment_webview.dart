@@ -57,13 +57,7 @@ class _PesapalPaymentWebViewState extends State<PesapalPaymentWebView> {
   static int _viewIdCounter = 0;
   late String _viewType;
   
-  // Auto-polling for payment status
-  Timer? _statusPollTimer;
-  final PesapalService _pesapalService = PesapalService();
-  bool _isCheckingStatus = false;
   String _paymentStatus = 'pending';
-  int _pollCount = 0;
-  static const int _maxPollAttempts = 30; // Stop after ~4 minutes (8s * 30)
 
   @override
   void initState() {
@@ -77,78 +71,6 @@ class _PesapalPaymentWebViewState extends State<PesapalPaymentWebView> {
       _setupMobileWebView();
     }
     
-    // Start auto-polling for payment status
-    _startStatusPolling();
-  }
-  
-  /// Start automatic payment status polling
-  void _startStatusPolling() {
-    debugPrint('🔄 Starting auto-poll for payment status...');
-    _statusPollTimer = Timer.periodic(const Duration(seconds: 8), (timer) async {
-      if (_paymentStatus == 'completed' || _paymentStatus == 'failed') {
-        timer.cancel();
-        return;
-      }
-      
-      if (_pollCount >= _maxPollAttempts) {
-        debugPrint('⏰ Max poll attempts reached, stopping auto-poll');
-        timer.cancel();
-        return;
-      }
-      
-      _pollCount++;
-      await _autoCheckPaymentStatus();
-    });
-  }
-  
-  /// Automatically check payment status (called by timer)
-  Future<void> _autoCheckPaymentStatus() async {
-    if (_isCheckingStatus) return; // Prevent concurrent checks
-    
-    setState(() => _isCheckingStatus = true);
-    
-    try {
-      debugPrint('🔍 Auto-checking payment status (attempt $_pollCount)...');
-      final result = await _pesapalService.queryPaymentStatus(
-        orderTrackingId: widget.orderTrackingId,
-      );
-      
-      debugPrint('📊 Status result: $result');
-      
-      if (result['success'] == true) {
-        final status = (result['status'] as String?)?.toLowerCase() ?? '';
-        final paymentStatusCode = result['payment_status_description'] as String?;
-        
-        debugPrint('📈 Payment status: $status, code: $paymentStatusCode');
-        
-        if (status == 'completed' || paymentStatusCode == 'Completed') {
-          // Get transaction details from result
-          final txHash = result['txHash'] as String?;
-          final tokenAmount = (result['tokenAmount'] as num?)?.toDouble() ?? 
-                              (result['akofaAmount'] as num?)?.toDouble() ?? 
-                              widget.tokenAmount;
-          final tokenSymbol = result['tokenSymbol'] as String? ?? widget.tokenSymbol;
-          final explorerUrl = result['explorerUrl'] as String?;
-          
-          _handlePaymentCompleted(
-            txHash: txHash,
-            tokenAmount: tokenAmount,
-            tokenSymbol: tokenSymbol,
-            explorerUrl: explorerUrl,
-          );
-        } else if (status == 'failed' || status == 'invalid' || status == 'credit_failed') {
-          final errorMessage = result['message'] as String?;
-          _handlePaymentFailed(errorMessage: errorMessage);
-        }
-        // Otherwise keep polling for pending status
-      }
-    } catch (e) {
-      debugPrint('❌ Auto-check error: $e');
-    } finally {
-      if (mounted) {
-        setState(() => _isCheckingStatus = false);
-      }
-    }
   }
   
   /// Handle successful payment - show success screen with transaction details
@@ -508,9 +430,8 @@ class _PesapalPaymentWebViewState extends State<PesapalPaymentWebView> {
   Future<void> _handleCallbackUrl(String url) async {
     if (url.contains('status=completed') || 
         url.contains('pesapal/callback') && url.contains('OrderTrackingId')) {
-      debugPrint('✅ Payment completed detected! Verifying status before closing...');
-      // Force a status check to ensure tokens are credited before closing
-      await _autoCheckPaymentStatus();
+      debugPrint('✅ Payment completed detected! Closing webview...');
+      widget.onPaymentComplete?.call();
     } else if (url.contains('status=cancelled') || url.contains('status=failed')) {
       debugPrint('❌ Payment cancelled/failed detected');
       widget.onPaymentCancelled?.call();
@@ -616,7 +537,7 @@ class _PesapalPaymentWebViewState extends State<PesapalPaymentWebView> {
             ),
           ),
 
-          // Bottom info bar with auto-poll status
+          // Bottom info bar
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -630,36 +551,13 @@ class _PesapalPaymentWebViewState extends State<PesapalPaymentWebView> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Auto-poll status indicator
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (_isCheckingStatus)
-                      SizedBox(
-                        width: 12,
-                        height: 12,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AppTheme.primaryGold,
-                        ),
-                      )
-                    else
-                      Icon(
-                        Icons.autorenew,
-                        color: AppTheme.primaryGold,
-                        size: 14,
-                      ),
-                    const SizedBox(width: 6),
-                    Text(
-                      _isCheckingStatus 
-                        ? 'Checking payment status...'
-                        : 'Auto-detecting payment (every 8s)',
-                      style: AppTheme.bodySmall.copyWith(
-                        color: AppTheme.primaryGold.withOpacity(0.8),
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
+                Text(
+                  'Payment status is confirmed by PesaPal IPN.',
+                  style: AppTheme.bodySmall.copyWith(
+                    color: AppTheme.primaryGold.withOpacity(0.8),
+                    fontSize: 11,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
                 // Info and cancel button row
@@ -705,9 +603,6 @@ class _PesapalPaymentWebViewState extends State<PesapalPaymentWebView> {
   }
 
   void _cancelPayment() {
-    // Cancel auto-polling
-    _statusPollTimer?.cancel();
-    
     // Call the cancelled callback
     widget.onPaymentCancelled?.call();
     
@@ -723,9 +618,6 @@ class _PesapalPaymentWebViewState extends State<PesapalPaymentWebView> {
 
   @override
   void dispose() {
-    // Cancel auto-poll timer
-    _statusPollTimer?.cancel();
-    
     if (kIsWeb && _iframeElement != null) {
       _iframeElement!.remove();
     }
