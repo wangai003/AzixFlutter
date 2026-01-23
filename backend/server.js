@@ -64,6 +64,67 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Lightweight payment status pages (avoid 404s on PesaPal redirects)
+app.get('/payment/:status', (req, res) => {
+  const { status } = req.params;
+  const { trackingId, message } = req.query;
+  const normalized = (status || '').toLowerCase();
+  const titles = {
+    success: 'Payment Successful',
+    failed: 'Payment Failed',
+    pending: 'Payment Pending',
+    error: 'Payment Error',
+  };
+  const title = titles[normalized] || 'Payment Update';
+  const description =
+    message ||
+    (normalized === 'success'
+      ? 'Your payment was successful. You can return to the app.'
+      : normalized === 'failed'
+        ? 'Your payment failed. You can retry from the app.'
+        : normalized === 'pending'
+          ? 'Your payment is still processing. We are verifying the status.'
+          : 'There was a problem processing your payment.');
+
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.status(200).send(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${title}</title>
+    <style>
+      body { font-family: Arial, sans-serif; background: #0f0f0f; color: #fff; margin: 0; }
+      .wrap { max-width: 560px; margin: 40px auto; padding: 24px; text-align: center; }
+      .card { background: #1c1c1c; padding: 20px; border-radius: 12px; }
+      .muted { color: #aaa; font-size: 13px; margin-top: 8px; }
+      .badge { display: inline-block; padding: 6px 10px; border-radius: 8px; background: #333; margin-bottom: 12px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <div class="badge">${normalized || 'update'}</div>
+        <h2>${title}</h2>
+        <p>${description}</p>
+        ${trackingId ? `<p class="muted">Tracking ID: ${trackingId}</p>` : ''}
+        <p class="muted">You can safely close this page and return to the app.</p>
+      </div>
+    </div>
+    <script>
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage(window.location.href, '*');
+        }
+      } catch (e) {}
+    </script>
+  </body>
+</html>`);
+});
+
+// Prevent favicon 404 noise
+app.get('/favicon.ico', (req, res) => res.status(204).end());
+
 // Monitoring endpoint - rate limiter stats
 app.get('/api/monitor/stats', authenticateWallet, (req, res) => {
   const stats = getStats();

@@ -5,9 +5,209 @@
  */
 
 const pesapalService = require('../services/pesapalService');
+const { getFaucetService } = require('../services/tokenFaucetService');
 
 // In-memory transaction store (replace with database in production)
 const pendingTransactions = new Map();
+
+// Firebase Admin (optional but strongly recommended for payment flows)
+let admin = null;
+let firestore = null;
+
+try {
+  admin = require('firebase-admin');
+  const fs = require('fs');
+  const path = require('path');
+
+  if (!admin.apps.length) {
+    let serviceAccount = null;
+    const serviceAccountPath = path.join(__dirname, '..', 'firebase-service-account.json');
+    if (fs.existsSync(serviceAccountPath)) {
+      try {
+        const serviceAccountFile = fs.readFileSync(serviceAccountPath, 'utf8');
+        serviceAccount = JSON.parse(serviceAccountFile);
+        console.log('✅ [PESAPAL] Loaded Firebase service account from file');
+      } catch (fileError) {
+        console.warn('⚠️  [PESAPAL] Could not parse firebase-service-account.json:', fileError.message);
+      }
+    }
+
+    if (!serviceAccount && process.env.FIREBASE_SERVICE_ACCOUNT) {
+      try {
+        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+        console.log('✅ [PESAPAL] Loaded Firebase service account from environment variable');
+      } catch (envError) {
+        console.warn('⚠️  [PESAPAL] Could not parse FIREBASE_SERVICE_ACCOUNT:', envError.message);
+      }
+    }
+
+    if (serviceAccount) {
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+      firestore = admin.firestore();
+      console.log('✅ [PESAPAL] Firebase Admin initialized');
+    } else {
+      console.warn('⚠️  [PESAPAL] Firebase Admin not configured. Token crediting may be delayed.');
+    }
+  } else {
+    firestore = admin.firestore();
+  }
+} catch (error) {
+  console.warn('⚠️  [PESAPAL] Firebase Admin not available:', error.message);
+}
+
+const tokenContractAddresses = {
+  AKOFA: '0xf1266ACCf0f757c61e4DFDD9EBBcaC05D2Ee375F',
+  USDC: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',
+  USDT: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
+};
+
+const tokenDecimals = {
+  AKOFA: 18,
+  USDC: 6,
+  USDT: 6,
+};
+
+async function getTransactionDoc(orderTrackingId) {
+  if (!firestore) return null;
+  const snapshot = await firestore
+    .collection('pesapal_transactions')
+    .where('orderTrackingId', '==', orderTrackingId)
+    .limit(1)
+    .get();
+  return snapshot.empty ? null : snapshot.docs[0];
+}
+
+async function upsertTransaction(orderTrackingId, data) {
+  if (!firestore) return;
+  const existingDoc = await getTransactionDoc(orderTrackingId);
+  if (existingDoc) {
+    await existingDoc.ref.set(
+      {
+        ...data,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+  } else {
+    await firestore.collection('pesapal_transactions').add({
+      ...data,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+}
+
+async function getUserPolygonAddress(userId) {
+  if (!firestore || !userId) return null;
+
+  const polygonWalletDoc = await firestore
+    .collection('polygon_wallets')
+    .doc(userId)
+    .get();
+  if (polygonWalletDoc.exists) {
+    const data = polygonWalletDoc.data() || {};
+    if (data.address) return data.address;
+  }
+
+  const userDoc = await firestore.collection('users').doc(userId).get();
+  if (userDoc.exists) {
+    const address = userDoc.data()?.polygonAddress;
+    if (address) return address;
+  }
+
+  const userDocUpper = await firestore.collection('USER').doc(userId).get();
+  if (userDocUpper.exists) {
+    const address = userDocUpper.data()?.polygonAddress;
+    if (address) return address;
+  }
+
+  return null;
+}
+
+async function creditTokensIfNeeded(orderTrackingId, storedTx) {
+  if (!storedTx) {
+    return { success: false, error: 'Transaction not found' };
+  }
+
+  const status = (storedTx.status || '').toLowerCase();
+  if (status === 'credited') {
+    return {
+      success: true,
+      alreadyCredited: true,
+      txHash: storedTx.polygonTxHash,
+      explorerUrl: storedTx.polygonExplorerUrl,
+    };
+  }
+
+  const tokenSymbol = (storedTx.tokenSymbol || 'AKOFA').toUpperCase();
+  const tokenAmount = Number(storedTx.tokenAmount || storedTx.akofaAmount || 0);
+  const userId = storedTx.userId;
+
+  if (!userId) {
+    return { success: false, error: 'User ID missing for transaction' };
+  }
+
+  const tokenAddress = tokenContractAddresses[tokenSymbol];
+  if (!tokenAddress) {
+    return { success: false, error: `Unsupported token: ${tokenSymbol}` };
+  }
+
+  if (!process.env.RPC_URL || !process.env.SERVER_PRIVATE_KEY) {
+    return { success: false, error: 'Backend wallet not configured' };
+  }
+
+  const userAddress = await getUserPolygonAddress(userId);
+  if (!userAddress) {
+    await upsertTransaction(orderTrackingId, {
+      status: 'pending_wallet',
+      creditError: 'Polygon wallet not found for user',
+    });
+    return { success: false, pending: true, error: 'User wallet not found' };
+  }
+
+  const faucet = getFaucetService();
+  const decimals = tokenDecimals[tokenSymbol] ?? 18;
+
+  try {
+    const sendResult = await faucet.sendTokens({
+      tokenAddress,
+      toAddress: userAddress,
+      amount: tokenAmount,
+      decimals,
+      requestedBy: userId,
+    });
+
+    await upsertTransaction(orderTrackingId, {
+      status: 'credited',
+      creditedAt: admin.firestore.FieldValue.serverTimestamp(),
+      polygonTxHash: sendResult.txHash,
+      polygonExplorerUrl:
+        process.env.POLYGON_EXPLORER_URL ||
+        `https://polygonscan.com/tx/${sendResult.txHash}`,
+      tokenSymbol,
+      tokenAmount,
+      userId,
+    });
+
+    return {
+      success: true,
+      txHash: sendResult.txHash,
+      explorerUrl:
+        process.env.POLYGON_EXPLORER_URL ||
+        `https://polygonscan.com/tx/${sendResult.txHash}`,
+      tokenSymbol,
+      tokenAmount,
+    };
+  } catch (error) {
+    await upsertTransaction(orderTrackingId, {
+      status: 'credit_failed',
+      creditError: error.message || String(error),
+    });
+    return { success: false, error: error.message || String(error) };
+  }
+}
 
 /**
  * Health check endpoint
@@ -82,6 +282,10 @@ async function initiatePayment(req, res) {
       description,
       userId,
       callbackUrl,
+      tokenSymbol,
+      tokenAmount,
+      pricePerTokenKES,
+      priceLockId,
     } = req.body;
 
     // Validate required fields
@@ -102,14 +306,18 @@ async function initiatePayment(req, res) {
     // Generate unique merchant reference
     const merchantReference = pesapalService.generateMerchantReference();
     
-    // Calculate AKOFA amount
-    const akofaAmount = pesapalService.calculateAkofaAmount(amount, currency);
+    const resolvedSymbol = (tokenSymbol || 'AKOFA').toUpperCase();
+    const resolvedAmount =
+      tokenAmount != null
+        ? Number(tokenAmount)
+        : pesapalService.calculateAkofaAmount(amount, currency);
 
     console.log('💳 Initiating PesaPal card payment:', {
       merchantReference,
       amount,
       currency,
-      akofaAmount,
+      tokenAmount: resolvedAmount,
+      tokenSymbol: resolvedSymbol,
       email,
     });
 
@@ -118,7 +326,9 @@ async function initiatePayment(req, res) {
       merchantReference,
       amount,
       currency,
-      description: description || `Purchase ${akofaAmount.toFixed(2)} AKOFA tokens`,
+      description:
+        description ||
+        `Purchase ${resolvedAmount.toFixed(2)} ${resolvedSymbol} tokens`,
       callbackUrl,
       billingAddress: {
         email,
@@ -135,11 +345,29 @@ async function initiatePayment(req, res) {
       orderTrackingId: result.orderTrackingId,
       amount,
       currency,
-      akofaAmount,
+      tokenAmount: resolvedAmount,
+      tokenSymbol: resolvedSymbol,
       email,
       userId,
       status: 'pending',
       createdAt: new Date().toISOString(),
+    });
+
+    await upsertTransaction(result.orderTrackingId, {
+      userId,
+      orderTrackingId: result.orderTrackingId,
+      merchantReference,
+      amountKES: amount,
+      tokenAmount: resolvedAmount,
+      tokenSymbol: resolvedSymbol,
+      pricePerTokenKES,
+      priceLockId,
+      currency,
+      email,
+      status: 'pending',
+      paymentMethod: 'card',
+      tokenContract: tokenContractAddresses[resolvedSymbol],
+      tokenDecimals: tokenDecimals[resolvedSymbol],
     });
 
     console.log('✅ Payment order created:', result.orderTrackingId);
@@ -149,7 +377,8 @@ async function initiatePayment(req, res) {
       orderTrackingId: result.orderTrackingId,
       merchantReference: result.merchantReference,
       redirectUrl: result.redirectUrl,
-      akofaAmount,
+      tokenAmount: resolvedAmount,
+      tokenSymbol: resolvedSymbol,
       amount,
       currency,
     });
@@ -181,14 +410,43 @@ async function queryStatus(req, res) {
     const status = await pesapalService.getTransactionStatus(orderTrackingId);
 
     // Get stored transaction details
-    const storedTx = pendingTransactions.get(orderTrackingId);
+    let storedTx = pendingTransactions.get(orderTrackingId);
+    if (!storedTx && firestore) {
+      const doc = await getTransactionDoc(orderTrackingId);
+      storedTx = doc ? doc.data() : null;
+    }
+
+    const tokenAmount = storedTx?.tokenAmount ?? storedTx?.akofaAmount;
+    const tokenSymbol = storedTx?.tokenSymbol ?? 'AKOFA';
+
+    // Persist latest payment status
+    await upsertTransaction(orderTrackingId, {
+      status: status.isCompleted ? 'completed' : status.isFailed ? 'failed' : 'pending',
+      paymentStatus: status,
+    });
+
+    let creditResult = null;
+    if (status.isCompleted) {
+      creditResult = await creditTokensIfNeeded(orderTrackingId, storedTx);
+    }
 
     res.json({
       success: true,
       ...status,
-      akofaAmount: storedTx?.akofaAmount,
-      originalAmount: storedTx?.amount,
+      tokenAmount,
+      tokenSymbol,
+      originalAmount: storedTx?.amount ?? storedTx?.amountKES,
       originalCurrency: storedTx?.currency,
+      txHash: creditResult?.txHash ?? storedTx?.polygonTxHash,
+      explorerUrl: creditResult?.explorerUrl ?? storedTx?.polygonExplorerUrl,
+      creditStatus: creditResult?.success === true
+        ? 'credited'
+        : creditResult?.pending
+          ? 'pending_wallet'
+          : creditResult?.error
+            ? 'credit_failed'
+            : undefined,
+      creditError: creditResult?.error,
     });
   } catch (error) {
     console.error('Status query error:', error);
@@ -227,13 +485,25 @@ async function ipnCallback(req, res) {
     const status = await pesapalService.getTransactionStatus(OrderTrackingId);
 
     // Update stored transaction
-    const storedTx = pendingTransactions.get(OrderTrackingId);
+    let storedTx = pendingTransactions.get(OrderTrackingId);
+    if (!storedTx && firestore) {
+      const doc = await getTransactionDoc(OrderTrackingId);
+      storedTx = doc ? doc.data() : null;
+    }
+
     if (storedTx) {
       storedTx.status = status.isCompleted ? 'completed' : status.isFailed ? 'failed' : 'pending';
       storedTx.paymentStatus = status;
       storedTx.updatedAt = new Date().toISOString();
       pendingTransactions.set(OrderTrackingId, storedTx);
     }
+
+    await upsertTransaction(OrderTrackingId, {
+      status: status.isCompleted ? 'completed' : status.isFailed ? 'failed' : 'pending',
+      paymentStatus: status,
+      orderTrackingId: OrderTrackingId,
+      merchantReference: OrderMerchantReference,
+    });
 
     if (status.isCompleted) {
       console.log('✅ Payment completed:', {
@@ -242,9 +512,19 @@ async function ipnCallback(req, res) {
         amount: status.amount,
       });
 
-      // TODO: Credit AKOFA tokens to user's wallet
-      // This would integrate with your Stellar/Polygon service
-      // await creditAkofaTokens(storedTx.userId, storedTx.akofaAmount, OrderTrackingId);
+      // Credit tokens immediately via backend faucet
+      if (storedTx) {
+        const creditResult = await creditTokensIfNeeded(OrderTrackingId, storedTx);
+        if (creditResult.success) {
+          console.log('✅ Tokens credited from IPN:', creditResult.txHash);
+        } else if (creditResult.pending) {
+          console.warn('⚠️ Token credit pending (wallet not found)');
+        } else {
+          console.error('❌ Token credit failed:', creditResult.error);
+        }
+      } else {
+        console.warn('⚠️ No stored transaction found for crediting');
+      }
     } else if (status.isFailed) {
       console.log('❌ Payment failed:', {
         OrderTrackingId,
@@ -287,6 +567,27 @@ async function userCallback(req, res) {
     // Get transaction status
     const status = await pesapalService.getTransactionStatus(OrderTrackingId);
 
+    // Load stored transaction for crediting
+    let storedTx = pendingTransactions.get(OrderTrackingId);
+    if (!storedTx && firestore) {
+      const doc = await getTransactionDoc(OrderTrackingId);
+      storedTx = doc ? doc.data() : null;
+    }
+
+    if (storedTx) {
+      storedTx.status = status.isCompleted ? 'completed' : status.isFailed ? 'failed' : 'pending';
+      storedTx.paymentStatus = status;
+      storedTx.updatedAt = new Date().toISOString();
+      pendingTransactions.set(OrderTrackingId, storedTx);
+    }
+
+    await upsertTransaction(OrderTrackingId, {
+      status: status.isCompleted ? 'completed' : status.isFailed ? 'failed' : 'pending',
+      paymentStatus: status,
+      orderTrackingId: OrderTrackingId,
+      merchantReference: OrderMerchantReference,
+    });
+
     // For API response (when called from mobile app)
     if (req.headers['accept']?.includes('application/json')) {
       const storedTx = pendingTransactions.get(OrderTrackingId);
@@ -299,7 +600,14 @@ async function userCallback(req, res) {
 
     // For web redirect (when user is redirected from PesaPal)
     if (status.isCompleted) {
-      res.redirect(`/payment/success?trackingId=${OrderTrackingId}`);
+      if (storedTx) {
+        const creditResult = await creditTokensIfNeeded(OrderTrackingId, storedTx);
+        if (creditResult.success) {
+          res.redirect(`/payment/success?trackingId=${OrderTrackingId}`);
+          return;
+        }
+      }
+      res.redirect(`/payment/pending?trackingId=${OrderTrackingId}`);
     } else if (status.isFailed) {
       res.redirect(`/payment/failed?trackingId=${OrderTrackingId}&message=${encodeURIComponent(status.message || 'Payment failed')}`);
     } else {
