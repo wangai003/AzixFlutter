@@ -315,9 +315,18 @@ async function reconcilePending(req, res) {
       if (status.isCompleted) {
         const creditResult = await creditTokensIfNeeded(orderTrackingId, tx);
         if (creditResult.success) {
+          await upsertTransaction(orderTrackingId, {
+            status: 'credited',
+            creditError: null,
+          });
           credited += 1;
         } else if (creditResult.pending) {
           stillPending += 1;
+        } else {
+          await upsertTransaction(orderTrackingId, {
+            status: 'credit_failed',
+            creditError: creditResult.error,
+          });
         }
         results.push({
           orderTrackingId,

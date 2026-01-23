@@ -8,6 +8,7 @@ import '../services/pesapal_service.dart';
 import '../services/polygon_wallet_service.dart';
 import '../services/polygon_mining_service.dart';
 import '../services/crypto_price_service.dart';
+import '../services/currency_service.dart';
 import '../theme/app_theme.dart';
 
 class MpesaPurchaseDialog extends StatefulWidget {
@@ -42,6 +43,9 @@ class _MpesaPurchaseDialogState extends State<MpesaPurchaseDialog> {
   late double? _pricePerToken;
   bool _isProcessing = false;
   String? _error;
+  String _displayCurrency = 'KES';
+  double _displayAmount = 0.0;
+  bool _isConverting = false;
 
   final List<double> _presetAmounts = [10, 50, 100, 500, 1000, 5000];
   
@@ -56,6 +60,36 @@ class _MpesaPurchaseDialogState extends State<MpesaPurchaseDialog> {
     _selectedToken = widget.tokenSymbol ?? 'AKOFA';
     _tokenAmount = widget.tokenAmount ?? (_selectedAmount / 5.52);
     _pricePerToken = widget.pricePerTokenKES;
+    _displayAmount = _selectedAmount;
+    _updateDisplayAmount();
+  }
+
+  Future<void> _updateDisplayAmount() async {
+    if (_displayCurrency == 'KES') {
+      if (mounted) setState(() => _displayAmount = _selectedAmount);
+      return;
+    }
+    try {
+      setState(() => _isConverting = true);
+      final converted = await CurrencyService.convertCurrency(
+        _selectedAmount,
+        'KES',
+        _displayCurrency,
+      );
+      if (mounted) {
+        setState(() => _displayAmount = converted);
+      }
+    } catch (e) {
+      debugPrint('Error converting currency: $e');
+      if (mounted) {
+        setState(() {
+          _displayCurrency = 'KES';
+          _displayAmount = _selectedAmount;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isConverting = false);
+    }
   }
 
   @override
@@ -127,10 +161,13 @@ class _MpesaPurchaseDialogState extends State<MpesaPurchaseDialog> {
               children: _presetAmounts.map((amount) {
                 final isSelected = _selectedAmount == amount;
                 return GestureDetector(
-                    onTap: () => setState(() {
-                      _selectedAmount = amount;
-                      _tokenAmount = amount / 5.52; // Default AKOFA rate
-                    }),
+                    onTap: () {
+                      setState(() {
+                        _selectedAmount = amount;
+                        _tokenAmount = amount / 5.52; // Default AKOFA rate
+                      });
+                      _updateDisplayAmount();
+                    },
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     decoration: BoxDecoration(
@@ -185,6 +222,7 @@ class _MpesaPurchaseDialogState extends State<MpesaPurchaseDialog> {
                       _selectedAmount = amount;
                       _tokenAmount = amount / 5.52; // Default AKOFA rate
                     });
+                    _updateDisplayAmount();
                 }
               },
             ),
@@ -239,6 +277,74 @@ class _MpesaPurchaseDialogState extends State<MpesaPurchaseDialog> {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Display Currency',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.grey,
+                        ),
+                      ),
+                      SizedBox(
+                        width: 120,
+                        child: DropdownButtonFormField<String>(
+                          value: _displayCurrency,
+                          decoration: InputDecoration(
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(color: AppTheme.grey.withOpacity(0.3)),
+                            ),
+                          ),
+                          dropdownColor: AppTheme.black,
+                          style: TextStyle(color: AppTheme.white, fontSize: 12),
+                          items: [
+                            'KES',
+                            ...CurrencyService.getPopularCurrenciesForRegion('global')
+                                .where((currency) => currency != 'KES'),
+                          ].map((currency) => DropdownMenuItem(
+                                value: currency,
+                                child: Text(currency),
+                              )).toList(),
+                          onChanged: (value) {
+                            if (value == null) return;
+                            setState(() => _displayCurrency = value);
+                            _updateDisplayAmount();
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Approx. Total',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.grey,
+                        ),
+                      ),
+                      _isConverting
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppTheme.primaryGold,
+                              ),
+                            )
+                          : Text(
+                              '${_displayCurrency} ${_displayAmount.toStringAsFixed(2)}',
+                              style: AppTheme.bodySmall.copyWith(
+                                color: AppTheme.white,
+                              ),
+                            ),
                     ],
                   ),
                   const SizedBox(height: 8),

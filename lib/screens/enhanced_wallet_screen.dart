@@ -676,6 +676,11 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
   Widget _buildOverviewTab(EnhancedWalletProvider walletProvider) {
     // Overview tab displays assets from the derived user's wallet address
     // The provider ensures the correct derived address is used for fetching balances
+    if (walletProvider.pesapalTransactionHistory.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        walletProvider.loadPesapalTransactionHistory();
+      });
+    }
     return RefreshIndicator(
       onRefresh: _refreshWallet,
       color: AppTheme.primaryGold,
@@ -709,8 +714,127 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
 
             // Wallet Stats
             _buildWalletStats(walletProvider),
+
+            if (_hasPendingPurchases(walletProvider)) ...[
+              const SizedBox(height: 24),
+              // Pending Purchases
+              _buildPendingPurchaseSection(walletProvider),
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  bool _hasPendingPurchases(EnhancedWalletProvider walletProvider) {
+    return walletProvider.pesapalTransactionHistory.any((tx) {
+      final status = (tx['status'] as String?)?.toLowerCase() ?? '';
+      return status != 'credited' && status != 'failed';
+    });
+  }
+
+  Widget _buildPendingPurchaseSection(EnhancedWalletProvider walletProvider) {
+    final pending = walletProvider.pesapalTransactionHistory.where((tx) {
+      final status = (tx['status'] as String?)?.toLowerCase() ?? '';
+      return status != 'credited' && status != 'failed';
+    }).toList();
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.darkGrey,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.grey.withOpacity(0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Pending Purchases',
+            style: AppTheme.bodyLarge.copyWith(
+              color: AppTheme.primaryGold,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Completed card purchases will be credited automatically. You can also retry crediting here.',
+            style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+          ),
+          const SizedBox(height: 12),
+          if (pending.isEmpty)
+            Text(
+              'No pending purchases.',
+              style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+            )
+          else
+            Column(
+              children: pending.take(3).map((tx) {
+                final token = tx['tokenSymbol'] ?? 'AKOFA';
+                final amount = (tx['tokenAmount'] as num?)?.toDouble() ?? 0.0;
+                final orderId = tx['orderTrackingId'] as String? ?? '';
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.black.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppTheme.grey.withOpacity(0.2)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.schedule, color: AppTheme.primaryGold, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${amount.toStringAsFixed(2)} $token',
+                          style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
+                        ),
+                      ),
+                      if (orderId.isNotEmpty)
+                        Text(
+                          '${orderId.substring(0, 6)}...',
+                          style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+                        ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () async {
+                final result = await walletProvider.reconcilePesapalTransactions();
+                if (!mounted) return;
+                if (result['success'] == true) {
+                  final credited = result['credited'] ?? 0;
+                  final checked = result['checked'] ?? 0;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Checked $checked pending purchases. Credited $credited.'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(result['error'] ?? 'Reconcile failed'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
+              icon: const Icon(Icons.sync),
+              label: const Text('Reconcile Purchases'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryGold,
+                foregroundColor: AppTheme.black,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2453,9 +2577,9 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
 
                       final shouldProceed = await _confirmGasTopUpIfNeeded(
                         walletProvider: walletProvider,
-                        asset: asset,
+                                        asset: asset,
                         recipientAddress: resolvedAddress,
-                        amount: amount,
+                                        amount: amount,
                       );
                       if (!shouldProceed) {
                         return;
@@ -2872,10 +2996,10 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                       }
 
                       final confirmAsset = AssetConfig(
-                        code: symbol,
-                        symbol: symbol,
-                        name: name,
-                        issuer: '',
+                                          code: symbol,
+                                          symbol: symbol,
+                                          name: name,
+                                          issuer: '',
                         isNative: isNative,
                         decimals: (token['decimals'] as int?) ?? 18,
                         contractAddress: token['contractAddress'] as String?,
@@ -3183,7 +3307,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
           'error': 'No contract address found for $symbol',
         };
       }
-
+      
       final asset = AssetConfig(
         code: symbol,
         symbol: symbol,
@@ -5194,7 +5318,7 @@ class _QuickMpesaPendingDialogState extends State<_QuickMpesaPendingDialog> {
 }
 
 /// Payment method selection dialog for buying AKOFA
-/// Allows users to choose between M-Pesa and Card (PesaPal) payments
+/// Allows users to choose between M-Pesa and Card payments
 class _PaymentMethodSelectionDialog extends StatelessWidget {
   final VoidCallback onMpesaSelected;
   final VoidCallback onCardSelected;
@@ -5467,12 +5591,12 @@ class _TokenPaymentMethodDialog extends StatelessWidget {
 
             const SizedBox(height: 12),
 
-            // Card Option (PesaPal)
+            // Card Option
             _buildPaymentMethodButton(
               context: context,
               icon: Icons.credit_card,
               title: 'Card Payment',
-              subtitle: 'Visa, Mastercard via PesaPal',
+              subtitle: 'Visa, Mastercard',
               color: Colors.blue,
               onTap: onCardSelected,
             ),

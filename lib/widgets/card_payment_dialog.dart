@@ -64,6 +64,9 @@ class _CardPaymentDialogState extends State<CardPaymentDialog> {
   bool _isLoading = false;
   bool _isCheckingStatus = false;
   String? _selectedCurrency = 'KES';
+  String _displayCurrency = 'KES';
+  double _displayAmount = 0.0;
+  bool _isConverting = false;
   late double _amountKES;
   late String _selectedToken;
   late double _tokenAmount;
@@ -99,6 +102,8 @@ class _CardPaymentDialogState extends State<CardPaymentDialog> {
     _phoneController.text = widget.phoneNumber ?? '';
     _customAmountController.text = _amountKES.toStringAsFixed(0);
     _loadCurrencyPrices();
+    _displayAmount = _amountKES;
+    _updateDisplayAmount();
   }
   
   // Token conversion rate (1 AKOFA = 5.52 KES for AKOFA token)
@@ -123,9 +128,11 @@ class _CardPaymentDialogState extends State<CardPaymentDialog> {
 
   Future<void> _loadCurrencyPrices() async {
     try {
-      final popularCurrencies = CurrencyService.getPopularCurrenciesForRegion(
-        'global',
-      );
+      final popularCurrencies = [
+        'KES',
+        ...CurrencyService.getPopularCurrenciesForRegion('global')
+            .where((currency) => currency != 'KES'),
+      ];
       
       // Calculate USD equivalent first
       final tokenAmountForPrice = _amountKES * _tokenConversionRate;
@@ -142,6 +149,34 @@ class _CardPaymentDialogState extends State<CardPaymentDialog> {
       if (mounted) setState(() {});
     } catch (e) {
       debugPrint('Error loading currency prices: $e');
+    }
+  }
+
+  Future<void> _updateDisplayAmount() async {
+    if (_displayCurrency == 'KES') {
+      if (mounted) setState(() => _displayAmount = _amountKES);
+      return;
+    }
+    try {
+      setState(() => _isConverting = true);
+      final converted = await CurrencyService.convertCurrency(
+        _amountKES,
+        'KES',
+        _displayCurrency,
+      );
+      if (mounted) {
+        setState(() => _displayAmount = converted);
+      }
+    } catch (e) {
+      debugPrint('Error converting currency: $e');
+      if (mounted) {
+        setState(() {
+          _displayCurrency = 'KES';
+          _displayAmount = _amountKES;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isConverting = false);
     }
   }
 
@@ -213,9 +248,9 @@ class _CardPaymentDialogState extends State<CardPaymentDialog> {
                       ),
                 ),
                 Text(
-                  _hasPreselectedValues 
+                  _hasPreselectedValues
                     ? 'Enter your details to complete payment'
-                    : 'Powered by PesaPal',
+                    : 'Secure card processing',
                   style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
                 ),
               ],
@@ -256,6 +291,7 @@ class _CardPaymentDialogState extends State<CardPaymentDialog> {
                   _customAmountController.text = amount.toStringAsFixed(0);
                 });
                 _loadCurrencyPrices();
+                _updateDisplayAmount();
               },
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -311,6 +347,7 @@ class _CardPaymentDialogState extends State<CardPaymentDialog> {
             if (amount != null && amount >= 10 && amount <= 500000) {
               setState(() => _amountKES = amount);
               _loadCurrencyPrices();
+              _updateDisplayAmount();
             }
           },
           validator: (value) {
@@ -379,6 +416,68 @@ class _CardPaymentDialogState extends State<CardPaymentDialog> {
                           ),
                         ],
                       ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Display Currency',
+                style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+              ),
+              SizedBox(
+                width: 120,
+                child: DropdownButtonFormField<String>(
+                  value: _displayCurrency,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: AppTheme.grey.withOpacity(0.3)),
+                    ),
+                  ),
+                  dropdownColor: AppTheme.black,
+                  style: TextStyle(color: AppTheme.white, fontSize: 12),
+                  items: (_currencyPrices.keys.isNotEmpty
+                          ? _currencyPrices.keys
+                          : ['KES'])
+                      .map((currency) => DropdownMenuItem(
+                            value: currency,
+                            child: Text(currency),
+                          ))
+                      .toList(),
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _displayCurrency = value);
+                    _updateDisplayAmount();
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Approx. Total',
+                style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+              ),
+              _isConverting
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppTheme.primaryGold,
+                      ),
+                    )
+                  : Text(
+                      '${_displayCurrency} ${_formatAmount(_displayAmount)}',
+                      style: AppTheme.bodySmall.copyWith(color: AppTheme.white),
+                    ),
+            ],
+          ),
           const SizedBox(height: 12),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,

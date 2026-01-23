@@ -1321,9 +1321,13 @@ class EnhancedWalletProvider extends ChangeNotifier {
       if (user == null) {
         return {'success': false, 'error': 'User not authenticated'};
       }
-      return await _pesapalService.reconcilePendingTransactions(
+      final result = await _pesapalService.reconcilePendingTransactions(
         userId: user.uid,
       );
+      if (result['success'] == true) {
+        await loadPesapalTransactionHistory();
+      }
+      return result;
     } catch (e) {
       return {'success': false, 'error': e.toString()};
     }
