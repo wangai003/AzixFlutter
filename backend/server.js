@@ -165,6 +165,7 @@ app.get('/api/pesapal/ipn-list', pesapalController.getIPNList);
 app.post('/api/pesapal/initiate', pesapalController.initiatePayment);
 app.post('/api/pesapal/query', pesapalController.queryStatus);
 app.post('/api/pesapal/reconcile', pesapalController.reconcilePending);
+app.post('/api/pesapal/claim', pesapalController.claimCompleted);
 app.post('/api/pesapal/ipn-callback', pesapalController.ipnCallback);
 app.post('/api/pesapal/ipn-callback/v2', pesapalController.ipnCallback);
 app.get('/api/pesapal/ipn-callback', (req, res) => res.sendStatus(200));

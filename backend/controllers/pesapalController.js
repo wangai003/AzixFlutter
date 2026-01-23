@@ -361,6 +361,98 @@ async function reconcilePending(req, res) {
 }
 
 /**
+ * Claim a completed purchase and credit to the provided wallet address.
+ */
+async function claimCompleted(req, res) {
+  try {
+    if (!firestore) {
+      return res.status(500).json({
+        success: false,
+        error: 'Firestore not configured on backend',
+      });
+    }
+
+    const { orderTrackingId, walletAddress, userId } = req.body || {};
+    if (!orderTrackingId || !walletAddress) {
+      return res.status(400).json({
+        success: false,
+        error: 'orderTrackingId and walletAddress are required',
+      });
+    }
+
+    const doc = await getTransactionDoc(orderTrackingId);
+    const tx = doc ? doc.data() : null;
+    if (!tx) {
+      return res.status(404).json({
+        success: false,
+        error: 'Transaction not found',
+      });
+    }
+
+    if (userId && tx.userId && userId !== tx.userId) {
+      return res.status(403).json({
+        success: false,
+        error: 'User does not match transaction',
+      });
+    }
+
+    const status = await pesapalService.getTransactionStatus(orderTrackingId);
+    await upsertTransaction(orderTrackingId, {
+      status: status.isCompleted ? 'completed' : status.isFailed ? 'failed' : 'pending',
+      paymentStatus: status,
+      walletAddress,
+    });
+
+    if (!status.isCompleted) {
+      return res.json({
+        success: false,
+        status: status.status,
+        message: 'Payment not completed yet',
+      });
+    }
+
+    const creditResult = await creditTokensIfNeeded(orderTrackingId, {
+      ...tx,
+      walletAddress,
+    });
+
+    if (creditResult.success) {
+      await upsertTransaction(orderTrackingId, {
+        status: 'credited',
+        creditError: null,
+        walletAddress,
+      });
+    } else if (creditResult.pending) {
+      await upsertTransaction(orderTrackingId, {
+        status: 'pending_wallet',
+        creditError: creditResult.error,
+        walletAddress,
+      });
+    } else {
+      await upsertTransaction(orderTrackingId, {
+        status: 'credit_failed',
+        creditError: creditResult.error,
+        walletAddress,
+      });
+    }
+
+    return res.json({
+      success: creditResult.success === true,
+      orderTrackingId,
+      txHash: creditResult.txHash,
+      explorerUrl: creditResult.explorerUrl,
+      error: creditResult.error,
+    });
+  } catch (error) {
+    console.error('Claim completed error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+
+/**
  * Initiate card payment
  * Creates a payment order and returns redirect URL for card entry
  */
@@ -740,6 +832,7 @@ module.exports = {
   getIPNList,
   initiatePayment,
   queryStatus,
+  claimCompleted,
   ipnCallback,
   userCallback,
   getTransaction,

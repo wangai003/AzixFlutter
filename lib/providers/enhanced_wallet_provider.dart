@@ -1333,6 +1333,32 @@ class EnhancedWalletProvider extends ChangeNotifier {
     }
   }
 
+  /// Claim a completed pending purchase and credit to the user's wallet
+  Future<Map<String, dynamic>> claimPendingPurchase({
+    required String orderTrackingId,
+  }) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        return {'success': false, 'error': 'User not authenticated'};
+      }
+      if (_address == null || _address!.isEmpty) {
+        return {'success': false, 'error': 'Wallet address not found'};
+      }
+      final result = await _pesapalService.claimCompletedPurchase(
+        orderTrackingId: orderTrackingId,
+        walletAddress: _address!,
+        userId: user.uid,
+      );
+      if (result['success'] == true) {
+        await loadPesapalTransactionHistory();
+      }
+      return result;
+    } catch (e) {
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
   /// Load PesaPal transaction history
   Future<void> loadPesapalTransactionHistory() async {
     try {

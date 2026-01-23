@@ -796,6 +796,33 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                           '${orderId.substring(0, 6)}...',
                           style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
                         ),
+                      if (orderId.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: () async {
+                            final result = await walletProvider.claimPendingPurchase(
+                              orderTrackingId: orderId,
+                            );
+                            if (!mounted) return;
+                            if (result['success'] == true) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Purchase credited successfully.'),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(result['error'] ?? 'Credit failed'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
+                          },
+                          child: const Text('Retry'),
+                        ),
+                      ],
                     ],
                   ),
                 );

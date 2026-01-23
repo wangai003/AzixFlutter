@@ -399,6 +399,49 @@ class PesapalService {
     }
   }
 
+  /// Claim a completed purchase and credit to the provided wallet address
+  Future<Map<String, dynamic>> claimCompletedPurchase({
+    required String orderTrackingId,
+    required String walletAddress,
+    required String userId,
+  }) async {
+    if (_backendBaseUrl.isEmpty) {
+      return {
+        'success': false,
+        'error': 'Backend URL not configured',
+      };
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_backendBaseUrl/pesapal/claim'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: json.encode({
+          'orderTrackingId': orderTrackingId,
+          'walletAddress': walletAddress,
+          'userId': userId,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body) as Map<String, dynamic>;
+      }
+
+      return {
+        'success': false,
+        'error': 'Claim failed: ${response.statusCode}',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'error': 'Failed to claim: $e',
+      };
+    }
+  }
+
   /// Credit tokens after successful payment (using Polygon)
   /// 
   /// Supports multiple tokens: AKOFA, USDC, USDT
