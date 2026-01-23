@@ -446,7 +446,7 @@ class _EnhancedPurchaseDialogState extends State<EnhancedPurchaseDialog> {
 
   Widget _buildConversionDisplay() {
     // Conversion calculation removed - Flutterwave integration no longer available
-    final akofaAmount = _selectedAmount / 100; // Simple conversion for display
+    final akofaAmount = _selectedAmount / 5.52; // Simple conversion for display
     final currencySymbol = _getCurrencySymbol();
 
     return Container(
@@ -644,7 +644,7 @@ class _EnhancedPurchaseDialogState extends State<EnhancedPurchaseDialog> {
 
   void _showPaymentPendingDialog(Map<String, dynamic> result, String provider) {
     final akofaAmount = (result['akofaAmount'] as double?) ??
-        _selectedAmount * 0.01; // fallback estimate
+        _selectedAmount / 5.52; // fallback estimate
     final localAmount = result['localAmount'] ?? _selectedAmount;
     final currencySymbol = _getCurrencySymbol();
     final checkoutRequestId = result['checkoutRequestId'] as String?;

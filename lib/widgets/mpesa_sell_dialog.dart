@@ -67,7 +67,7 @@ class _MpesaSellDialogState extends State<MpesaSellDialog>
       // Simulate API call for sell estimate
       await Future.delayed(const Duration(milliseconds: 500));
 
-      final kesAmount = _selectedAmount * 100; // 1 AKOFA = 100 KES
+      final kesAmount = _selectedAmount * 5.52; // 1 AKOFA = 5.52 KES
       final fee = kesAmount * 0.02; // 2% fee
       final finalAmount = kesAmount - fee;
 

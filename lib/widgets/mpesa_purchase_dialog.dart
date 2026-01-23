@@ -43,7 +43,7 @@ class _MpesaPurchaseDialogState extends State<MpesaPurchaseDialog> {
   bool _isProcessing = false;
   String? _error;
 
-  final List<double> _presetAmounts = [100, 500, 1000, 5000];
+  final List<double> _presetAmounts = [10, 50, 100, 500, 1000, 5000];
   
   // Check if we have pre-selected values from token dialog
   bool get _hasPreselectedValues => widget.tokenSymbol != null && widget.tokenAmount != null && widget.amountKES != null;
@@ -54,7 +54,7 @@ class _MpesaPurchaseDialogState extends State<MpesaPurchaseDialog> {
     // Initialize with pre-selected values if available
     _selectedAmount = widget.amountKES ?? 100.0;
     _selectedToken = widget.tokenSymbol ?? 'AKOFA';
-    _tokenAmount = widget.tokenAmount ?? (_selectedAmount * 0.01);
+    _tokenAmount = widget.tokenAmount ?? (_selectedAmount / 5.52);
     _pricePerToken = widget.pricePerTokenKES;
   }
 
@@ -129,7 +129,7 @@ class _MpesaPurchaseDialogState extends State<MpesaPurchaseDialog> {
                 return GestureDetector(
                     onTap: () => setState(() {
                       _selectedAmount = amount;
-                      _tokenAmount = amount * 0.01; // Default AKOFA rate
+                      _tokenAmount = amount / 5.52; // Default AKOFA rate
                     }),
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -183,7 +183,7 @@ class _MpesaPurchaseDialogState extends State<MpesaPurchaseDialog> {
                 if (amount != null && amount >= 100 && amount <= 50000) {
                     setState(() {
                       _selectedAmount = amount;
-                      _tokenAmount = amount * 0.01; // Default AKOFA rate
+                      _tokenAmount = amount / 5.52; // Default AKOFA rate
                     });
                 }
               },
@@ -262,7 +262,7 @@ class _MpesaPurchaseDialogState extends State<MpesaPurchaseDialog> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Rate: 100 KES = 1 AKOFA',
+                    'Rate: 1 AKOFA = 5.52 KES',
                     style: AppTheme.bodySmall.copyWith(
                       color: AppTheme.grey.withOpacity(0.8),
                     ),

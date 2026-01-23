@@ -130,8 +130,8 @@ class EnhancedMpesaService {
       _useSandbox ? _sandboxCallbackUrl : _productionCallbackUrl;
 
   // Exchange rates
-  static const double KES_TO_AKOFA_RATE = 0.01; // 100 KES = 1 AKOFA
-  static const double MIN_PURCHASE_KES = 100.0; // Minimum 100 KES
+  static const double KES_TO_AKOFA_RATE = 1 / 5.52; // 1 AKOFA = 5.52 KES
+  static const double MIN_PURCHASE_KES = 10.0; // Minimum 10 KES
   static const double MAX_PURCHASE_KES = 50000.0; // Maximum 50,000 KES
 
   // Sell transaction limits
@@ -161,8 +161,7 @@ class EnhancedMpesaService {
       }
 
       // Calculate KES amount (reverse of purchase rate)
-      final amountKES =
-          akofaAmount * KES_TO_AKOFA_RATE * 100; // 1 AKOFA = 100 KES
+      final amountKES = akofaAmount / KES_TO_AKOFA_RATE;
 
       // Format phone number
       final formattedPhone = _formatPhoneNumber(phoneNumber);

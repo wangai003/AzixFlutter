@@ -115,7 +115,7 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
       if (price != null && price.priceKES > 0) {
         _tokenAmount = _kesAmount / price.priceKES;
       } else if (_selectedToken == 'AKOFA') {
-        _tokenAmount = _kesAmount / 100.0; // Default: 100 KES = 1 AKOFA
+        _tokenAmount = _kesAmount / 5.52; // Default: 1 AKOFA = 5.52 KES
       } else {
         _tokenAmount = _kesAmount / 155.0; // Default: 155 KES = 1 USD
       }
@@ -123,7 +123,7 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
       if (price != null && price.priceKES > 0) {
         _kesAmount = _tokenAmount * price.priceKES;
       } else if (_selectedToken == 'AKOFA') {
-        _kesAmount = _tokenAmount * 100.0; // Default: 1 AKOFA = 100 KES
+        _kesAmount = _tokenAmount * 5.52; // Default: 1 AKOFA = 5.52 KES
       } else {
         _kesAmount = _tokenAmount * 155.0; // Default: 1 USD = 155 KES
       }
@@ -166,8 +166,8 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
         if (price != null && price.priceKES > 0) {
           _tokenAmount = _kesAmount / price.priceKES;
         } else if (_selectedToken == 'AKOFA') {
-          // Default AKOFA rate: 100 KES = 1 AKOFA
-          _tokenAmount = _kesAmount / 100.0;
+          // Default AKOFA rate: 1 AKOFA = 5.52 KES
+          _tokenAmount = _kesAmount / 5.52;
         } else {
           // Default stablecoin rate: ~155 KES = 1 USD
           _tokenAmount = _kesAmount / 155.0;
@@ -178,8 +178,8 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
         if (price != null && price.priceKES > 0) {
           _kesAmount = _tokenAmount * price.priceKES;
         } else if (_selectedToken == 'AKOFA') {
-          // Default AKOFA rate: 1 AKOFA = 100 KES
-          _kesAmount = _tokenAmount * 100.0;
+          // Default AKOFA rate: 1 AKOFA = 5.52 KES
+          _kesAmount = _tokenAmount * 5.52;
         } else {
           // Default stablecoin rate: 1 USD = ~155 KES
           _kesAmount = _tokenAmount * 155.0;

@@ -72,7 +72,7 @@ class _CardPaymentDialogState extends State<CardPaymentDialog> {
   String? _currentOrderTrackingId;
 
   // Preset purchase amounts in KES
-  final List<double> _presetAmounts = [100, 500, 1000, 5000, 10000, 50000];
+  final List<double> _presetAmounts = [10, 50, 100, 500, 1000, 5000, 10000, 50000];
 
   @override
   void initState() {
@@ -85,13 +85,13 @@ class _CardPaymentDialogState extends State<CardPaymentDialog> {
     // Set amount - prefer explicit amountKES, then calculate from akofaAmount
     if (widget.amountKES != null) {
       _amountKES = widget.amountKES!;
-      _tokenAmount = widget.tokenAmount ?? (_amountKES * 0.01);
+      _tokenAmount = widget.tokenAmount ?? (_amountKES / 5.52);
     } else if (widget.akofaAmount != null) {
-      _amountKES = widget.akofaAmount! * 100; // Convert AKOFA to KES
+      _amountKES = widget.akofaAmount! * 5.52; // Convert AKOFA to KES
       _tokenAmount = widget.akofaAmount!;
     } else {
-      _amountKES = 100.0;
-      _tokenAmount = 1.0;
+      _amountKES = 10.0;
+      _tokenAmount = _amountKES / 5.52;
     }
     
     // Set initial values from legacy or new mode
@@ -101,10 +101,10 @@ class _CardPaymentDialogState extends State<CardPaymentDialog> {
     _loadCurrencyPrices();
   }
   
-  // Token conversion rate (100 KES = 1 AKOFA for AKOFA token)
+  // Token conversion rate (1 AKOFA = 5.52 KES for AKOFA token)
   double get _tokenConversionRate {
     if (_pricePerTokenKES != null) return 1.0 / _pricePerTokenKES!;
-    return _selectedToken == 'AKOFA' ? 0.01 : 1.0 / 155.0; // Default rates
+    return _selectedToken == 'AKOFA' ? (1 / 5.52) : 1.0 / 155.0; // Default rates
   }
   
   // Check if we have pre-selected values from token dialog
@@ -421,7 +421,7 @@ class _CardPaymentDialogState extends State<CardPaymentDialog> {
           Text(
             _hasPreselectedValues && _pricePerTokenKES != null
               ? 'Rate: KES ${_pricePerTokenKES!.toStringAsFixed(2)} = 1 $_selectedToken'
-              : 'Rate: 100 KES = 1 AKOFA',
+              : 'Rate: 1 AKOFA = 5.52 KES',
             style: AppTheme.bodySmall.copyWith(
               color: AppTheme.grey.withOpacity(0.8),
             ),

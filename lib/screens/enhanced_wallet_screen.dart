@@ -1105,7 +1105,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '1 AKOFA = 100 KES',
+                          '1 AKOFA = 5.52 KES',
                           style: AppTheme.bodySmall.copyWith(
                             color: AppTheme.primaryGold,
                           ),
@@ -4919,7 +4919,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
             checkoutRequestId: checkoutRequestId,
             amountKes: amount,
             tokenAmount: (result['akofaAmount'] as num?)?.toDouble() ??
-                (amount * 0.01),
+                (amount / 5.52),
             tokenSymbol: result['tokenSymbol'] as String? ?? 'AKOFA',
           );
         } else {

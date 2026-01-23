@@ -279,9 +279,9 @@ class MpesaService {
       final transactionDoc = querySnapshot.docs.first;
       final transactionData = transactionDoc.data();
       
-      // Calculate AKOFA tokens to credit (1 KES = 0.01 AKOFA)
+      // Calculate AKOFA tokens to credit (1 AKOFA = 5.52 KES)
       final double amount = transactionData['amount'] ?? 0.0;
-      final double akofaAmount = amount * 0.01; // Exchange rate: 100 KES = 1 AKOFA
+      final double akofaAmount = amount / 5.52;
       
       // Get user ID
       final String userId = transactionData['userId'] ?? _auth.currentUser!.uid;

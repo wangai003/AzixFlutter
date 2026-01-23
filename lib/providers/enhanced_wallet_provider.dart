@@ -1216,8 +1216,8 @@ class EnhancedWalletProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Calculate token amount (default to AKOFA with 100 KES = 1 AKOFA rate)
-      final tokenAmount = amountKES * 0.01;
+      // Calculate token amount (default to AKOFA with 1 AKOFA = 5.52 KES rate)
+      final tokenAmount = amountKES / 5.52;
       
       final result = await _pesapalService.initiateCardPayment(
         amountKES: amountKES,

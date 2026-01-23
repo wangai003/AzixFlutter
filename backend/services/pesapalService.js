@@ -322,13 +322,13 @@ function generateMerchantReference(prefix = 'AKOFA') {
 
 /**
  * Calculate AKOFA amount from currency amount
- * Exchange rate: 100 KES = 1 AKOFA (same as M-Pesa)
+ * Exchange rate: 1 AKOFA = 5.52 KES
  */
 function calculateAkofaAmount(amount, currency = 'KES') {
   // For non-KES currencies, you would need to convert to KES first
   // For now, we assume KES
   const kesAmount = currency === 'KES' ? amount : amount; // Add conversion logic for other currencies
-  return kesAmount * 0.01; // 100 KES = 1 AKOFA
+  return kesAmount / 5.52;
 }
 
 /**

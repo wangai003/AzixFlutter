@@ -27,7 +27,7 @@ class PesapalService {
   );
 
   // Minimum and maximum purchase amounts in KES
-  static const double MIN_PURCHASE_KES = 100.0; // Minimum 100 KES
+  static const double MIN_PURCHASE_KES = 10.0; // Minimum 10 KES
   static const double MAX_PURCHASE_KES = 500000.0; // Maximum 500,000 KES (higher for cards)
 
   /// Token Contract Addresses on Polygon
@@ -758,9 +758,9 @@ class PesapalService {
     return usdAmount * usdToKesRate;
   }
 
-  /// Convert KES to AKOFA (100 KES = 1 AKOFA)
+  /// Convert KES to AKOFA (1 AKOFA = 5.52 KES)
   static double kesToAkofa(double kesAmount) {
-    const kesToAkofaRate = 0.01;
+    const kesToAkofaRate = 1 / 5.52;
     return kesAmount * kesToAkofaRate;
   }
 

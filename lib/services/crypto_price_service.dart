@@ -36,7 +36,7 @@ class CryptoPriceService {
       contractAddress: '0xf1266ACCf0f757c61e4DFDD9EBBcaC05D2Ee375F',
       decimals: 18,
       isStablecoin: false,
-      fixedPriceKES: 100.0, // 1 AKOFA = 100 KES (fixed rate)
+      fixedPriceKES: 5.52, // 1 AKOFA = 5.52 KES (fixed rate)
       coingeckoId: null, // Not listed on CoinGecko
       iconPath: 'assets/icons/akofa.png',
     ),
