@@ -15,6 +15,9 @@ const walletMonitor = require('./services/walletMonitor');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Trust proxy (Vercel/NGINX) for correct IP and rate limiting
+app.set('trust proxy', 1);
+
 // Security middleware
 app.use(helmet());
 
@@ -156,6 +159,7 @@ app.get('/api/pesapal/ipn-list', pesapalController.getIPNList);
 app.post('/api/pesapal/initiate', pesapalController.initiatePayment);
 app.post('/api/pesapal/query', pesapalController.queryStatus);
 app.post('/api/pesapal/ipn-callback', pesapalController.ipnCallback);
+app.post('/api/pesapal/ipn-callback/v2', pesapalController.ipnCallback);
 app.get('/api/pesapal/callback', pesapalController.userCallback);
 app.get('/api/pesapal/transaction/:orderTrackingId', pesapalController.getTransaction);
 
