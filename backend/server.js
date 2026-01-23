@@ -47,7 +47,13 @@ const corsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization']
 };
 
-app.use(cors(corsOptions));
+// Allow PesaPal IPN callbacks regardless of origin
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/pesapal/ipn-callback')) {
+    return next();
+  }
+  return cors(corsOptions)(req, res, next);
+});
 app.use(express.json());
 
 // Rate limiting (IP-based - general protection)
@@ -160,6 +166,8 @@ app.post('/api/pesapal/initiate', pesapalController.initiatePayment);
 app.post('/api/pesapal/query', pesapalController.queryStatus);
 app.post('/api/pesapal/ipn-callback', pesapalController.ipnCallback);
 app.post('/api/pesapal/ipn-callback/v2', pesapalController.ipnCallback);
+app.get('/api/pesapal/ipn-callback', (req, res) => res.sendStatus(200));
+app.get('/api/pesapal/ipn-callback/v2', (req, res) => res.sendStatus(200));
 app.get('/api/pesapal/callback', pesapalController.userCallback);
 app.get('/api/pesapal/transaction/:orderTrackingId', pesapalController.getTransaction);
 

@@ -180,7 +180,7 @@ class _MpesaPurchaseDialogState extends State<MpesaPurchaseDialog> {
               ),
               onChanged: (value) {
                 final amount = double.tryParse(value);
-                if (amount != null && amount >= 100 && amount <= 50000) {
+                if (amount != null && amount >= 10 && amount <= 50000) {
                     setState(() {
                       _selectedAmount = amount;
                       _tokenAmount = amount / 5.52; // Default AKOFA rate
@@ -434,8 +434,8 @@ class _MpesaPurchaseDialogState extends State<MpesaPurchaseDialog> {
       return;
     }
 
-    if (_selectedAmount < 100) {
-      setState(() => _error = 'Minimum purchase amount is KES 100');
+    if (_selectedAmount < 10) {
+      setState(() => _error = 'Minimum purchase amount is KES 10');
       return;
     }
 

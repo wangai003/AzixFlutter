@@ -303,12 +303,12 @@ class _CardPaymentDialogState extends State<CardPaymentDialog> {
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide(color: AppTheme.primaryGold),
             ),
-            hintText: 'Min: 100, Max: 500,000',
+            hintText: 'Min: 10, Max: 500,000',
             hintStyle: TextStyle(color: AppTheme.grey.withOpacity(0.5)),
           ),
           onChanged: (value) {
             final amount = double.tryParse(value);
-            if (amount != null && amount >= 100 && amount <= 500000) {
+            if (amount != null && amount >= 10 && amount <= 500000) {
               setState(() => _amountKES = amount);
               _loadCurrencyPrices();
             }
@@ -318,8 +318,8 @@ class _CardPaymentDialogState extends State<CardPaymentDialog> {
               return 'Please enter an amount';
             }
             final amount = double.tryParse(value);
-            if (amount == null || amount < 100) {
-              return 'Minimum amount is KES 100';
+            if (amount == null || amount < 10) {
+              return 'Minimum amount is KES 10';
             }
             if (amount > 500000) {
               return 'Maximum amount is KES 500,000';

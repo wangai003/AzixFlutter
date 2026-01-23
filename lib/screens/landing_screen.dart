@@ -139,7 +139,7 @@ class _LandingScreenState extends State<LandingScreen> {
 
   Widget _buildHeroSection(bool isDesktop, bool isTablet, bool isMobile) {
     return Container(
-      height: isMobile ? 700 : (isTablet ? 800 : 900),
+      height: isMobile ? 700 : (isTablet ? 760 : 780),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
@@ -182,6 +182,7 @@ class _LandingScreenState extends State<LandingScreen> {
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   // Logo and tagline
                   AppLogo(
@@ -192,15 +193,20 @@ class _LandingScreenState extends State<LandingScreen> {
                   const SizedBox(height: 40),
                   
                   // Main heading
-                  Text(
-                    'Azix - The Digital Infrastructure for African Commerce & Global Trade',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: isMobile ? 34 : (isTablet ? 48 : 60),
-                      fontWeight: FontWeight.w900,
-                      color: AppTheme.primaryGold,
-                      height: 1.15,
-                      letterSpacing: -1,
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: isDesktop ? 1000 : (isTablet ? 900 : double.infinity),
+                    ),
+                    child: Text(
+                      'Azix - The Digital Infrastructure for African Commerce & Global Trade',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: isMobile ? 34 : (isTablet ? 46 : 56),
+                        fontWeight: FontWeight.w900,
+                        color: AppTheme.primaryGold,
+                        height: 1.15,
+                        letterSpacing: -1,
+                      ),
                     ),
                   )
                       .animate()
@@ -210,7 +216,7 @@ class _LandingScreenState extends State<LandingScreen> {
                   const SizedBox(height: 24),
                   
                   // Subtitle
-                  Container(
+                  ConstrainedBox(
                     constraints: BoxConstraints(
                       maxWidth: isDesktop ? 720 : (isTablet ? 640 : double.infinity),
                     ),
@@ -232,9 +238,9 @@ class _LandingScreenState extends State<LandingScreen> {
                   const SizedBox(height: 16),
                   
                   // Description
-                  Container(
+                  ConstrainedBox(
                     constraints: BoxConstraints(
-                      maxWidth: isDesktop ? 860 : (isTablet ? 700 : double.infinity),
+                      maxWidth: isDesktop ? 900 : (isTablet ? 700 : double.infinity),
                     ),
                     child: Text(
                       'All in one secure platform designed for Africa and the global diaspora.',
@@ -252,9 +258,9 @@ class _LandingScreenState extends State<LandingScreen> {
 
                   const SizedBox(height: 16),
 
-                  Container(
+                  ConstrainedBox(
                     constraints: BoxConstraints(
-                      maxWidth: isDesktop ? 860 : (isTablet ? 700 : double.infinity),
+                      maxWidth: isDesktop ? 960 : (isTablet ? 740 : double.infinity),
                     ),
                     child: Text(
                       'Azix connects African businesses, creators, exporters, and investors to global markets, payments, and opportunities - without relying on fragmented banks, middlemen, or expensive intermediaries.',
@@ -362,7 +368,7 @@ class _LandingScreenState extends State<LandingScreen> {
   }
 
   Widget _buildHowItWorksSection(bool isDesktop, bool isTablet, bool isMobile) {
-    return Container(
+    return ResponsiveContainer(
       key: _howItWorksKey,
       padding: EdgeInsets.symmetric(
         horizontal: isMobile ? 24.0 : (isTablet ? 48.0 : 80.0),
@@ -393,39 +399,44 @@ class _LandingScreenState extends State<LandingScreen> {
           
           // Steps
           if (isDesktop || isTablet)
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: _buildStep(
-                    '1',
-                    'Create an Account',
-                    'Sign up with email or wallet-based access. No unnecessary data harvesting.',
-                    Icons.person_add,
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: isDesktop ? 1100 : 900,
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: _buildStep(
+                      '1',
+                      'Create an Account',
+                      'Sign up with email or wallet-based access. No unnecessary data harvesting.',
+                      Icons.person_add,
+                    ),
                   ),
-                ),
-                if (isDesktop) const SizedBox(width: 32),
-                if (isTablet) const SizedBox(width: 24),
-                Expanded(
-                  child: _buildStep(
-                    '2',
-                    'Access the Ecosystem',
-                    'Explore marketplaces, wallets, trade tools, and opportunities.',
-                    Icons.public,
+                  if (isDesktop) const SizedBox(width: 32),
+                  if (isTablet) const SizedBox(width: 24),
+                  Expanded(
+                    child: _buildStep(
+                      '2',
+                      'Access the Ecosystem',
+                      'Explore marketplaces, wallets, trade tools, and opportunities.',
+                      Icons.public,
+                    ),
                   ),
-                ),
-                if (isDesktop) const SizedBox(width: 32),
-                if (isTablet) const SizedBox(width: 24),
-                Expanded(
-                  child: _buildStep(
-                    '3',
-                    'Transact & Grow',
-                    'Trade, earn, settle payments, and build digital economic history. Azix grows with you.',
-                    Icons.trending_up,
+                  if (isDesktop) const SizedBox(width: 32),
+                  if (isTablet) const SizedBox(width: 24),
+                  Expanded(
+                    child: _buildStep(
+                      '3',
+                      'Transact & Grow',
+                      'Trade, earn, settle payments, and build digital economic history. Azix grows with you.',
+                      Icons.trending_up,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             )
           else
             Column(
@@ -574,7 +585,7 @@ class _LandingScreenState extends State<LandingScreen> {
   }
 
   Widget _buildPhasedEcosystemSection(bool isDesktop, bool isTablet, bool isMobile) {
-    return Container(
+    return ResponsiveContainer(
       padding: EdgeInsets.symmetric(
         horizontal: isMobile ? 24.0 : (isTablet ? 48.0 : 80.0),
         vertical: isMobile ? 60.0 : 100.0,
@@ -654,7 +665,7 @@ class _LandingScreenState extends State<LandingScreen> {
   }
 
   Widget _buildWhoBehindAzixSection(bool isDesktop, bool isTablet, bool isMobile) {
-    return Container(
+    return ResponsiveContainer(
       padding: EdgeInsets.symmetric(
         horizontal: isMobile ? 24.0 : (isTablet ? 48.0 : 80.0),
         vertical: isMobile ? 60.0 : 100.0,
@@ -753,7 +764,7 @@ class _LandingScreenState extends State<LandingScreen> {
   }
 
   Widget _buildFinalCTASection(bool isDesktop, bool isTablet, bool isMobile) {
-    return Container(
+    return ResponsiveContainer(
       key: _finalCtaKey,
       padding: EdgeInsets.symmetric(
         horizontal: isMobile ? 24.0 : (isTablet ? 48.0 : 80.0),
@@ -835,7 +846,7 @@ class _LandingScreenState extends State<LandingScreen> {
   }) {
     final double maxWidth =
         isDesktop ? 900 : (isTablet ? 720 : double.infinity);
-    return Container(
+    return ResponsiveContainer(
       padding: EdgeInsets.symmetric(
         horizontal: isMobile ? 24.0 : (isTablet ? 48.0 : 80.0),
         vertical: isMobile ? 60.0 : 100.0,
@@ -900,34 +911,55 @@ class _LandingScreenState extends State<LandingScreen> {
     required List<String> items,
     required IconData icon,
   }) {
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 820),
-      child: Column(
-        children: items
-            .map(
-              (item) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(icon, size: 18, color: AppTheme.primaryGold),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        item,
-                        style: TextStyle(
-                          fontSize: 15,
-                          color: AppTheme.white.withOpacity(0.85),
-                          height: 1.5,
-                        ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final bool isWide = constraints.maxWidth >= 900;
+        if (!isWide || items.length < 4) {
+          return _buildBulletColumn(items, icon);
+        }
+
+        final int midPoint = (items.length / 2).ceil();
+        final List<String> leftItems = items.sublist(0, midPoint);
+        final List<String> rightItems = items.sublist(midPoint);
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: _buildBulletColumn(leftItems, icon)),
+            const SizedBox(width: 32),
+            Expanded(child: _buildBulletColumn(rightItems, icon)),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildBulletColumn(List<String> items, IconData icon) {
+    return Column(
+      children: items
+          .map(
+            (item) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(icon, size: 18, color: AppTheme.primaryGold),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      item,
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: AppTheme.white.withOpacity(0.85),
+                        height: 1.5,
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            )
-            .toList(),
-      ),
+            ),
+          )
+          .toList(),
     );
   }
 
@@ -936,7 +968,7 @@ class _LandingScreenState extends State<LandingScreen> {
     required List<String> items,
   }) {
     return Container(
-      width: ResponsiveLayout.isDesktop(context) ? 320 : double.infinity,
+      width: ResponsiveLayout.isDesktop(context) ? 360 : double.infinity,
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: const Color(0xFF212121),
@@ -986,7 +1018,7 @@ class _LandingScreenState extends State<LandingScreen> {
   }
 
   Widget _buildFooter(bool isDesktop, bool isTablet, bool isMobile) {
-    return Container(
+    return ResponsiveContainer(
       padding: EdgeInsets.symmetric(
         horizontal: isMobile ? 24.0 : (isTablet ? 48.0 : 80.0),
         vertical: 40.0,

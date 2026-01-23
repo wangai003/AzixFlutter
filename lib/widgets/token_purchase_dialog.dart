@@ -49,7 +49,7 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
   Timer? _priceRefreshTimer;
   
   // Preset amounts in KES
-  final List<double> _presetAmountsKES = [100, 500, 1000, 5000, 10000];
+  final List<double> _presetAmountsKES = [10, 50, 100, 500, 1000, 5000, 10000];
   
   @override
   void initState() {
@@ -194,7 +194,7 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
     });
     
     // Debug: Print current state
-    debugPrint('📝 Amount changed: KES=$_kesAmount, Token=$_tokenAmount, Button enabled: ${_tokenAmount > 0 && _kesAmount >= 100}');
+    debugPrint('📝 Amount changed: KES=$_kesAmount, Token=$_tokenAmount, Button enabled: ${_tokenAmount > 0 && _kesAmount >= 10}');
   }
   
   void _toggleInputMode() {
@@ -275,10 +275,10 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
   bool _isCheckingBalance = false;
   
   Future<void> _proceedToPayment() async {
-    if (_tokenAmount <= 0 || _kesAmount < 100) {
+    if (_tokenAmount <= 0 || _kesAmount < 10) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Minimum purchase is KES 100'),
+          content: Text('Minimum purchase is KES 10'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -535,9 +535,9 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
                 
                 const SizedBox(height: 20),
                 
-                // Proceed Button - enabled when tokenAmount > 0 AND kesAmount >= 100
+                // Proceed Button - enabled when tokenAmount > 0 AND kesAmount >= 10
                 ElevatedButton(
-                  onPressed: (_tokenAmount > 0 && _kesAmount >= 100 && !_isCheckingBalance) 
+                  onPressed: (_tokenAmount > 0 && _kesAmount >= 10 && !_isCheckingBalance) 
                     ? _proceedToPayment 
                     : null,
                   style: ElevatedButton.styleFrom(

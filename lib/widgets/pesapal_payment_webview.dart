@@ -1,9 +1,7 @@
-import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../theme/app_theme.dart';
-import '../services/pesapal_service.dart';
 
 // Web-only imports
 // ignore: avoid_web_libraries_in_flutter
@@ -80,7 +78,6 @@ class _PesapalPaymentWebViewState extends State<PesapalPaymentWebView> {
     String? tokenSymbol,
     String? explorerUrl,
   }) {
-    _statusPollTimer?.cancel();
     setState(() => _paymentStatus = 'completed');
     
     final displayAmount = tokenAmount ?? widget.tokenAmount;
@@ -261,7 +258,6 @@ class _PesapalPaymentWebViewState extends State<PesapalPaymentWebView> {
   
   /// Handle failed payment
   void _handlePaymentFailed({String? errorMessage}) {
-    _statusPollTimer?.cancel();
     setState(() => _paymentStatus = 'failed');
     
     final message = errorMessage ?? 'Payment failed. Please try again.';
@@ -331,10 +327,8 @@ class _PesapalPaymentWebViewState extends State<PesapalPaymentWebView> {
               // Reset and try again
               setState(() {
                 _paymentStatus = 'pending';
-                _pollCount = 0;
               });
               _refreshPage();
-              _startStatusPolling();
             },
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

@@ -1224,6 +1224,7 @@ class EnhancedWalletProvider extends ChangeNotifier {
         tokenAmount: tokenAmount,
         tokenSymbol: 'AKOFA',
         email: email,
+        walletAddress: _address ?? '',
         phone: phone,
         firstName: firstName,
         lastName: lastName,
