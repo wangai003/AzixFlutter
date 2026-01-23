@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:bip39/bip39.dart' as bip39;
 import 'package:provider/provider.dart';
 import '../services/secure_wallet_service.dart';
 import '../services/akofa_tag_service.dart';
@@ -26,6 +28,8 @@ class _SecureWalletCreationScreenState
   bool _biometricsSupported = false;
   bool _biometricsChecked = false;
   String? _biometricSupportError;
+  String? _seedPhrase;
+  bool _seedPhraseAcknowledged = false;
 
   // Password fields
   final TextEditingController _passwordController = TextEditingController();
@@ -1005,12 +1009,26 @@ class _SecureWalletCreationScreenState
         }
       }
 
+      // Generate and show seed phrase (one-time display)
+      if (!_seedPhraseAcknowledged) {
+        _seedPhrase ??= bip39.generateMnemonic();
+        final seedConfirmed = await _showSeedPhraseDialog(_seedPhrase!);
+        if (!seedConfirmed) {
+          setState(() {
+            _isCreating = false;
+            _currentStep = 0;
+          });
+          return;
+        }
+        _seedPhraseAcknowledged = true;
+      }
+
       // Create secure wallet with biometric settings (if available and enabled)
       setState(() => _currentStep = 2);
       final stellarResult = await SecureWalletService.createSecureWallet(
         userId: user.uid,
         password: password,
-        recoveryPhrase: null, // Could be generated separately
+        recoveryPhrase: _seedPhrase,
         enableBiometrics: _biometricsSupported && _enableBiometrics && biometricSetupSuccess,
       );
 
@@ -1021,7 +1039,7 @@ class _SecureWalletCreationScreenState
         polygonResult = await PolygonWalletService.createSecurePolygonWallet(
           userId: user.uid,
           password: password,
-          recoveryPhrase: null,
+          recoveryPhrase: _seedPhrase,
         );
 
         if (polygonResult['success'] == true) {
@@ -1037,6 +1055,8 @@ class _SecureWalletCreationScreenState
       if (result['success'] == true) {
         // Check AKOFA tag creation and linking
         await _verifyAkofaTagCreation(user.uid);
+        _seedPhrase = null;
+        _seedPhraseAcknowledged = false;
 
         // Update success message to include both wallets
         String successMsg = result['message'];
@@ -1072,6 +1092,116 @@ class _SecureWalletCreationScreenState
     } finally {
       setState(() => _isCreating = false);
     }
+  }
+
+  Future<bool> _showSeedPhraseDialog(String seedPhrase) async {
+    return (await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) {
+            bool confirmed = false;
+            bool copied = false;
+            return StatefulBuilder(
+              builder: (context, setDialogState) {
+                return AlertDialog(
+                  title: const Text('Write down your recovery phrase'),
+                  content: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'This 12-word recovery phrase can restore your wallet if you lose access.',
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'You will only see this once. Store it offline and keep it private.',
+                          style: TextStyle(color: Colors.redAccent),
+                        ),
+                        const SizedBox(height: 16),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade200,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.black12),
+                          ),
+                          child: SelectableText(
+                            seedPhrase,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              height: 1.5,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            ElevatedButton.icon(
+                              onPressed: () async {
+                                await Clipboard.setData(
+                                  ClipboardData(text: seedPhrase),
+                                );
+                                setDialogState(() {
+                                  copied = true;
+                                });
+                              },
+                              icon: const Icon(Icons.copy),
+                              label: const Text('Copy'),
+                            ),
+                            const SizedBox(width: 12),
+                            if (copied)
+                              const Text(
+                                'Copied',
+                                style: TextStyle(color: Colors.green),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Important:',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          '• Anyone with this phrase can access your wallet.\n'
+                          '• We cannot recover it for you.\n'
+                          '• Do not store it in screenshots or cloud notes.',
+                        ),
+                        const SizedBox(height: 16),
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text(
+                            'I have written down my recovery phrase and understand it is the only way to recover my wallet.',
+                          ),
+                          value: confirmed,
+                          onChanged: (value) {
+                            setDialogState(() {
+                              confirmed = value ?? false;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: const Text('Cancel'),
+                    ),
+                    ElevatedButton(
+                      onPressed: confirmed
+                          ? () => Navigator.of(context).pop(true)
+                          : null,
+                      child: const Text('Continue'),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        )) ??
+        false;
   }
 
   /// Verify AKOFA tag creation and linking during wallet creation

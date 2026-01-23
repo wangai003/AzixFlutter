@@ -15,9 +15,8 @@ class StorePaymentService {
   // Backend server URL - should match your backend configuration
   static const String _backendUrl = String.fromEnvironment(
     'AZIX_BACKEND_URL',
-    defaultValue: 'http://localhost:3000',
+    defaultValue: 'https://azix-flutter.vercel.app',
   );
-  // For production: 'https://your-backend.herokuapp.com'
   // For mobile testing: 'http://YOUR_IP_ADDRESS:3000'
 
   /// Process payment for a store order using Polygon wallet

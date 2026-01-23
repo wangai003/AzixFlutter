@@ -6,8 +6,10 @@ import 'package:http/http.dart' as http;
 /// Authentication: Wallet-based (no Firebase required!)
 class BiconomyBackendService {
   // Backend server URL - UPDATE THIS to your deployed backend!
-  static const String _backendUrl = 'http://localhost:3000';
-  // For production: 'https://your-backend.herokuapp.com'
+  static const String _backendUrl = String.fromEnvironment(
+    'AZIX_BACKEND_URL',
+    defaultValue: 'https://azix-flutter.vercel.app',
+  );
   // For mobile testing: 'http://YOUR_IP_ADDRESS:3000'
   
   /// Send gasless ERC-20 transaction via backend relay

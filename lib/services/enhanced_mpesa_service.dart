@@ -62,7 +62,7 @@ class EnhancedMpesaService {
   /// Change this to your production URL when deploying
   static const String _backendBaseUrl = String.fromEnvironment(
     'AZIX_BACKEND_API_URL',
-    defaultValue: 'http://localhost:3000/api',
+    defaultValue: 'https://azix-flutter.vercel.app/api',
   );
 
   /// Enable CORS proxy (auto-enabled on web to avoid browser CORS blocking

@@ -10,7 +10,6 @@ import '../services/moonpay_service.dart';
 import '../services/moonpay_callback_service.dart';
 import '../services/polygon_wallet_service.dart';
 import '../services/blockchain_transaction_service.dart';
-import '../services/biconomy_backend_service.dart';
 import '../models/transaction.dart' as app_transaction;
 import '../models/asset_config.dart';
 
@@ -232,6 +231,9 @@ class EnhancedWalletProvider extends ChangeNotifier {
           
           // Load initial data from the correct derived address
           await Future.wait([loadBalances(), loadTransactions()]);
+
+          // Process any pending token credits (includes PesaPal card payments)
+          await _mpesaService.processPendingCredits(user.uid, _address!);
           
           // Start MoonPay transaction monitoring
           if (!_isMonitoringMoonPayTransactions) {
@@ -690,38 +692,7 @@ class EnhancedWalletProvider extends ChangeNotifier {
     required String toAddress,
     required double amount,
   }) async {
-    // Don't use gasless if disabled
-    if (!_gaslessEnabled || !_useGaslessWhenPossible) return false;
-    
-    // Can't use gasless for native MATIC transfers (need gas to move MATIC)
-    if (asset.isNative || asset.code == 'MATIC') return false;
-    
-    // Check if token contract address is available
-    if (asset.contractAddress == null || asset.contractAddress!.isEmpty) {
-      return false;
-    }
-    
-    // Check if user has enough gas
-    final hasGas = await hasEnoughGasForTransaction(
-      asset: asset,
-      toAddress: toAddress,
-      amount: amount,
-    );
-    
-    // If user has gas, let them choose (default to regular)
-    // If no gas, must use gasless
-    if (!hasGas) {
-      debugPrint('⛽ No gas available - will use gasless transaction');
-      return true;
-    }
-    
-    // User has gas - check if backend gasless service is available
-    if (_useGaslessWhenPossible) {
-      // With Biconomy MEE Sponsorship, gasless is always available if backend is healthy
-      final health = await BiconomyBackendService.healthCheck();
-      return health;
-    }
-    
+    // Gasless backend flow is disabled; rely on serverless MATIC top-ups instead.
     return false;
   }
   
@@ -763,17 +734,10 @@ class EnhancedWalletProvider extends ChangeNotifier {
         debugPrint('🔄 Sending ERC-20 token: ${asset.symbol}');
         debugPrint('📍 Contract: ${asset.contractAddress}');
         
-        // Determine if we should use gasless
-        final useGasless = forceGasless ?? await shouldUseGasless(
-          asset: asset,
-          toAddress: recipientAddress,
-          amount: amount,
-        );
-        
         Map<String, dynamic> result;
         
-        // Temporarily disable gasless/sponsored path; always use standard send
-        debugPrint('⛽ Using regular transaction with gas (gasless disabled)');
+        // Use standard send with serverless MATIC top-up if needed
+        debugPrint('⛽ Using standard transaction with serverless gas top-up when required');
         result = await PolygonWalletService.sendERC20TokenWithAuth(
           userId: user.uid,
           password: password,
@@ -814,156 +778,10 @@ class EnhancedWalletProvider extends ChangeNotifier {
     required double amount,
     required String password,
   }) async {
-    if (!_hasWallet || _address == null) {
-      return {'success': false, 'error': 'No Polygon wallet found'};
-    }
-    
-    if (asset.contractAddress == null || asset.contractAddress!.isEmpty) {
-      return {'success': false, 'error': 'No contract address for token'};
-    }
-
-    _isProcessingPolygonTransaction = true;
-    _setError(null);
-    notifyListeners();
-
-    try {
-      final user = _auth.currentUser;
-      if (user == null) {
-        throw Exception('User not authenticated');
-      }
-      
-      debugPrint('═══════════════════════════════════════════════════════════════');
-      debugPrint('🔄 [GASLESS] Attempting gasless transaction via backend relay...');
-      debugPrint('═══════════════════════════════════════════════════════════════');
-      debugPrint('📍 Token: ${asset.symbol}');
-      debugPrint('💰 Amount: $amount');
-      debugPrint('🎯 User pays: \$0.00 (gasless!)');
-      debugPrint('📊 Wallet address (from provider): $_address');
-      debugPrint('📊 Balance shown in UI: ${_balances[asset.symbol.toUpperCase()]?.toString() ?? '0'} ${asset.symbol}');
-      debugPrint('═══════════════════════════════════════════════════════════════');
-
-      // Try to sign transaction locally and relay via backend
-      Map<String, dynamic> result;
-      
-      try {
-        // Create signed transaction (this will auto-fix address if needed)
-        final signedTx = await PolygonWalletService.createSignedERC20Transaction(
-          userId: user.uid,
-          password: password,
-          tokenContractAddress: asset.contractAddress!,
-          toAddress: recipientAddress,
-          amount: amount,
-        );
-
-        if (signedTx['success'] == true) {
-          debugPrint('✅ Transaction signed locally');
-          
-          // Update provider address with the authoritative derived address
-          final derivedAddress = signedTx['from'] as String?;
-          if (derivedAddress != null && derivedAddress.toLowerCase() != _address?.toLowerCase()) {
-            debugPrint('🔧 [PROVIDER] Updating address from $_address to $derivedAddress (derived from key)');
-            _address = derivedAddress;
-            _secureWalletAddress = derivedAddress;
-            
-            // Reload balances with correct address
-            debugPrint('🔄 [PROVIDER] Reloading balances for correct address...');
-            await loadBalances();
-            notifyListeners();
-          }
-
-          // Send signed transaction to backend for relay
-          result = await BiconomyBackendService.sendGaslessTransaction(
-            signedTransaction: signedTx['signedTransaction'],
-            userAddress: derivedAddress ?? _address!,
-          );
-          
-          if (result['success'] == true) {
-            debugPrint('✅ Gasless relay successful!');
-            debugPrint('💰 User paid: \$0.00 (gas paid by backend)');
-          } else {
-            throw Exception('Backend relay failed: ${result['error']}');
-          }
-        } else {
-          throw Exception('Failed to sign transaction: ${signedTx['error']}');
-        }
-      } catch (gaslessError) {
-        debugPrint('⚠️ Gasless relay failed: $gaslessError');
-        
-        // Check if insufficient token balance
-        if (gaslessError.toString().contains('transfer amount exceeds balance')) {
-          _isProcessingPolygonTransaction = false;
-          notifyListeners();
-          return {
-            'success': false,
-            'error': 'Insufficient ${asset.symbol} balance. You don\'t have enough ${asset.symbol} to send $amount.',
-            'insufficientBalance': true,
-          };
-        }
-        
-        // Check if wallet data is incomplete
-        if (gaslessError.toString().contains('incomplete') || 
-            gaslessError.toString().contains('recreate your Polygon wallet')) {
-          _isProcessingPolygonTransaction = false;
-          notifyListeners();
-          return {
-            'success': false,
-            'error': 'Wallet data is incomplete. Please recreate your Polygon wallet in Settings.',
-            'needsWalletRecreation': true,
-          };
-        }
-        
-        // Check if user has MATIC for fallback
-        final maticBalance = _balances['MATIC']?.balance ?? 0.0;
-        if (maticBalance < 0.01) {
-          debugPrint('⚠️ User has insufficient MATIC ($maticBalance) for fallback transaction');
-          _isProcessingPolygonTransaction = false;
-          notifyListeners();
-          return {
-            'success': false,
-            'error': 'Gasless transaction failed and you don\'t have enough MATIC to pay gas fees. Please contact support or add MATIC to your wallet.',
-            'gaslessError': gaslessError.toString(),
-          };
-        }
-        
-        debugPrint('🔄 Falling back to regular transaction (user pays gas)...');
-        
-        // Fallback to regular transaction where user pays gas
-        final fallbackResult = await _sendERC20WithUserWallet(
-          userId: user.uid,
-          password: password,
-          tokenAddress: asset.contractAddress!,
-          toAddress: recipientAddress,
-          amount: amount,
-        );
-        
-        if (fallbackResult['success'] != true) {
-          throw Exception(fallbackResult['error'] ?? 'Transaction failed');
-        }
-        
-        result = fallbackResult;
-      }
-
-      if (result['success'] == true) {
-        debugPrint('✅ TRUE gasless transaction successful!');
-        debugPrint('📋 TX Hash: ${result['txHash']}');
-        debugPrint('💰 User paid: \$0.00');
-        
-        // Refresh balances and transactions after successful transaction
-        await Future.wait([loadBalances(), loadTransactions(forceRefresh: true)]);
-      } else {
-        debugPrint('❌ Gasless transaction failed: ${result['error']}');
-      }
-
-      _isProcessingPolygonTransaction = false;
-      notifyListeners();
-      return result;
-    } catch (e) {
-      debugPrint('❌ Error in gasless transaction: $e');
-      _setError('Failed to send gasless transaction: $e');
-      _isProcessingPolygonTransaction = false;
-      notifyListeners();
-      return {'success': false, 'error': e.toString()};
-    }
+    return {
+      'success': false,
+      'error': 'Gasless backend relay is disabled. Please use the standard send flow.',
+    };
   }
   
   /// Enable or disable gasless transactions
@@ -1471,6 +1289,27 @@ class EnhancedWalletProvider extends ChangeNotifier {
       _setLoading(false);
       notifyListeners();
       return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// Auto-check pending PesaPal transactions and credit tokens if completed
+  Future<void> checkPendingPesapalTransactions() async {
+    try {
+      final history = await getPesapalHistory();
+      if (history.isEmpty) return;
+
+      final pendingTxs = history.where((tx) {
+        final status = (tx['status'] as String?)?.toLowerCase() ?? '';
+        return status != 'credited' && status != 'failed';
+      }).toList();
+
+      for (final tx in pendingTxs) {
+        final orderTrackingId = tx['orderTrackingId'] as String?;
+        if (orderTrackingId == null || orderTrackingId.isEmpty) continue;
+        await checkPesapalPaymentStatus(orderTrackingId);
+      }
+    } catch (e) {
+      debugPrint('Error auto-checking PesaPal transactions: $e');
     }
   }
 

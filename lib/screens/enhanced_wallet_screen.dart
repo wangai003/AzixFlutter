@@ -28,7 +28,6 @@ import '../services/secure_wallet_service.dart';
 import '../services/akofa_tag_service.dart';
 import '../services/biometric_service.dart';
 import '../services/polygon_wallet_service.dart';
-import '../services/biconomy_backend_service.dart';
 import '../providers/auth_provider.dart' as local_auth;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'secure_wallet_creation_screen.dart';
@@ -58,6 +57,12 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     // This is the ONLY place in the app where wallet authentication is triggered
     // The dialog will ONLY appear when user navigates to this Enhanced Wallet Screen
     // ========================================================================
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final walletProvider =
+          Provider.of<EnhancedWalletProvider>(context, listen: false);
+      walletProvider.checkPendingPesapalTransactions();
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _checkWalletSession();
       
@@ -121,6 +126,198 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
       listen: false,
     );
     sessionProvider.recordActivity();
+  }
+
+  Future<bool> _confirmGasTopUpIfNeeded({
+    required EnhancedWalletProvider walletProvider,
+    required AssetConfig asset,
+    required String recipientAddress,
+    required double amount,
+  }) async {
+    if (asset.isNative || asset.code.toUpperCase() == 'MATIC') {
+      return true;
+    }
+
+    final userAddress = walletProvider.address;
+    if (userAddress == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Wallet address not found'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return false;
+    }
+
+    if (asset.contractAddress == null || asset.contractAddress!.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Token contract address not found for ${asset.symbol}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return false;
+    }
+
+    // Estimate gas for ERC-20 transfer
+    final gasEstimate = await PolygonWalletService.estimateERC20GasFee(
+      fromAddress: userAddress,
+      tokenContractAddress: asset.contractAddress!,
+      toAddress: recipientAddress,
+      amount: amount,
+    );
+
+    if (gasEstimate['success'] != true) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(gasEstimate['error'] ?? 'Unable to estimate gas fees'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return false;
+    }
+
+    if (gasEstimate['hasEnoughForGas'] == true) {
+      return true;
+    }
+
+    final requiredGasFee = gasEstimate['gasFee'] as double? ?? 0.0;
+    final currentBalance = gasEstimate['currentBalance'] as double? ?? 0.0;
+    final insufficient = (requiredGasFee - currentBalance);
+
+    if (insufficient <= 0) {
+      return true;
+    }
+
+    final topUpAmount = insufficient * 1.1;
+
+    // Estimate gas cost for sending the top-up MATIC
+    final topUpGasEstimate = await PolygonWalletService.estimateMaticGasFee(
+      fromAddress: userAddress,
+      toAddress: userAddress,
+      amountMatic: 0.0,
+    );
+    final topUpGasCost =
+        topUpGasEstimate['gasFee'] as double? ?? 0.01; // fallback estimate
+
+    final feeAmount = PolygonWalletService.calculateMaticTopUpFee(
+      maticAmount: topUpAmount,
+      gasCostForMaticTransfer: topUpGasCost,
+    );
+
+    // Determine fee token availability
+    String? feeToken;
+    double? feeTokenBalance;
+
+    final usdtBalance = await PolygonWalletService.getStablecoinBalance(
+      userAddress: userAddress,
+      tokenSymbol: 'USDT',
+    );
+    if (usdtBalance['success'] == true &&
+        (usdtBalance['balance'] as double? ?? 0.0) >= feeAmount) {
+      feeToken = 'USDT';
+      feeTokenBalance = usdtBalance['balance'] as double?;
+    } else {
+      final usdcBalance = await PolygonWalletService.getStablecoinBalance(
+        userAddress: userAddress,
+        tokenSymbol: 'USDC',
+      );
+      if (usdcBalance['success'] == true &&
+          (usdcBalance['balance'] as double? ?? 0.0) >= feeAmount) {
+        feeToken = 'USDC';
+        feeTokenBalance = usdcBalance['balance'] as double?;
+      }
+    }
+
+    if (!mounted) return false;
+
+    if (feeToken == null) {
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: AppTheme.darkGrey,
+          title: const Text('Insufficient Fee Balance',
+              style: TextStyle(color: AppTheme.white)),
+          content: Text(
+            'You don\'t have enough USDT or USDC to cover the gas top-up fee (~${feeAmount.toStringAsFixed(6)}). Please add USDT/USDC or MATIC and try again.',
+            style: const TextStyle(color: AppTheme.grey, fontSize: 13),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text('OK', style: TextStyle(color: AppTheme.grey)),
+            ),
+          ],
+        ),
+      );
+      return false;
+    }
+
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.darkGrey,
+        title: const Text(
+          'Low MATIC for Gas',
+          style: TextStyle(color: AppTheme.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'We can top up your wallet with MATIC to cover gas for this transaction.',
+              style: TextStyle(color: AppTheme.white, fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            _buildGasInfoRow(
+              'Top-up Amount:',
+              '${topUpAmount.toStringAsFixed(6)} MATIC',
+            ),
+            const SizedBox(height: 8),
+            _buildGasInfoRow(
+              'Fee (charged in $feeToken):',
+              '${feeAmount.toStringAsFixed(6)} $feeToken',
+              isHighlight: true,
+            ),
+            if (feeTokenBalance != null) ...[
+              const SizedBox(height: 8),
+              _buildGasInfoRow(
+                'Your $feeToken Balance:',
+                feeTokenBalance.toStringAsFixed(6),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Text(
+              'The fee will be charged before the MATIC top-up.',
+              style: TextStyle(color: AppTheme.grey, fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryGold,
+              foregroundColor: AppTheme.black,
+            ),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+
+    return proceed == true;
   }
 
   @override
@@ -2254,273 +2451,13 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                         return;
                       }
 
-                      // Check gas fees before proceeding
-                      final userAddress = walletProvider.address;
-                      if (userAddress == null) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Wallet address not found'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        return;
-                      }
-
-                      // Show checking gas dialog
-                      showDialog(
-                        context: context,
-                        barrierDismissible: false,
-                        builder: (context) => AlertDialog(
-                          backgroundColor: AppTheme.darkGrey,
-                          content: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const CircularProgressIndicator(
-                                color: AppTheme.primaryGold,
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                'Checking gas fees...',
-                                style: TextStyle(
-                                  color: AppTheme.white,
-                                  fontSize: 16,
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ],
-                          ),
-                        ),
+                      final shouldProceed = await _confirmGasTopUpIfNeeded(
+                        walletProvider: walletProvider,
+                        asset: asset,
+                        recipientAddress: resolvedAddress,
+                        amount: amount,
                       );
-
-                      // Estimate gas fee
-                      Map<String, dynamic> gasEstimate;
-                      if (asset.isNative || asset.code == 'MATIC') {
-                        gasEstimate = await PolygonWalletService.estimateMaticGasFee(
-                          fromAddress: userAddress,
-                          toAddress: resolvedAddress,
-                          amountMatic: amount,
-                        );
-                      } else if (asset.contractAddress != null) {
-                        gasEstimate = await PolygonWalletService.estimateERC20GasFee(
-                          fromAddress: userAddress,
-                          tokenContractAddress: asset.contractAddress!,
-                        );
-                      } else {
-                        // Close checking dialog
-                        Navigator.of(context).pop();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Unable to estimate gas fees'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        return;
-                      }
-
-                      // Close checking dialog
-                      Navigator.of(context).pop();
-
-                      // Check if user has enough MATIC for gas
-                      if (gasEstimate['success'] != true || gasEstimate['hasEnoughForGas'] != true) {
-                        final gasFee = gasEstimate['gasFee'] as double? ?? 0.0;
-                        final insufficientAmount = gasEstimate['insufficientAmount'] as double? ?? 0.0;
-                        final currentBalance = gasEstimate['currentBalance'] as double? ?? 0.0;
-                        
-                        // Check if gasless is available for non-MATIC assets
-                        final canUseGasless = !asset.isNative && asset.code != 'MATIC';
-                        
-                        showDialog(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            backgroundColor: AppTheme.darkGrey,
-                            title: Row(
-                              children: [
-                                Icon(
-                                  canUseGasless ? Icons.bolt : Icons.warning_amber_rounded,
-                                  color: canUseGasless ? Colors.blue : Colors.orange,
-                                  size: 28,
-                                ),
-                                const SizedBox(width: 12),
-                                Text(
-                                  canUseGasless ? 'Use Gasless Transaction' : 'Insufficient Gas',
-                                  style: TextStyle(
-                                    color: canUseGasless ? Colors.blue : Colors.orange,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            content: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  canUseGasless
-                                      ? 'You don\'t have enough MATIC for gas, but you can send this transaction for FREE!'
-                                      : 'You don\'t have enough MATIC to pay for gas fees.',
-                                  style: TextStyle(color: AppTheme.white, fontSize: 15),
-                                ),
-                                const SizedBox(height: 16),
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: (canUseGasless ? Colors.blue : Colors.orange).withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: (canUseGasless ? Colors.blue : Colors.orange).withOpacity(0.3),
-                                    ),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      _buildGasInfoRow('Estimated Gas Fee:', '${gasFee.toStringAsFixed(6)} MATIC'),
-                                      const SizedBox(height: 8),
-                                      _buildGasInfoRow('Your MATIC Balance:', '${currentBalance.toStringAsFixed(6)} MATIC'),
-                                      const SizedBox(height: 8),
-                                      if (!canUseGasless)
-                                        _buildGasInfoRow('Additional Needed:', '${insufficientAmount.toStringAsFixed(6)} MATIC', isHighlight: true),
-                                      if (canUseGasless)
-                                        _buildGasInfoRow('Your Cost (Gasless):', '0.00 MATIC ✨', isHighlight: true),
-                                    ],
-                                  ),
-                                ),
-                                if (canUseGasless) ...[
-                                  const SizedBox(height: 16),
-                                  Container(
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: Colors.green.withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(color: Colors.green.withOpacity(0.3)),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.check_circle, color: Colors.green, size: 20),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Text(
-                                            'Gasless transactions are powered by Biconomy. No MATIC needed!',
-                                            style: TextStyle(color: Colors.green, fontSize: 12),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ] else ...[
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    'Please top up your wallet with MATIC to continue.',
-                                    style: TextStyle(color: AppTheme.grey, fontSize: 13),
-                                  ),
-                                ],
-                              ],
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.of(context).pop(),
-                                child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
-                              ),
-                              if (canUseGasless)
-                                ElevatedButton.icon(
-                                  onPressed: () async {
-                                    Navigator.of(context).pop();
-                                    
-                                    // Show processing dialog
-                                    showDialog(
-                                      context: context,
-                                      barrierDismissible: false,
-                                      builder: (context) => AlertDialog(
-                                        backgroundColor: AppTheme.darkGrey,
-                                        content: Column(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            const CircularProgressIndicator(
-                                              color: Colors.blue,
-                                            ),
-                                            const SizedBox(height: 16),
-                                            Text(
-                                              'Sending gasless transaction...',
-                                              style: TextStyle(color: AppTheme.white),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    );
-                                    
-                                    try {
-                                      // Send gasless transaction
-                                      final result = await walletProvider.sendAsset(
-                                        recipientAddress: resolvedAddress,
-                                        asset: asset,
-                                        amount: amount,
-                                        memo: memoController.text.trim(),
-                                        password: password,
-                                        forceGasless: true, // Force gasless
-                                      );
-                                      
-                                      // Close processing dialog
-                                      Navigator.of(context).pop();
-                                      
-                                      if (result['success'] == true) {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(
-                                            content: Row(
-                                              children: [
-                                                Icon(Icons.check_circle, color: Colors.white),
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                  child: Text(
-                                                    'Gasless transaction successful! ${asset.symbol} sent for FREE ✨',
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                            backgroundColor: Colors.green,
-                                            duration: const Duration(seconds: 5),
-                                          ),
-                                        );
-                                      } else {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(
-                                            content: Text(
-                                              'Transaction failed: ${result['error']}',
-                                            ),
-                                            backgroundColor: Colors.red,
-                                          ),
-                                        );
-                                      }
-                                    } catch (e) {
-                                      Navigator.of(context).pop();
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text('Error: $e'),
-                                          backgroundColor: Colors.red,
-                                        ),
-                                      );
-                                    }
-                                  },
-                                  icon: const Icon(Icons.bolt),
-                                  label: const Text('Send for FREE'),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.blue,
-                                    foregroundColor: Colors.white,
-                                  ),
-                                )
-                              else
-                                ElevatedButton.icon(
-                                  onPressed: () {
-                                    Navigator.of(context).pop();
-                                    _showBuyCryptoOptions();
-                                  },
-                                  icon: const Icon(Icons.add_circle_outline),
-                                  label: const Text('Top Up'),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.orange,
-                                    foregroundColor: Colors.white,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        );
+                      if (!shouldProceed) {
                         return;
                       }
 
@@ -2886,7 +2823,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                     border: Border.all(color: Colors.blue.withOpacity(0.3)),
                   ),
                   child: Text(
-                    '⚠️ Polygon transactions require gas fees in MATIC',
+                    '⚠️ Polygon transactions use MATIC for gas. If you are short, we can top up and charge a USDC/USDT fee.',
                     style: TextStyle(color: Colors.blue, fontSize: 12),
                     textAlign: TextAlign.center,
                   ),
@@ -2934,311 +2871,23 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                         return;
                       }
 
-                      // Check gas fees before proceeding
-                      final userAddress = walletProvider.address;
-                      if (userAddress == null) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Wallet address not found'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        return;
-                      }
-
-                      // Show checking gas dialog
-                      showDialog(
-                        context: context,
-                        barrierDismissible: false,
-                        builder: (context) => AlertDialog(
-                          backgroundColor: AppTheme.darkGrey,
-                          content: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const CircularProgressIndicator(
-                                color: AppTheme.primaryGold,
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                'Checking gas fees...',
-                                style: TextStyle(
-                                  color: AppTheme.white,
-                                  fontSize: 16,
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ],
-                          ),
-                        ),
+                      final confirmAsset = AssetConfig(
+                        code: symbol,
+                        symbol: symbol,
+                        name: name,
+                        issuer: '',
+                        isNative: isNative,
+                        decimals: (token['decimals'] as int?) ?? 18,
+                        contractAddress: token['contractAddress'] as String?,
                       );
 
-                      // Estimate gas fee
-                      Map<String, dynamic> gasEstimate;
-                      if (isNative) {
-                        gasEstimate = await PolygonWalletService.estimateMaticGasFee(
-                          fromAddress: userAddress,
-                          toAddress: recipientAddress,
-                          amountMatic: amount,
-                        );
-                      } else {
-                        final contractAddress = token['contractAddress'] as String?;
-                        if (contractAddress == null || contractAddress.isEmpty) {
-                          // Close checking dialog
-                          Navigator.of(context).pop();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Token contract address not found'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                          return;
-                        }
-                        gasEstimate = await PolygonWalletService.estimateERC20GasFee(
-                          fromAddress: userAddress,
-                          tokenContractAddress: contractAddress,
-                        );
-                      }
-
-                      // Close checking dialog
-                      Navigator.of(context).pop();
-
-                      // Check if user has enough MATIC for gas
-                      if (gasEstimate['success'] != true || gasEstimate['hasEnoughForGas'] != true) {
-                        Navigator.of(context).pop(); // Close send dialog
-                        
-                        final gasFee = gasEstimate['gasFee'] as double? ?? 0.0;
-                        final insufficientAmount = gasEstimate['insufficientAmount'] as double? ?? 0.0;
-                        final maticBalance = gasEstimate['currentBalance'] as double? ?? 0.0;
-                        
-                        // Check if gasless is available for non-MATIC assets
-                        final canUseGasless = !isNative && symbol != 'MATIC';
-                        
-                        showDialog(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            backgroundColor: AppTheme.darkGrey,
-                            title: Row(
-                              children: [
-                                Icon(
-                                  canUseGasless ? Icons.bolt : Icons.warning_amber_rounded,
-                                  color: canUseGasless ? Colors.blue : Colors.orange,
-                                  size: 28,
-                                ),
-                                const SizedBox(width: 12),
-                                Text(
-                                  canUseGasless ? 'Use Gasless Transaction' : 'Insufficient Gas',
-                                  style: TextStyle(
-                                    color: canUseGasless ? Colors.blue : Colors.orange,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            content: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  canUseGasless
-                                      ? 'You don\'t have enough MATIC for gas, but you can send $symbol for FREE!'
-                                      : 'You don\'t have enough MATIC to pay for gas fees.',
-                                  style: TextStyle(color: AppTheme.white, fontSize: 15),
-                                ),
-                                const SizedBox(height: 16),
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: (canUseGasless ? Colors.blue : Colors.orange).withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: (canUseGasless ? Colors.blue : Colors.orange).withOpacity(0.3),
-                                    ),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      _buildGasInfoRow('Estimated Gas Fee:', '${gasFee.toStringAsFixed(6)} MATIC'),
-                                      const SizedBox(height: 8),
-                                      _buildGasInfoRow('Your MATIC Balance:', '${maticBalance.toStringAsFixed(6)} MATIC'),
-                                      const SizedBox(height: 8),
-                                      if (!canUseGasless)
-                                        _buildGasInfoRow('Additional Needed:', '${insufficientAmount.toStringAsFixed(6)} MATIC', isHighlight: true),
-                                      if (canUseGasless)
-                                        _buildGasInfoRow('Your Cost (Gasless):', '0.00 MATIC ✨', isHighlight: true),
-                                    ],
-                                  ),
-                                ),
-                                if (canUseGasless) ...[
-                                  const SizedBox(height: 16),
-                                  Container(
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: Colors.green.withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(color: Colors.green.withOpacity(0.3)),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.check_circle, color: Colors.green, size: 20),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Text(
-                                            'Gasless transactions are powered by Biconomy. No MATIC needed!',
-                                            style: TextStyle(color: Colors.green, fontSize: 12),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ] else ...[
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    'Please top up your wallet with MATIC to continue.',
-                                    style: TextStyle(color: AppTheme.grey, fontSize: 13),
-                                  ),
-                                ],
-                              ],
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.of(context).pop(),
-                                child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
-                              ),
-                              if (canUseGasless)
-                                ElevatedButton.icon(
-                                  onPressed: () async {
-                                    Navigator.of(context).pop();
-                                    
-                                    // Show processing dialog
-                                    showDialog(
-                                      context: context,
-                                      barrierDismissible: false,
-                                      builder: (context) => AlertDialog(
-                                        backgroundColor: AppTheme.darkGrey,
-                                        content: Column(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            const CircularProgressIndicator(
-                                              color: Colors.blue,
-                                            ),
-                                            const SizedBox(height: 16),
-                                            Text(
-                                              'Sending gasless transaction...',
-                                              style: TextStyle(color: AppTheme.white),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    );
-                                    
-                                    try {
-                                      // Get contract address for ERC-20 tokens
-                                      final contractAddress = token['contractAddress'] as String?;
-                                      
-                                      // Send gasless transaction using provider method
-                                      final result = await walletProvider.sendGaslessERC20(
-                                        recipientAddress: recipientAddress,
-                                        asset: AssetConfig(
-                                          code: symbol,
-                                          symbol: symbol,
-                                          name: name,
-                                          issuer: '',
-                                          isNative: false,
-                                          decimals: 18,
-                                          contractAddress: contractAddress,
-                                        ),
-                                        amount: amount,
-                                        password: password,
-                                      );
-                                      
-                                      // Check if widget is still mounted before using context
-                                      if (!mounted) return;
-                                      
-                                      // Close processing dialog
-                                      Navigator.of(context).pop();
-                                      
-                                      if (result['success'] == true) {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(
-                                            content: Row(
-                                              children: [
-                                                Icon(Icons.check_circle, color: Colors.white),
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                  child: Text(
-                                                    'Gasless transaction successful! $symbol sent for FREE ✨',
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                            backgroundColor: Colors.green,
-                                            duration: const Duration(seconds: 5),
-                                          ),
-                                        );
-                                      } else {
-                                        // Show specific error messages
-                                        String errorMessage = result['error'] ?? 'Transaction failed';
-                                        IconData errorIcon = Icons.error;
-                                        Color bgColor = Colors.red;
-                                        
-                                        if (result['needsWalletRecreation'] == true) {
-                                          errorIcon = Icons.warning_amber;
-                                        } else if (result['insufficientBalance'] == true) {
-                                          errorIcon = Icons.account_balance_wallet;
-                                          bgColor = Colors.orange;
-                                        }
-                                        
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(
-                                            content: Row(
-                                              children: [
-                                                Icon(errorIcon, color: Colors.white),
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                  child: Text(errorMessage),
-                                                ),
-                                              ],
-                                            ),
-                                            backgroundColor: bgColor,
-                                            duration: const Duration(seconds: 7),
-                                          ),
-                                        );
-                                      }
-                                    } catch (e) {
-                                      // Check if widget is still mounted before using context
-                                      if (mounted) {
-                                        Navigator.of(context).pop();
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(
-                                            content: Text('Error: $e'),
-                                            backgroundColor: Colors.red,
-                                          ),
-                                        );
-                                      }
-                                    }
-                                  },
-                                  icon: const Icon(Icons.bolt),
-                                  label: const Text('Send for FREE'),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.blue,
-                                    foregroundColor: Colors.white,
-                                  ),
-                                )
-                              else
-                                ElevatedButton.icon(
-                                  onPressed: () {
-                                    Navigator.of(context).pop();
-                                    _showBuyCryptoOptions();
-                                },
-                                icon: const Icon(Icons.add_circle_outline),
-                                label: const Text('Top Up'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.orange,
-                                  foregroundColor: Colors.white,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
+                      final shouldProceed = await _confirmGasTopUpIfNeeded(
+                        walletProvider: walletProvider,
+                        asset: confirmAsset,
+                        recipientAddress: recipientAddress,
+                        amount: amount,
+                      );
+                      if (!shouldProceed) {
                         return;
                       }
 
@@ -3284,8 +2933,10 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                       if (!mounted) return;
                       
                       if (result['success'] == true) {
-                        final isGasless = result['isGasless'] == true || result['sponsored'] == true;
                         final message = result['message'] as String?;
+                        final feeToken = result['feeToken'];
+                        final feeCharged =
+                            result['feeCharged'] is num ? result['feeCharged'] as num : null;
                         
                         // Show enhanced success dialog
                         showDialog(
@@ -3309,7 +2960,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                                       shape: BoxShape.circle,
                                     ),
                                     child: Icon(
-                                      isGasless ? Icons.flash_on : Icons.check_circle,
+                                      Icons.check_circle,
                                       color: Colors.green,
                                       size: 32,
                                     ),
@@ -3317,7 +2968,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                                   const SizedBox(width: 12),
                                   Expanded(
                                     child: Text(
-                                      isGasless ? 'Gasless Transaction Sent!' : 'Transaction Sent!',
+                                      'Transaction Sent!',
                                       style: TextStyle(
                                         color: Colors.green,
                                         fontWeight: FontWeight.bold,
@@ -3330,33 +2981,6 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                                 mainAxisSize: MainAxisSize.min,
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  // Gasless badge if applicable
-                                  if (isGasless) ...[
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                      decoration: BoxDecoration(
-                                        color: Colors.blue.withOpacity(0.2),
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(color: Colors.blue.withOpacity(0.5)),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(Icons.stars, color: Colors.blue, size: 18),
-                                          const SizedBox(width: 8),
-                                          Text(
-                                            'Gas Sponsored - You Paid \$0.00!',
-                                            style: TextStyle(
-                                              color: Colors.blue,
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 14,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(height: 16),
-                                  ],
                                   Container(
                                     padding: const EdgeInsets.all(16),
                                     decoration: BoxDecoration(
@@ -3372,9 +2996,12 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                                         _buildGasInfoRow('Amount:', '$amount $symbol'),
                                         const SizedBox(height: 8),
                                         _buildGasInfoRow('To:', '${recipientAddress.substring(0, 10)}...${recipientAddress.substring(recipientAddress.length - 8)}'),
-                                        if (isGasless) ...[
+                                        if (feeCharged != null && feeToken is String) ...[
                                           const SizedBox(height: 8),
-                                          _buildGasInfoRow('Gas Cost:', '\$0.00 (Sponsored)'),
+                                          _buildGasInfoRow(
+                                            'Gas Top-up Fee:',
+                                            '${feeCharged.toDouble().toStringAsFixed(6)} $feeToken',
+                                          ),
                                         ],
                                         if (result['txHash'] != null) ...[
                                           const SizedBox(height: 8),
@@ -3547,8 +3174,8 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
           password: password,
         );
       }
-      
-      // For ERC-20 tokens - use Biconomy sponsorship if available
+      // For ERC-20 tokens, use the serverless flow that tops up MATIC and
+      // charges a USDC/USDT fee when needed.
       final contractAddress = token['contractAddress'] as String?;
       if (contractAddress == null || contractAddress.isEmpty) {
         return {
@@ -3556,99 +3183,23 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
           'error': 'No contract address found for $symbol',
         };
       }
-      
-      final userAddress = walletProvider.address;
-      if (userAddress == null) {
-        return {
-          'success': false,
-          'error': 'Wallet address not available',
-        };
-      }
-      
-      // Try to use gasless (backend relay) transaction
-      print('🔄 Attempting gasless transaction via backend relay...');
-      
-      try {
-        // Import needed for transaction signing
-        final user = FirebaseAuth.instance.currentUser;
-        if (user != null) {
-          // Get user's private key to sign the transaction
-          final signedTx = await PolygonWalletService.createSignedERC20Transaction(
-            userId: user.uid,
-            password: password,
-            tokenContractAddress: contractAddress,
-            toAddress: recipientAddress,
-            amount: amount,
-          );
-          
-          if (signedTx['success'] == true) {
-            print('✅ Transaction signed by user');
-            
-            // Send signed transaction to backend for relay
-            final gaslessResult = await BiconomyBackendService.sendGaslessTransaction(
-              signedTransaction: signedTx['signedTransaction'],
-              userAddress: userAddress,
-            );
-            
-            if (gaslessResult['success'] == true) {
-              print('✅ Gasless relay successful!');
-              print('💰 User paid: \$0.00 (gas paid by backend)');
-              print('📋 TX Hash: ${gaslessResult['txHash']}');
-              
-              // Refresh balances and transactions after successful transaction
-              await Future.wait([
-                walletProvider.loadBalances(),
-                walletProvider.loadTransactions(forceRefresh: true),
-              ]);
-              
-              return {
-                'success': true,
-                'txHash': gaslessResult['txHash'],
-                'message': 'Transaction relayed successfully! Gas paid by backend - you paid \$0.00',
-                'isGasless': true,
-                'sponsored': true,
-              };
-            } else {
-              print('⚠️  Backend relay failed: ${gaslessResult['error']}');
-              print('🔄 Falling back to regular transaction...');
-            }
-          } else {
-            print('⚠️  Failed to sign transaction: ${signedTx['error']}');
-            print('🔄 Falling back to regular transaction...');
-          }
-        }
-      } catch (backendError) {
-        print('⚠️  Gasless relay error: $backendError');
-        print('🔄 Falling back to regular transaction...');
-      }
-      
-      // Fallback to regular transaction if gasless fails
-      print('📤 Sending regular transaction...');
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        return {
-          'success': false,
-          'error': 'User not authenticated',
-        };
-      }
-      
-      final result = await PolygonWalletService.sendERC20TokenWithAuth(
-        userId: user.uid,
-        password: password,
-        tokenContractAddress: contractAddress,
-        toAddress: recipientAddress,
-        amount: amount,
+
+      final asset = AssetConfig(
+        code: symbol,
+        symbol: symbol,
+        name: token['name']?.toString() ?? symbol,
+        issuer: '',
+        isNative: false,
+        decimals: (token['decimals'] as int?) ?? 18,
+        contractAddress: contractAddress,
       );
-      
-      if (result['success'] == true) {
-        // Refresh balances and transactions after successful transaction
-        await Future.wait([
-          walletProvider.loadBalances(),
-          walletProvider.loadTransactions(forceRefresh: true),
-        ]);
-      }
-      
-      return result;
+
+      return await walletProvider.sendAsset(
+        recipientAddress: recipientAddress,
+        asset: asset,
+        amount: amount,
+        password: password,
+      );
     } catch (e) {
       return {
         'success': false,
