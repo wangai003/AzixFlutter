@@ -275,6 +275,7 @@ async function getTransactionStatus(orderTrackingId) {
     '2': 'FAILED',
     '3': 'REVERSED',
   };
+  const statusCode = Number(data.status_code);
 
   return {
     paymentMethod: data.payment_method,
@@ -286,13 +287,13 @@ async function getTransactionStatus(orderTrackingId) {
     message: data.message,
     paymentAccount: data.payment_account,
     callBackUrl: data.call_back_url,
-    statusCode: data.status_code,
+    statusCode: statusCode,
     merchantReference: data.merchant_reference,
     paymentStatusCode: data.payment_status_code,
     currency: data.currency,
-    status: statusMap[data.status_code] || 'PENDING',
-    isCompleted: data.status_code === '1',
-    isFailed: data.status_code === '2',
+    status: statusMap[String(statusCode)] || 'PENDING',
+    isCompleted: statusCode === 1,
+    isFailed: statusCode === 2,
   };
 }
 

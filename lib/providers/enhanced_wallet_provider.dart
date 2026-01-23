@@ -1314,6 +1314,21 @@ class EnhancedWalletProvider extends ChangeNotifier {
     }
   }
 
+  /// Manually reconcile pending PesaPal transactions for the current user
+  Future<Map<String, dynamic>> reconcilePesapalTransactions() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        return {'success': false, 'error': 'User not authenticated'};
+      }
+      return await _pesapalService.reconcilePendingTransactions(
+        userId: user.uid,
+      );
+    } catch (e) {
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
   /// Load PesaPal transaction history
   Future<void> loadPesapalTransactionHistory() async {
     try {

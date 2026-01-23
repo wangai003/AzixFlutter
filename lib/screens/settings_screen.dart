@@ -6,6 +6,7 @@ import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/notification_provider.dart';
 import '../providers/security_provider.dart';
+import '../providers/enhanced_wallet_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/custom_button.dart';
 import '../providers/admin_provider.dart';
@@ -37,6 +38,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _selectedCurrency = 'USD';
   bool _isDarkMode = true;
   bool _autoBackupEnabled = false;
+  bool _isReconcilingPesapal = false;
 
   // Security settings for UI display
   late List<SecuritySetting> _securitySettings;
@@ -162,6 +164,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _reconcilePesapalPayments() async {
+    setState(() => _isReconcilingPesapal = true);
+    try {
+      final walletProvider =
+          Provider.of<EnhancedWalletProvider>(context, listen: false);
+      final result = await walletProvider.reconcilePesapalTransactions();
+
+      if (!mounted) return;
+      if (result['success'] == true) {
+        final credited = result['credited'] ?? 0;
+        final checked = result['checked'] ?? 0;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Checked $checked pending payments. Credited $credited.',
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['error'] ?? 'Reconcile failed'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Reconcile error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isReconcilingPesapal = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
@@ -191,6 +233,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         _buildSectionHeader('Account'),
                         _buildAccountInfo(user),
                         const SizedBox(height: 8),
+                        _buildSettingItem(
+                          icon: Icons.sync,
+                          title: 'Reconcile PesaPal Payments',
+                          subtitle: _isReconcilingPesapal
+                              ? 'Reconciling pending payments...'
+                              : 'Re-check pending card payments and credit if completed',
+                          onTap: _isReconcilingPesapal
+                              ? () {}
+                              : _reconcilePesapalPayments,
+                        ),
                         _buildSettingItem(
                           icon: Icons.edit,
                           title: 'Edit Profile',

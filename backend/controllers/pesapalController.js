@@ -268,6 +268,90 @@ async function getIPNList(req, res) {
 }
 
 /**
+ * Reconcile pending transactions for a user and credit if completed.
+ */
+async function reconcilePending(req, res) {
+  try {
+    if (!firestore) {
+      return res.status(500).json({
+        success: false,
+        error: 'Firestore not configured on backend',
+      });
+    }
+
+    const { userId } = req.body || {};
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId is required',
+      });
+    }
+
+    const pendingStatuses = ['pending', 'pending_wallet', 'processing', 'completed'];
+    const snapshot = await firestore
+      .collection('pesapal_transactions')
+      .where('userId', '==', userId)
+      .where('status', 'in', pendingStatuses)
+      .get();
+
+    let checked = 0;
+    let credited = 0;
+    let stillPending = 0;
+    const results = [];
+
+    for (const doc of snapshot.docs) {
+      const tx = doc.data();
+      const orderTrackingId = tx.orderTrackingId;
+      if (!orderTrackingId) continue;
+
+      checked += 1;
+      const status = await pesapalService.getTransactionStatus(orderTrackingId);
+
+      await upsertTransaction(orderTrackingId, {
+        status: status.isCompleted ? 'completed' : status.isFailed ? 'failed' : 'pending',
+        paymentStatus: status,
+      });
+
+      if (status.isCompleted) {
+        const creditResult = await creditTokensIfNeeded(orderTrackingId, tx);
+        if (creditResult.success) {
+          credited += 1;
+        } else if (creditResult.pending) {
+          stillPending += 1;
+        }
+        results.push({
+          orderTrackingId,
+          status: 'completed',
+          credited: creditResult.success === true,
+          error: creditResult.error,
+          txHash: creditResult.txHash,
+        });
+      } else {
+        stillPending += 1;
+        results.push({
+          orderTrackingId,
+          status: status.status,
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      checked,
+      credited,
+      stillPending,
+      results,
+    });
+  } catch (error) {
+    console.error('Reconcile pending error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+
+/**
  * Initiate card payment
  * Creates a payment order and returns redirect URL for card entry
  */
@@ -650,5 +734,6 @@ module.exports = {
   ipnCallback,
   userCallback,
   getTransaction,
+  reconcilePending,
 };
 

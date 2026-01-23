@@ -362,6 +362,43 @@ class PesapalService {
     }
   }
 
+  /// Reconcile pending PesaPal transactions for a user and credit if completed
+  Future<Map<String, dynamic>> reconcilePendingTransactions({
+    required String userId,
+  }) async {
+    if (_backendBaseUrl.isEmpty) {
+      return {
+        'success': false,
+        'error': 'Backend URL not configured',
+      };
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_backendBaseUrl/pesapal/reconcile'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: json.encode({'userId': userId}),
+      );
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body) as Map<String, dynamic>;
+      }
+
+      return {
+        'success': false,
+        'error': 'Reconcile failed: ${response.statusCode}',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'error': 'Failed to reconcile: $e',
+      };
+    }
+  }
+
   /// Credit tokens after successful payment (using Polygon)
   /// 
   /// Supports multiple tokens: AKOFA, USDC, USDT
