@@ -3,14 +3,11 @@ import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
-import '../providers/stellar_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/notification_provider.dart';
 import '../providers/security_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/custom_button.dart';
-import '../widgets/stellar_wallet_prompt.dart';
-import 'enhanced_wallet_screen.dart';
 import '../providers/admin_provider.dart';
 import 'admin/admin_dashboard_screen.dart';
 import '../services/auth_service.dart';
@@ -168,7 +165,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
-    final stellarProvider = Provider.of<StellarProvider>(context);
     final user = _userModel;
 
     return Container(
@@ -213,49 +209,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           subtitle: 'Permanently delete your account',
                           onTap: _showDeleteAccountDialog,
                         ),
-                        _buildSettingItem(
-                          icon: Icons.account_balance_wallet,
-                          title: 'Stellar Wallet',
-                          subtitle: stellarProvider.hasWallet
-                              ? 'Manage your Stellar wallet'
-                              : 'Create a Stellar wallet',
-                          onTap: () {
-                            if (stellarProvider.hasWallet) {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      const EnhancedWalletScreen(),
-                                ),
-                              );
-                            } else {
-                              // Show wallet creation dialog
-                              showDialog(
-                                context: context,
-                                barrierDismissible: false,
-                                builder: (context) => Dialog(
-                                  backgroundColor: Colors.transparent,
-                                  elevation: 0,
-                                  insetPadding: const EdgeInsets.symmetric(
-                                    horizontal: 20,
-                                    vertical: 24,
-                                  ),
-                                  child: SizedBox(
-                                    width:
-                                        MediaQuery.of(context).size.width > 600
-                                        ? 400
-                                        : MediaQuery.of(context).size.width *
-                                              0.85,
-                                    child: const StellarWalletPrompt(),
-                                  ),
-                                ),
-                              );
-                            }
-                          },
-                        ),
-
-                        const SizedBox(height: 24),
-
                         // Appearance section
                         _buildSectionHeader('Appearance'),
                         _buildSwitchItem(

@@ -18,6 +18,8 @@ class LandingScreen extends StatefulWidget {
 class _LandingScreenState extends State<LandingScreen> {
   final ScrollController _scrollController = ScrollController();
   bool _showBackToTop = false;
+  final GlobalKey _howItWorksKey = GlobalKey();
+  final GlobalKey _finalCtaKey = GlobalKey();
 
   @override
   void initState() {
@@ -42,6 +44,17 @@ class _LandingScreenState extends State<LandingScreen> {
       0,
       duration: const Duration(milliseconds: 500),
       curve: Curves.easeInOut,
+    );
+  }
+
+  void _scrollToSection(GlobalKey key) {
+    final context = key.currentContext;
+    if (context == null) return;
+    Scrollable.ensureVisible(
+      context,
+      duration: const Duration(milliseconds: 700),
+      curve: Curves.easeInOut,
+      alignment: 0.05,
     );
   }
 
@@ -74,18 +87,33 @@ class _LandingScreenState extends State<LandingScreen> {
               children: [
                 // Hero Section
                 _buildHeroSection(isDesktop, isTablet, isMobile),
-                
-                // Features Section
-                _buildFeaturesSection(isDesktop, isTablet, isMobile),
-                
-                // How It Works Section
+
+                // Why Azix Exists
+                _buildWhyAzixSection(isDesktop, isTablet, isMobile),
+
+                // What You Can Do
+                _buildWhatYouCanDoSection(isDesktop, isTablet, isMobile),
+
+                // How Azix Works
                 _buildHowItWorksSection(isDesktop, isTablet, isMobile),
-                
-                // Ecosystem Section
-                _buildEcosystemSection(isDesktop, isTablet, isMobile),
-                
-                // CTA Section
-                _buildCTASection(isDesktop, isTablet, isMobile),
+
+                // Security & Transparency
+                _buildSecuritySection(isDesktop, isTablet, isMobile),
+
+                // Who Azix Is For
+                _buildWhoAzixIsForSection(isDesktop, isTablet, isMobile),
+
+                // Phased Ecosystem
+                _buildPhasedEcosystemSection(isDesktop, isTablet, isMobile),
+
+                // Who's Behind Azix
+                _buildWhoBehindAzixSection(isDesktop, isTablet, isMobile),
+
+                // Principles
+                _buildPrinciplesSection(isDesktop, isTablet, isMobile),
+
+                // Final CTA
+                _buildFinalCTASection(isDesktop, isTablet, isMobile),
                 
                 // Footer
                 _buildFooter(isDesktop, isTablet, isMobile),
@@ -165,13 +193,13 @@ class _LandingScreenState extends State<LandingScreen> {
                   
                   // Main heading
                   Text(
-                    'Welcome to AZIX',
+                    'Azix - The Digital Infrastructure for African Commerce & Global Trade',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: isMobile ? 40 : (isTablet ? 56 : 72),
+                      fontSize: isMobile ? 34 : (isTablet ? 48 : 60),
                       fontWeight: FontWeight.w900,
                       color: AppTheme.primaryGold,
-                      height: 1.1,
+                      height: 1.15,
                       letterSpacing: -1,
                     ),
                   )
@@ -184,13 +212,13 @@ class _LandingScreenState extends State<LandingScreen> {
                   // Subtitle
                   Container(
                     constraints: BoxConstraints(
-                      maxWidth: isDesktop ? 700 : (isTablet ? 600 : double.infinity),
+                      maxWidth: isDesktop ? 720 : (isTablet ? 640 : double.infinity),
                     ),
                     child: Text(
-                      'The Hub for Seamless, Super-Fast Transactions',
+                      'Trade. Pay. Invest. Settle.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        fontSize: isMobile ? 20 : (isTablet ? 24 : 28),
+                        fontSize: isMobile ? 22 : (isTablet ? 26 : 30),
                         fontWeight: FontWeight.w600,
                         color: AppTheme.white,
                         height: 1.4,
@@ -206,10 +234,10 @@ class _LandingScreenState extends State<LandingScreen> {
                   // Description
                   Container(
                     constraints: BoxConstraints(
-                      maxWidth: isDesktop ? 800 : (isTablet ? 650 : double.infinity),
+                      maxWidth: isDesktop ? 860 : (isTablet ? 700 : double.infinity),
                     ),
                     child: Text(
-                      'Your gateway to cross-border trade and tokenized assets. Experience lightning-fast transactions, gasless transfers, and seamless global commerce—all in one powerful platform.',
+                      'All in one secure platform designed for Africa and the global diaspora.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: isMobile ? 16 : (isTablet ? 18 : 20),
@@ -221,8 +249,28 @@ class _LandingScreenState extends State<LandingScreen> {
                         .fadeIn(duration: 1000.ms, delay: 600.ms)
                         .slideY(begin: 0.3, end: 0),
                   ),
+
+                  const SizedBox(height: 16),
+
+                  Container(
+                    constraints: BoxConstraints(
+                      maxWidth: isDesktop ? 860 : (isTablet ? 700 : double.infinity),
+                    ),
+                    child: Text(
+                      'Azix connects African businesses, creators, exporters, and investors to global markets, payments, and opportunities - without relying on fragmented banks, middlemen, or expensive intermediaries.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: isMobile ? 15 : (isTablet ? 17 : 19),
+                        color: AppTheme.white.withOpacity(0.75),
+                        height: 1.6,
+                      ),
+                    )
+                        .animate()
+                        .fadeIn(duration: 1000.ms, delay: 700.ms)
+                        .slideY(begin: 0.3, end: 0),
+                  ),
                   
-                  const SizedBox(height: 48),
+                  const SizedBox(height: 40),
                   
                   // CTA Buttons
                   Wrap(
@@ -233,7 +281,7 @@ class _LandingScreenState extends State<LandingScreen> {
                       SizedBox(
                         width: isMobile ? double.infinity : 200,
                         child: CustomButton(
-                          text: 'Get Started',
+                          text: 'Explore Azix',
                           onPressed: _navigateToAuth,
                         )
                             .animate()
@@ -243,14 +291,10 @@ class _LandingScreenState extends State<LandingScreen> {
                       SizedBox(
                         width: isMobile ? double.infinity : 200,
                         child: CustomButton(
-                          text: 'Learn More',
+                          text: 'Learn How It Works',
                           isOutlined: true,
                           onPressed: () {
-                            _scrollController.animateTo(
-                              800,
-                              duration: const Duration(milliseconds: 800),
-                              curve: Curves.easeInOut,
-                            );
+                            _scrollToSection(_howItWorksKey);
                           },
                         )
                             .animate()
@@ -259,15 +303,6 @@ class _LandingScreenState extends State<LandingScreen> {
                       ),
                     ],
                   ),
-                  
-                  const SizedBox(height: 60),
-                  
-                  // Stats Row
-                  if (!isMobile)
-                    _buildStatsRow(isDesktop, isTablet)
-                        .animate()
-                        .fadeIn(duration: 1000.ms, delay: 1200.ms)
-                        .slideY(begin: 0.3, end: 0),
                 ],
               ),
             ),
@@ -277,44 +312,58 @@ class _LandingScreenState extends State<LandingScreen> {
     );
   }
 
-  Widget _buildStatsRow(bool isDesktop, bool isTablet) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        _buildStatItem('Super-Fast', 'Lightning Speed', Icons.flash_on),
-        _buildStatItem('Cross-Border', 'Global Trade', Icons.public),
-        _buildStatItem('Tokenized', 'Digital Assets', Icons.account_balance),
+  Widget _buildWhyAzixSection(bool isDesktop, bool isTablet, bool isMobile) {
+    return _buildTextSection(
+      backgroundColor: const Color(0xFF1a1a1a),
+      isDesktop: isDesktop,
+      isTablet: isTablet,
+      isMobile: isMobile,
+      title: 'Why we built Azix',
+      subtitle: 'Across Africa and emerging markets:',
+      paragraphs: [
+        'Azix was created to solve these problems at the infrastructure level, not with temporary fixes.',
+        'We are building a neutral digital marketplace and financial layer where:',
+      ],
+      bullets: [
+        'Businesses struggle to receive international payments',
+        'Traders rely on costly middlemen',
+        'Investors face limited access to global markets',
+        'Young people lack credible digital economic pathways',
+        'Value moves efficiently',
+        'Trade is transparent',
+        'Payments are programmable',
+        'Opportunity is accessible',
       ],
     );
   }
 
-  Widget _buildStatItem(String title, String subtitle, IconData icon) {
-    return Column(
-      children: [
-        Icon(icon, color: AppTheme.primaryGold, size: 32),
-        const SizedBox(height: 8),
-        Text(
-          title,
-          style: const TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-            color: AppTheme.primaryGold,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          subtitle,
-          style: TextStyle(
-            fontSize: 14,
-            color: AppTheme.white.withOpacity(0.7),
-          ),
-        ),
+  Widget _buildWhatYouCanDoSection(bool isDesktop, bool isTablet, bool isMobile) {
+    return _buildTextSection(
+      backgroundColor: AppTheme.black,
+      isDesktop: isDesktop,
+      isTablet: isTablet,
+      isMobile: isMobile,
+      title: 'What you can do on Azix',
+      subtitle: 'One platform. Multiple economic functions.',
+      paragraphs: [
+        'With Azix, you can:',
       ],
+      bullets: [
+        'Buy & sell goods or services across borders',
+        'Send & receive digital payments securely',
+        'Access tokenized markets & financial tools (coming phases)',
+        'Participate in live marketplaces & bidding hubs',
+        'Connect directly with verified buyers & sellers',
+        'Prepare for global trade without traditional barriers',
+        'No switching between apps. No fragmented systems.',
+      ],
+      bulletIcon: Icons.check_circle,
     );
   }
 
-  Widget _buildFeaturesSection(bool isDesktop, bool isTablet, bool isMobile) {
+  Widget _buildHowItWorksSection(bool isDesktop, bool isTablet, bool isMobile) {
     return Container(
+      key: _howItWorksKey,
       padding: EdgeInsets.symmetric(
         horizontal: isMobile ? 24.0 : (isTablet ? 48.0 : 80.0),
         vertical: isMobile ? 60.0 : 100.0,
@@ -322,9 +371,8 @@ class _LandingScreenState extends State<LandingScreen> {
       color: const Color(0xFF1a1a1a),
       child: Column(
         children: [
-          // Section title
           Text(
-            'Powerful Features',
+            'How Azix Works',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: isMobile ? 32 : (isTablet ? 40 : 48),
@@ -334,196 +382,7 @@ class _LandingScreenState extends State<LandingScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            'Built for seamless transactions and global commerce',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: isMobile ? 16 : (isTablet ? 18 : 20),
-              color: AppTheme.white.withOpacity(0.8),
-            ),
-          ),
-          const SizedBox(height: 60),
-          
-          // Features grid
-          if (isDesktop || isTablet)
-            _buildFeaturesGrid(isDesktop, isTablet)
-          else
-            _buildFeaturesList(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFeaturesGrid(bool isDesktop, bool isTablet) {
-    return Wrap(
-      spacing: 32,
-      runSpacing: 32,
-      alignment: WrapAlignment.center,
-      children: [
-        _buildFeatureCard(
-          'Super-Fast Transactions',
-          'Experience lightning-speed transactions with instant confirmations across multiple blockchains',
-          Icons.speed,
-          const Color(0xFFFFD700),
-        ),
-        _buildFeatureCard(
-          'Cross-Border Trade',
-          'Trade globally without borders, barriers, or excessive fees. Connect with buyers and sellers worldwide',
-          Icons.language,
-          const Color(0xFF2196F3),
-        ),
-        _buildFeatureCard(
-          'Tokenized Assets',
-          'Access a complete ecosystem of tokenized digital assets including AKOFA tokens and more',
-          Icons.stars,
-          const Color(0xFF4CAF50),
-        ),
-        _buildFeatureCard(
-          'Seamless Payments',
-          'Gasless transactions powered by Biconomy—send tokens without paying gas fees',
-          Icons.payment,
-          const Color(0xFFFF9800),
-        ),
-        _buildFeatureCard(
-          'Global Marketplace',
-          'Buy and sell goods and services worldwide using crypto with secure escrow protection',
-          Icons.storefront,
-          const Color(0xFF9C27B0),
-        ),
-        _buildFeatureCard(
-          'Multi-Chain Wallet',
-          'Secure wallet supporting Stellar and Polygon with encrypted key management',
-          Icons.account_balance_wallet,
-          const Color(0xFFE91E63),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildFeaturesList() {
-    return Column(
-      children: [
-        _buildFeatureCard(
-          'Super-Fast Transactions',
-          'Experience lightning-speed transactions with instant confirmations across multiple blockchains',
-          Icons.speed,
-          const Color(0xFFFFD700),
-        ),
-        const SizedBox(height: 24),
-        _buildFeatureCard(
-          'Cross-Border Trade',
-          'Trade globally without borders, barriers, or excessive fees. Connect with buyers and sellers worldwide',
-          Icons.language,
-          const Color(0xFF2196F3),
-        ),
-        const SizedBox(height: 24),
-        _buildFeatureCard(
-          'Tokenized Assets',
-          'Access a complete ecosystem of tokenized digital assets including AKOFA tokens and more',
-          Icons.stars,
-          const Color(0xFF4CAF50),
-        ),
-        const SizedBox(height: 24),
-        _buildFeatureCard(
-          'Seamless Payments',
-          'Gasless transactions powered by Biconomy—send tokens without paying gas fees',
-          Icons.payment,
-          const Color(0xFFFF9800),
-        ),
-        const SizedBox(height: 24),
-        _buildFeatureCard(
-          'Global Marketplace',
-          'Buy and sell goods and services worldwide using crypto with secure escrow protection',
-          Icons.storefront,
-          const Color(0xFF9C27B0),
-        ),
-        const SizedBox(height: 24),
-        _buildFeatureCard(
-          'Multi-Chain Wallet',
-          'Secure wallet supporting Stellar and Polygon with encrypted key management',
-          Icons.account_balance_wallet,
-          const Color(0xFFE91E63),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildFeatureCard(String title, String description, IconData icon, Color color) {
-    final isDesktop = ResponsiveLayout.isDesktop(context);
-    final isTablet = ResponsiveLayout.isTablet(context);
-    
-    return Container(
-      width: isDesktop ? 350 : (isTablet ? 300 : double.infinity),
-      padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: const Color(0xFF212121),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: color.withOpacity(0.3),
-          width: 2,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: color.withOpacity(0.1),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Icon(icon, color: color, size: 32),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: AppTheme.white,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            description,
-            style: TextStyle(
-              fontSize: 16,
-              color: AppTheme.white.withOpacity(0.7),
-              height: 1.5,
-            ),
-          ),
-        ],
-      ),
-    ).animate().fadeIn(duration: 600.ms).slideY(begin: 0.2, end: 0);
-  }
-
-  Widget _buildHowItWorksSection(bool isDesktop, bool isTablet, bool isMobile) {
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: isMobile ? 24.0 : (isTablet ? 48.0 : 80.0),
-        vertical: isMobile ? 60.0 : 100.0,
-      ),
-      color: AppTheme.black,
-      child: Column(
-        children: [
-          Text(
-            'How It Works',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: isMobile ? 32 : (isTablet ? 40 : 48),
-              fontWeight: FontWeight.w900,
-              color: AppTheme.primaryGold,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Get started in minutes',
+            'Simple & transparent',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: isMobile ? 16 : (isTablet ? 18 : 20),
@@ -541,8 +400,8 @@ class _LandingScreenState extends State<LandingScreen> {
                 Expanded(
                   child: _buildStep(
                     '1',
-                    'Create Account',
-                    'Sign up with email or Google. Quick and secure.',
+                    'Create an Account',
+                    'Sign up with email or wallet-based access. No unnecessary data harvesting.',
                     Icons.person_add,
                   ),
                 ),
@@ -551,9 +410,9 @@ class _LandingScreenState extends State<LandingScreen> {
                 Expanded(
                   child: _buildStep(
                     '2',
-                    'Setup Wallet',
-                    'Create or import your crypto wallet in seconds.',
-                    Icons.wallet,
+                    'Access the Ecosystem',
+                    'Explore marketplaces, wallets, trade tools, and opportunities.',
+                    Icons.public,
                   ),
                 ),
                 if (isDesktop) const SizedBox(width: 32),
@@ -561,9 +420,9 @@ class _LandingScreenState extends State<LandingScreen> {
                 Expanded(
                   child: _buildStep(
                     '3',
-                    'Start Earning',
-                    'Mine tokens, trade, and participate in the ecosystem.',
-                    Icons.rocket_launch,
+                    'Transact & Grow',
+                    'Trade, earn, settle payments, and build digital economic history. Azix grows with you.',
+                    Icons.trending_up,
                   ),
                 ),
               ],
@@ -573,23 +432,23 @@ class _LandingScreenState extends State<LandingScreen> {
               children: [
                 _buildStep(
                   '1',
-                  'Create Account',
-                  'Sign up with email or Google. Quick and secure.',
+                  'Create an Account',
+                  'Sign up with email or wallet-based access. No unnecessary data harvesting.',
                   Icons.person_add,
                 ),
                 const SizedBox(height: 32),
                 _buildStep(
                   '2',
-                  'Setup Wallet',
-                  'Create or import your crypto wallet in seconds.',
-                  Icons.wallet,
+                  'Access the Ecosystem',
+                  'Explore marketplaces, wallets, trade tools, and opportunities.',
+                  Icons.public,
                 ),
                 const SizedBox(height: 32),
                 _buildStep(
                   '3',
-                  'Start Earning',
-                  'Mine tokens, trade, and participate in the ecosystem.',
-                  Icons.rocket_launch,
+                  'Transact & Grow',
+                  'Trade, earn, settle payments, and build digital economic history. Azix grows with you.',
+                  Icons.trending_up,
                 ),
               ],
             ),
@@ -671,7 +530,50 @@ class _LandingScreenState extends State<LandingScreen> {
     ).animate().fadeIn(duration: 600.ms).scale();
   }
 
-  Widget _buildEcosystemSection(bool isDesktop, bool isTablet, bool isMobile) {
+  Widget _buildSecuritySection(bool isDesktop, bool isTablet, bool isMobile) {
+    return _buildTextSection(
+      backgroundColor: AppTheme.black,
+      isDesktop: isDesktop,
+      isTablet: isTablet,
+      isMobile: isMobile,
+      title: 'Security & Transparency',
+      subtitle: 'Built with modern financial standards',
+      paragraphs: [
+        'Users control value. Azix provides infrastructure - not custodial exploitation.',
+      ],
+      bullets: [
+        'Self-custody compatible architecture',
+        'Blockchain-backed transaction records',
+        'Transparent settlement layers',
+        'No hidden rehypothecation of user assets',
+      ],
+      bulletIcon: Icons.lock,
+    );
+  }
+
+  Widget _buildWhoAzixIsForSection(bool isDesktop, bool isTablet, bool isMobile) {
+    return _buildTextSection(
+      backgroundColor: const Color(0xFF1a1a1a),
+      isDesktop: isDesktop,
+      isTablet: isTablet,
+      isMobile: isMobile,
+      title: 'Who Azix is for',
+      subtitle: 'Designed for real economic participants',
+      paragraphs: [
+        'If you participate in the real economy, Azix is built for you.',
+      ],
+      bullets: [
+        'African SMEs & exporters',
+        'Global buyers seeking verified African suppliers',
+        'Creators, developers & service providers',
+        'Diaspora investors & traders',
+        'Students & young professionals building digital income',
+      ],
+      bulletIcon: Icons.group,
+    );
+  }
+
+  Widget _buildPhasedEcosystemSection(bool isDesktop, bool isTablet, bool isMobile) {
     return Container(
       padding: EdgeInsets.symmetric(
         horizontal: isMobile ? 24.0 : (isTablet ? 48.0 : 80.0),
@@ -682,15 +584,15 @@ class _LandingScreenState extends State<LandingScreen> {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            const Color(0xFF1a1a1a),
             AppTheme.black,
+            const Color(0xFF1a1a1a),
           ],
         ),
       ),
       child: Column(
         children: [
           Text(
-            'The AZIX Ecosystem',
+            'Phased Ecosystem',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: isMobile ? 32 : (isTablet ? 40 : 48),
@@ -704,7 +606,7 @@ class _LandingScreenState extends State<LandingScreen> {
               maxWidth: isDesktop ? 800 : (isTablet ? 650 : double.infinity),
             ),
             child: Text(
-              'The premier hub for seamless, super-fast transactions and cross-border trade. AZIX is your home for tokenized assets and the future of global digital commerce.',
+              'Azix is not a single product - it is an evolving system.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: isMobile ? 16 : (isTablet ? 18 : 20),
@@ -713,43 +615,36 @@ class _LandingScreenState extends State<LandingScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 60),
-          
-          // Ecosystem features
+          const SizedBox(height: 40),
           Wrap(
             spacing: 24,
             runSpacing: 24,
             alignment: WrapAlignment.center,
             children: [
-              _buildEcosystemItem(
-                'Instant Settlement',
-                'Super-fast transaction finality in seconds',
-                Icons.timer,
+              _buildPhaseCard(
+                title: 'Phase 1 (Live / Rolling Out)',
+                items: [
+                  'Wallet & payments',
+                  'Marketplace & trade listings',
+                  'Live bidding hubs',
+                  'Escrow-style transaction flows',
+                ],
               ),
-              _buildEcosystemItem(
-                'Global Reach',
-                'Trade across borders with anyone, anywhere',
-                Icons.public,
+              _buildPhaseCard(
+                title: 'Phase 2 (Expansion)',
+                items: [
+                  'Tokenized assets & trade finance',
+                  'Cross-border settlement rails',
+                  'Advanced merchant tools',
+                ],
               ),
-              _buildEcosystemItem(
-                'Tokenized Economy',
-                'Complete ecosystem of digital tokenized assets',
-                Icons.token,
-              ),
-              _buildEcosystemItem(
-                'Zero Gas Fees',
-                'Seamless transactions without gas costs',
-                Icons.money_off,
-              ),
-              _buildEcosystemItem(
-                'Vendor Network',
-                'Join our global marketplace of vendors',
-                Icons.store,
-              ),
-              _buildEcosystemItem(
-                'Secure & Fast',
-                'Military-grade security with lightning speed',
-                Icons.shield_outlined,
+              _buildPhaseCard(
+                title: 'Phase 3 (Long-Term Vision)',
+                items: [
+                  'African capital markets access',
+                  'Global liquidity bridges',
+                  'Digital economic identity layers',
+                ],
               ),
             ],
           ),
@@ -758,80 +653,17 @@ class _LandingScreenState extends State<LandingScreen> {
     );
   }
 
-  Widget _buildEcosystemItem(String title, String description, IconData icon) {
-    final isDesktop = ResponsiveLayout.isDesktop(context);
-    final isTablet = ResponsiveLayout.isTablet(context);
-    
-    return Container(
-      width: isDesktop ? 320 : (isTablet ? 280 : double.infinity),
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: const Color(0xFF212121).withOpacity(0.5),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: AppTheme.primaryGold.withOpacity(0.2),
-          width: 1,
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryGold.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: AppTheme.primaryGold, size: 24),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: AppTheme.white,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  description,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: AppTheme.white.withOpacity(0.7),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    ).animate().fadeIn(duration: 600.ms).slideX(begin: -0.1, end: 0);
-  }
-
-  Widget _buildCTASection(bool isDesktop, bool isTablet, bool isMobile) {
+  Widget _buildWhoBehindAzixSection(bool isDesktop, bool isTablet, bool isMobile) {
     return Container(
       padding: EdgeInsets.symmetric(
         horizontal: isMobile ? 24.0 : (isTablet ? 48.0 : 80.0),
-        vertical: isMobile ? 80.0 : 120.0,
+        vertical: isMobile ? 60.0 : 100.0,
       ),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            AppTheme.primaryGold.withOpacity(0.1),
-            Colors.transparent,
-          ],
-        ),
-      ),
+      color: const Color(0xFF1a1a1a),
       child: Column(
         children: [
           Text(
-            'Ready to Get Started?',
+            "Who's behind Azix",
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: isMobile ? 32 : (isTablet ? 40 : 48),
@@ -842,25 +674,311 @@ class _LandingScreenState extends State<LandingScreen> {
           const SizedBox(height: 16),
           Container(
             constraints: BoxConstraints(
-              maxWidth: isDesktop ? 700 : (isTablet ? 600 : double.infinity),
+              maxWidth: isDesktop ? 900 : (isTablet ? 700 : double.infinity),
             ),
-            child: Text(
-              'Join the future of seamless, super-fast transactions. Experience cross-border trade and manage your tokenized assets—all in one powerful hub.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: isMobile ? 16 : (isTablet ? 18 : 20),
-                color: AppTheme.white.withOpacity(0.8),
-                height: 1.6,
-              ),
+            child: Column(
+              children: [
+                Text(
+                  'Azix is developed by Daada Inc., a cross-border technology company focused on:',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: isMobile ? 16 : (isTablet ? 18 : 20),
+                    color: AppTheme.white.withOpacity(0.8),
+                    height: 1.6,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                _buildBulletList(
+                  items: const [
+                    'Digital commerce',
+                    'Financial infrastructure',
+                    'Trade enablement',
+                  ],
+                  icon: Icons.business,
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'Founded by operators with experience in:',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: isMobile ? 16 : (isTablet ? 18 : 20),
+                    color: AppTheme.white.withOpacity(0.8),
+                    height: 1.6,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                _buildBulletList(
+                  items: const [
+                    'Education',
+                    'Blockchain systems',
+                    'Trade & sourcing',
+                    'African market development',
+                  ],
+                  icon: Icons.school,
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'This is infrastructure, not a quick crypto experiment.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: isMobile ? 15 : (isTablet ? 17 : 19),
+                    color: AppTheme.white.withOpacity(0.8),
+                    height: 1.6,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 40),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPrinciplesSection(bool isDesktop, bool isTablet, bool isMobile) {
+    return _buildTextSection(
+      backgroundColor: AppTheme.black,
+      isDesktop: isDesktop,
+      isTablet: isTablet,
+      isMobile: isMobile,
+      title: 'Our principles',
+      subtitle: 'Azix is being built to last decades, not cycles.',
+      bullets: [
+        'Access over exclusion',
+        'Infrastructure over hype',
+        'Transparency over opacity',
+        'Long-term value over speculation',
+      ],
+      bulletIcon: Icons.check_circle_outline,
+    );
+  }
+
+  Widget _buildFinalCTASection(bool isDesktop, bool isTablet, bool isMobile) {
+    return Container(
+      key: _finalCtaKey,
+      padding: EdgeInsets.symmetric(
+        horizontal: isMobile ? 24.0 : (isTablet ? 48.0 : 80.0),
+        vertical: isMobile ? 80.0 : 120.0,
+      ),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppTheme.primaryGold.withOpacity(0.12),
+            Colors.transparent,
+          ],
+        ),
+      ),
+      child: Column(
+        children: [
+          Text(
+            'Explore before you commit',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: isMobile ? 30 : (isTablet ? 38 : 46),
+              fontWeight: FontWeight.w900,
+              color: AppTheme.primaryGold,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            constraints: BoxConstraints(
+              maxWidth: isDesktop ? 800 : (isTablet ? 650 : double.infinity),
+            ),
+            child: Column(
+              children: [
+                Text(
+                  'You do not need to deposit funds to explore Azix. You do not need to trade immediately.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: isMobile ? 16 : (isTablet ? 18 : 20),
+                    color: AppTheme.white.withOpacity(0.85),
+                    height: 1.6,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Create a free account and explore the platform. See how trade, payments, and opportunity come together.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: isMobile ? 16 : (isTablet ? 18 : 20),
+                    color: AppTheme.white.withOpacity(0.8),
+                    height: 1.6,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 36),
           SizedBox(
-            width: isMobile ? double.infinity : 250,
+            width: isMobile ? double.infinity : 240,
             child: CustomButton(
-              text: 'Create Your Account',
+              text: 'Explore Azix',
               onPressed: _navigateToAuth,
             ).animate().fadeIn(duration: 600.ms).scale(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTextSection({
+    required String title,
+    String? subtitle,
+    List<String> paragraphs = const [],
+    List<String> bullets = const [],
+    IconData bulletIcon = Icons.circle,
+    required bool isDesktop,
+    required bool isTablet,
+    required bool isMobile,
+    Color backgroundColor = AppTheme.black,
+  }) {
+    final double maxWidth =
+        isDesktop ? 900 : (isTablet ? 720 : double.infinity);
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: isMobile ? 24.0 : (isTablet ? 48.0 : 80.0),
+        vertical: isMobile ? 60.0 : 100.0,
+      ),
+      color: backgroundColor,
+      child: Column(
+        children: [
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: isMobile ? 30 : (isTablet ? 38 : 46),
+              fontWeight: FontWeight.w900,
+              color: AppTheme.primaryGold,
+            ),
+          ),
+          Container(
+            constraints: BoxConstraints(maxWidth: maxWidth),
+            child: Column(
+              children: [
+                if (subtitle != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    subtitle,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: isMobile ? 16 : (isTablet ? 18 : 20),
+                      color: AppTheme.white.withOpacity(0.85),
+                    ),
+                  ),
+                ],
+                if (paragraphs.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  ...paragraphs.map(
+                    (paragraph) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12.0),
+                      child: Text(
+                        paragraph,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: isMobile ? 15 : (isTablet ? 17 : 19),
+                          color: AppTheme.white.withOpacity(0.75),
+                          height: 1.6,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+                if (bullets.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  _buildBulletList(items: bullets, icon: bulletIcon),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBulletList({
+    required List<String> items,
+    required IconData icon,
+  }) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 820),
+      child: Column(
+        children: items
+            .map(
+              (item) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(icon, size: 18, color: AppTheme.primaryGold),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        item,
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: AppTheme.white.withOpacity(0.85),
+                          height: 1.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+            .toList(),
+      ),
+    );
+  }
+
+  Widget _buildPhaseCard({
+    required String title,
+    required List<String> items,
+  }) {
+    return Container(
+      width: ResponsiveLayout.isDesktop(context) ? 320 : double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: const Color(0xFF212121),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppTheme.primaryGold.withOpacity(0.2),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: AppTheme.primaryGold,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ...items.map(
+            (item) => Padding(
+              padding: const EdgeInsets.only(bottom: 8.0),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.circle, size: 8, color: AppTheme.primaryGold),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      item,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: AppTheme.white.withOpacity(0.8),
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -892,26 +1010,46 @@ class _LandingScreenState extends State<LandingScreen> {
             ],
           ),
           const SizedBox(height: 24),
+          Wrap(
+            spacing: 16,
+            runSpacing: 8,
+            alignment: WrapAlignment.center,
+            children: [
+              Text(
+                'Terms & Privacy',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: AppTheme.white.withOpacity(0.7),
+                ),
+              ),
+              Text(
+                'Roadmap',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: AppTheme.white.withOpacity(0.7),
+                ),
+              ),
+              Text(
+                'Contact: support@azix.world',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: AppTheme.white.withOpacity(0.7),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Azix does not provide financial advice. Platform features vary by region.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 12,
+              color: AppTheme.white.withOpacity(0.55),
+            ),
+          ),
+          const SizedBox(height: 12),
           Text(
             '© 2024 AZIX. All rights reserved.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 14,
-              color: AppTheme.white.withOpacity(0.5),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'The Hub for Seamless, Super-Fast Transactions & Cross-Border Trade',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 14,
-              color: AppTheme.white.withOpacity(0.5),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Your Home for Tokenized Assets',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 12,
