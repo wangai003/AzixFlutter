@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
 import '../providers/enhanced_wallet_provider.dart';
 import '../providers/wallet_session_provider.dart';
 import '../theme/app_theme.dart';
@@ -25,6 +27,7 @@ import '../widgets/store_payment_dialog.dart';
 import 'buy_crypto_screen.dart';
 import 'buy_crypto_page.dart';
 import 'wallet_connect_screen.dart';
+import '../widgets/moonpay_payment_webview.dart';
 import '../services/secure_wallet_service.dart';
 import '../services/akofa_tag_service.dart';
 import '../services/biometric_service.dart';
@@ -1127,6 +1130,15 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                 disabled: false, // Polygon doesn't require trustlines
               ),
             ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildActionButton(
+                'Top Up Wallet',
+                Icons.add_card,
+                _showBuyCryptoOptions,
+                disabled: false,
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 12),
@@ -2021,7 +2033,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
   }
 
   /// Show MoonPay buy crypto page
-  void _showMoonPayBuyCrypto(EnhancedWalletProvider walletProvider) {
+  void _showMoonPayBuyCrypto(EnhancedWalletProvider walletProvider) async {
     if (walletProvider.address == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -2032,19 +2044,94 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
       return;
     }
 
-    // Open MoonPay buy crypto page
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (context) => BuyCryptoPage(
-          walletAddress: walletProvider.address!,
-          amountKES: 1000, // Default amount, can be made configurable
+    try {
+      // Get backend URL
+      final backendUrl = const String.fromEnvironment(
+        'AZIX_BACKEND_URL',
+        defaultValue: 'https://azix-flutter.vercel.app',
+      );
+
+      // Show loading dialog
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Center(
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppTheme.darkGrey,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryGold),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Preparing MoonPay checkout...',
+                  style: TextStyle(color: AppTheme.white),
+                ),
+              ],
+            ),
+          ),
         ),
-      ),
-    ).then((_) {
+      );
+
+      // Get MoonPay URL from backend (no signature required)
+      final response = await http.post(
+        Uri.parse("$backendUrl/api/get-moonpay-url"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "walletAddress": walletProvider.address!,
+          "amountKES": 1000, // Default amount
+        }),
+      );
+
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading dialog
+
+      if (response.statusCode != 200) {
+        final errorData = jsonDecode(response.body);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(errorData["error"] ?? "Failed to get MoonPay URL"),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      final data = jsonDecode(response.body);
+      final paymentUrl = data["url"] as String;
+
+      // Open MoonPay payment webview (same pattern as PesaPal)
+      if (!mounted) return;
+      final result = await showMoonPayPaymentWebView(
+        context: context,
+        paymentUrl: paymentUrl,
+        walletAddress: walletProvider.address!,
+        amountKES: 1000,
+      );
+
       // Refresh wallet when returning from MoonPay
-      walletProvider.refreshWallet();
-    });
+      if (result != null && result['status'] == 'completed') {
+        walletProvider.refreshWallet();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   /// Show ThirdWeb onramp dialog

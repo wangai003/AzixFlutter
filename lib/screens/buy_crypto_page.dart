@@ -1,10 +1,17 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_theme.dart';
 import '../services/polygon_wallet_service.dart';
+
+// Web-only imports
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html show IFrameElement;
+// ignore: undefined_prefixed_name
+import 'dart:ui_web' as ui;
 
 class BuyCryptoPage extends StatefulWidget {
   final String walletAddress;
@@ -24,38 +31,70 @@ class _BuyCryptoPageState extends State<BuyCryptoPage> {
   String? checkoutUrl;
   bool isLoading = true;
   String? error;
-  late final WebViewController controller;
+  WebViewController? controller; // Nullable for web platform
+  html.IFrameElement? iframeElement; // For web platform
 
   @override
   void initState() {
     super.initState();
-    controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onNavigationRequest: (request) {
-            // Handle MoonPay return URL
-            if (request.url.startsWith("myapp://moonpay-return") ||
-                request.url.contains("moonpay-return")) {
-              Navigator.pop(context);
-              return NavigationDecision.prevent;
-            }
-            return NavigationDecision.navigate;
-          },
-          onPageStarted: (url) {
-            setState(() {
-              isLoading = true;
-            });
-          },
-          onPageFinished: (url) {
-            setState(() {
-              isLoading = false;
-            });
-          },
-        ),
+    fetchCheckoutUrl();
+  }
+
+  void _initializeWebView(String url) {
+    if (kIsWeb) {
+      // Web platform: Use iframe
+      iframeElement = html.IFrameElement()
+        ..src = url
+        ..style.border = 'none'
+        ..style.width = '100%'
+        ..style.height = '100%';
+
+      // Register iframe with platform view registry
+      ui.platformViewRegistry.registerViewFactory(
+        'moonpay-checkout-iframe',
+        (int viewId) => iframeElement!,
       );
 
-    fetchCheckoutUrl();
+      setState(() {
+        isLoading = false;
+      });
+    } else {
+      // Mobile platform: Use WebViewController
+      controller = WebViewController()
+        ..setJavaScriptMode(JavaScriptMode.unrestricted)
+        ..setNavigationDelegate(
+          NavigationDelegate(
+            onNavigationRequest: (request) {
+              // Handle MoonPay return URL
+              if (request.url.startsWith("myapp://moonpay-return") ||
+                  request.url.contains("moonpay-return")) {
+                Navigator.pop(context);
+                return NavigationDecision.prevent;
+              }
+              return NavigationDecision.navigate;
+            },
+            onPageStarted: (url) {
+              setState(() {
+                isLoading = true;
+              });
+            },
+            onPageFinished: (url) {
+              setState(() {
+                isLoading = false;
+              });
+            },
+          ),
+        )
+        ..loadRequest(Uri.parse(url));
+    }
+  }
+
+  @override
+  void dispose() {
+    if (kIsWeb && iframeElement != null) {
+      iframeElement!.remove();
+    }
+    super.dispose();
   }
 
   Future<void> fetchCheckoutUrl() async {
@@ -135,13 +174,15 @@ class _BuyCryptoPageState extends State<BuyCryptoPage> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
+        final url = data["url"] as String;
         setState(() {
-          checkoutUrl = data["url"];
+          checkoutUrl = url;
           error = null;
-          if (checkoutUrl != null) {
-            controller.loadRequest(Uri.parse(checkoutUrl!));
-          }
         });
+        // Initialize WebView/iframe with the URL
+        if (checkoutUrl != null) {
+          _initializeWebView(checkoutUrl!);
+        }
       } else {
         final errorData = jsonDecode(response.body);
         setState(() {
@@ -268,7 +309,41 @@ class _BuyCryptoPageState extends State<BuyCryptoPage> {
         ],
       ),
       backgroundColor: AppTheme.darkGrey,
-      body: WebViewWidget(controller: controller),
+      body: Stack(
+        children: [
+          // Web implementation
+          if (kIsWeb && checkoutUrl != null && !isLoading && error == null)
+            HtmlElementView(viewType: 'moonpay-checkout-iframe'),
+
+          // Mobile implementation
+          if (!kIsWeb && controller != null && !isLoading && error == null)
+            WebViewWidget(controller: controller!),
+
+          // Loading indicator overlay
+          if (isLoading)
+            Container(
+              color: AppTheme.darkGrey,
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryGold),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      "Loading MoonPay checkout...",
+                      style: TextStyle(
+                        color: AppTheme.white,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 

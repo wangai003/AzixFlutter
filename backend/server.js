@@ -198,7 +198,7 @@ app.get('/api/store-payment/stores/:storeId', storePaymentController.getStoreCon
 
 // MoonPay Onramp API
 app.get('/api/moonpay/health', moonpayController.healthCheck);
-app.post('/api/get-moonpay-url', authenticateWallet, moonpayController.getMoonPayUrl);
+app.post('/api/get-moonpay-url', moonpayController.getMoonPayUrl);
 app.post('/webhooks/moonpay', moonpayController.moonPayWebhook);
 
 // MEE Sponsorship - Get smart account address

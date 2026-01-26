@@ -95,18 +95,15 @@ function verifyMoonPaySignature(req) {
 /**
  * Generate MoonPay checkout URL
  * POST /api/get-moonpay-url
- * Requires wallet authentication via authenticateWallet middleware
  */
 async function getMoonPayUrl(req, res) {
   try {
-    // Get wallet address from authenticated request (set by authenticateWallet middleware)
-    const walletAddress = req.wallet?.address || req.body.userAddress;
-    const { amountKES } = req.body;
+    // Get wallet address from request body
+    const { walletAddress, amountKES } = req.body;
 
     if (!walletAddress) {
       return res.status(400).json({ 
-        error: 'walletAddress required',
-        hint: 'Include userAddress in request body or ensure authenticateWallet middleware is applied'
+        error: 'walletAddress required'
       });
     }
 
