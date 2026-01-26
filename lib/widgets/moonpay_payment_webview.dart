@@ -182,7 +182,7 @@ class _MoonPayPaymentWebViewState extends State<MoonPayPaymentWebView> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Your USDT will be sent directly to your wallet by MoonPay.',
+              'Your USDT will be sent directly to your wallet.',
               style: TextStyle(
                 color: AppTheme.white,
                 fontSize: 14,
@@ -366,7 +366,7 @@ class _MoonPayPaymentWebViewState extends State<MoonPayPaymentWebView> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Buy Crypto with MoonPay',
+              'Buy Crypto',
               style: AppTheme.bodyLarge.copyWith(
                 color: AppTheme.white,
                 fontWeight: FontWeight.bold,
@@ -437,7 +437,7 @@ class _MoonPayPaymentWebViewState extends State<MoonPayPaymentWebView> {
                           ),
                           const SizedBox(height: 16),
                           Text(
-                            'Loading MoonPay...',
+                            'Loading payment...',
                             style: AppTheme.bodyMedium.copyWith(
                               color: AppTheme.white,
                             ),
@@ -465,7 +465,7 @@ class _MoonPayPaymentWebViewState extends State<MoonPayPaymentWebView> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Tokens are sent directly to your wallet by MoonPay.',
+                  'Tokens are sent directly to your wallet.',
                   style: AppTheme.bodySmall.copyWith(
                     color: AppTheme.primaryGold.withOpacity(0.8),
                     fontSize: 11,
@@ -480,7 +480,7 @@ class _MoonPayPaymentWebViewState extends State<MoonPayPaymentWebView> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Secure payment via MoonPay',
+                        'Secure payment',
                         style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
                       ),
                     ),

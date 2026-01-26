@@ -117,15 +117,45 @@ async function getMoonPayUrl(req, res) {
     const returnUrl = process.env.APP_RETURN_URL || 'myapp://moonpay-return';
     const amount = amountKES || 1000;
 
-    const url =
+    // Use Polygon-compatible currency codes
+    // MoonPay uses format: {coin}_{chain} for multi-chain tokens
+    // Options: usdt_polygon, usdc_polygon
+    const currencyCode = process.env.MOONPAY_CURRENCY_CODE || 'usdt_polygon';
+    
+    // Brand customization parameters
+    // Primary brand color (hex without #) - defaults to app's primary gold #FFD700
+    const primaryColor = (process.env.MOONPAY_PRIMARY_COLOR || 'FFD700').replace('#', '');
+    
+    // Theme: 'light' or 'dark' - defaults to dark to match app theme
+    const theme = process.env.MOONPAY_THEME || 'dark';
+    
+    // Logo URL (optional) - should be a publicly accessible URL
+    // If not set, MoonPay will use default branding
+    const logoUrl = process.env.MOONPAY_LOGO_URL;
+    
+    // Build base URL with required parameters
+    let url =
       `https://buy.moonpay.com` +
       `?apiKey=${apiKey}` +
-      `&currencyCode=USDT` +
+      `&currencyCode=${currencyCode}` +
       `&walletAddress=${walletAddress}` +
       `&baseCurrencyAmount=${amount}` +
-      `&redirectURL=${encodeURIComponent(returnUrl)}`;
+      `&redirectURL=${encodeURIComponent(returnUrl)}` +
+      `&toChainName=polygon` + // Explicitly specify Polygon network
+      `&primaryColor=${primaryColor}` + // Brand primary color
+      `&theme=${theme}`; // Theme (light/dark)
+    
+    // Add logo URL if provided
+    if (logoUrl) {
+      url += `&logoUrl=${encodeURIComponent(logoUrl)}`;
+    }
 
     console.log('✅ Generated MoonPay URL for wallet:', walletAddress);
+    console.log(`   Currency: ${currencyCode} on Polygon network`);
+    console.log(`   Theme: ${theme}, Primary Color: #${primaryColor}`);
+    if (logoUrl) {
+      console.log(`   Logo: ${logoUrl}`);
+    }
 
     res.json({ url });
   } catch (error) {
@@ -184,6 +214,14 @@ async function moonPayWebhook(req, res) {
     if (status !== 'completed') {
       console.log('ℹ️ Transaction not completed:', transactionId, status);
       return res.status(200).send('Not completed');
+    }
+
+    // Validate network is Polygon (safety check - tokens are sent on-chain by MoonPay)
+    if (network && network.toLowerCase() !== 'polygon' && network.toLowerCase() !== 'matic') {
+      console.warn(`⚠️ [MOONPAY] Transaction on unexpected network: ${network}`);
+      console.warn('   Expected: polygon/matic. Transaction will still be recorded.');
+    } else {
+      console.log(`✅ [MOONPAY] Transaction confirmed on Polygon network`);
     }
 
     // Check for duplicate (idempotency) in Firestore (optional)

@@ -2071,7 +2071,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Preparing MoonPay checkout...',
+                  'Preparing checkout...',
                   style: TextStyle(color: AppTheme.white),
                 ),
               ],
@@ -2080,7 +2080,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
         ),
       );
 
-      // Get MoonPay URL from backend (no signature required)
+      // Get payment URL from backend (no signature required)
       final response = await http.post(
         Uri.parse("$backendUrl/api/get-moonpay-url"),
         headers: {"Content-Type": "application/json"},
@@ -2098,7 +2098,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(errorData["error"] ?? "Failed to get MoonPay URL"),
+              content: Text(errorData["error"] ?? "Failed to get payment URL"),
               backgroundColor: Colors.red,
             ),
           );
@@ -2109,7 +2109,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
       final data = jsonDecode(response.body);
       final paymentUrl = data["url"] as String;
 
-      // Open MoonPay payment webview (same pattern as PesaPal)
+      // Open payment webview (same pattern as PesaPal)
       if (!mounted) return;
       final result = await showMoonPayPaymentWebView(
         context: context,
@@ -2118,7 +2118,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
         amountKES: 1000,
       );
 
-      // Refresh wallet when returning from MoonPay
+      // Refresh wallet when returning from payment
       if (result != null && result['status'] == 'completed') {
         walletProvider.refreshWallet();
       }
@@ -2163,7 +2163,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     );
   }
 
-  /// Show buy crypto options
+  /// Show buy crypto options (MoonPay only)
   void _showBuyCryptoOptions() {
     final walletProvider = Provider.of<EnhancedWalletProvider>(
       context,
@@ -2189,7 +2189,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
             ),
             const SizedBox(height: 8),
             Text(
-              'Choose a method to add MATIC to your wallet',
+              'Buy USDT with card',
               style: TextStyle(color: AppTheme.grey, fontSize: 14),
             ),
             const SizedBox(height: 24),
@@ -2199,54 +2199,16 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                 child: const Icon(Icons.credit_card, color: AppTheme.primaryGold),
               ),
               title: Text(
-                'Buy with MoonPay',
+                'Buy with Card',
                 style: TextStyle(color: AppTheme.white),
               ),
               subtitle: Text(
-                'Buy USDT with card via MoonPay',
+                'Buy USDT with card',
                 style: TextStyle(color: AppTheme.grey, fontSize: 12),
               ),
               onTap: () {
                 Navigator.pop(context);
                 _showMoonPayBuyCrypto(walletProvider);
-              },
-            ),
-            const Divider(color: AppTheme.grey),
-            ListTile(
-              leading: CircleAvatar(
-                backgroundColor: Colors.purple.withOpacity(0.2),
-                child: const Icon(Icons.credit_card, color: Colors.purple),
-              ),
-              title: Text(
-                'Buy with ThirdWeb',
-                style: TextStyle(color: AppTheme.white),
-              ),
-              subtitle: Text(
-                'Use ThirdWeb Pay to purchase MATIC',
-                style: TextStyle(color: AppTheme.grey, fontSize: 12),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                _showThirdWebOnramp(walletProvider);
-              },
-            ),
-            const Divider(color: AppTheme.grey),
-            ListTile(
-              leading: CircleAvatar(
-                backgroundColor: Colors.blue.withOpacity(0.2),
-                child: const Icon(Icons.qr_code, color: Colors.blue),
-              ),
-              title: Text(
-                'Receive from Another Wallet',
-                style: TextStyle(color: AppTheme.white),
-              ),
-              subtitle: Text(
-                'Get your wallet address',
-                style: TextStyle(color: AppTheme.grey, fontSize: 12),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                _showReceiveOptions();
               },
             ),
           ],

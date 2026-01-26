@@ -186,7 +186,7 @@ class _BuyCryptoPageState extends State<BuyCryptoPage> {
       } else {
         final errorData = jsonDecode(response.body);
         setState(() {
-          error = errorData["error"] ?? "Failed to get MoonPay URL";
+          error = errorData["error"] ?? "Failed to get payment URL";
           isLoading = false;
         });
       }
@@ -290,7 +290,7 @@ class _BuyCryptoPageState extends State<BuyCryptoPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Buy Crypto with MoonPay"),
+        title: const Text("Buy Crypto"),
         backgroundColor: AppTheme.darkGrey,
         foregroundColor: AppTheme.primaryGold,
         actions: [
@@ -332,7 +332,7 @@ class _BuyCryptoPageState extends State<BuyCryptoPage> {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      "Loading MoonPay checkout...",
+                      "Loading checkout...",
                       style: TextStyle(
                         color: AppTheme.white,
                         fontSize: 16,
