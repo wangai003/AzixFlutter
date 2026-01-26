@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/crypto_price_service.dart';
+import '../services/currency_service.dart';
 import '../services/polygon_wallet_service.dart';
 import '../theme/app_theme.dart';
 
@@ -39,6 +40,14 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
   // Calculated values
   double _tokenAmount = 0;
   double _kesAmount = 0;
+
+  // Display currency (for conversion preview)
+  String _displayCurrency = 'KES';
+  double _displayAmount = 0.0;
+  bool _isConverting = false;
+
+  // Supported display currencies
+  static const List<String> _displayCurrencies = ['KES', 'USD', 'NGN', 'ZAR'];
   
   // Price lock
   LockedPrice? _lockedPrice;
@@ -56,6 +65,7 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
     super.initState();
     _loadPrices();
     _startPriceRefresh();
+    _displayAmount = _kesAmount;
   }
   
   @override
@@ -96,6 +106,7 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
           _isLoadingPrices = false;
           _recalculateAmounts();
         });
+        _updateDisplayAmount();
       }
     } catch (e) {
       if (mounted) {
@@ -134,6 +145,40 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
       _lockedPrice = null;
       _priceLockTimer?.cancel();
     }
+
+    _updateDisplayAmount();
+  }
+
+  Future<void> _updateDisplayAmount() async {
+    if (_kesAmount <= 0) {
+      if (mounted) setState(() => _displayAmount = 0.0);
+      return;
+    }
+    if (_displayCurrency == 'KES') {
+      if (mounted) setState(() => _displayAmount = _kesAmount);
+      return;
+    }
+    try {
+      setState(() => _isConverting = true);
+      final converted = await CurrencyService.convertCurrency(
+        _kesAmount,
+        'KES',
+        _displayCurrency,
+      );
+      if (mounted) {
+        setState(() => _displayAmount = converted);
+      }
+    } catch (e) {
+      debugPrint('Error converting currency: $e');
+      if (mounted) {
+        setState(() {
+          _displayCurrency = 'KES';
+          _displayAmount = _kesAmount;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isConverting = false);
+    }
   }
   
   void _selectToken(String token) {
@@ -143,6 +188,7 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
       _priceLockTimer?.cancel();
       _recalculateAmounts();
     });
+    _updateDisplayAmount();
   }
   
   void _setKESAmount(double amount) {
@@ -152,6 +198,7 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
       _amountController.text = amount.toStringAsFixed(0);
       _recalculateAmounts();
     });
+    _updateDisplayAmount();
   }
   
   void _onAmountChanged(String value) {
@@ -193,6 +240,7 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
       }
     });
     
+    _updateDisplayAmount();
     // Debug: Print current state
     debugPrint('📝 Amount changed: KES=$_kesAmount, Token=$_tokenAmount, Button enabled: ${_tokenAmount > 0 && _kesAmount >= 10}');
   }
@@ -207,6 +255,7 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
         _amountController.text = _kesAmount > 0 ? _kesAmount.toStringAsFixed(0) : '';
       }
     });
+    _updateDisplayAmount();
   }
   
   Future<void> _lockPrice() async {
@@ -832,7 +881,6 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
   
   Widget _buildConversionDisplay() {
     final price = _prices[_selectedToken];
-    if (price == null) return const SizedBox();
     
     return Container(
       padding: const EdgeInsets.all(16),
@@ -862,6 +910,70 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
             ],
           ),
           const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Display Currency',
+                style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+              ),
+              SizedBox(
+                width: 110,
+                child: DropdownButtonFormField<String>(
+                  value: _displayCurrency,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(
+                        color: AppTheme.grey.withOpacity(0.3),
+                      ),
+                    ),
+                  ),
+                  dropdownColor: AppTheme.black,
+                  style: TextStyle(color: AppTheme.white, fontSize: 12),
+                  items: _displayCurrencies
+                      .map((currency) => DropdownMenuItem(
+                            value: currency,
+                            child: Text(currency),
+                          ))
+                      .toList(),
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _displayCurrency = value);
+                    _updateDisplayAmount();
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Approx. Total',
+                style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+              ),
+              _isConverting
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppTheme.primaryGold,
+                      ),
+                    )
+                  : Text(
+                      '${_displayCurrency} ${_displayAmount.toStringAsFixed(2)}',
+                      style:
+                          AppTheme.bodySmall.copyWith(color: AppTheme.white),
+                    ),
+            ],
+          ),
+          const SizedBox(height: 8),
           Icon(Icons.arrow_downward, color: AppTheme.primaryGold, size: 20),
           const SizedBox(height: 8),
           Row(
@@ -880,7 +992,7 @@ class _TokenPurchaseDialogState extends State<TokenPurchaseDialog> {
               ),
             ],
           ),
-          if (_selectedToken != 'AKOFA') ...[
+          if (_selectedToken != 'AKOFA' && price != null) ...[
             const SizedBox(height: 4),
             Text(
               '≈ \$${(_tokenAmount * price.priceUSD).toStringAsFixed(2)} USD',

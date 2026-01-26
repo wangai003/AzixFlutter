@@ -67,6 +67,7 @@ class _CardPaymentDialogState extends State<CardPaymentDialog> {
   String _displayCurrency = 'KES';
   double _displayAmount = 0.0;
   bool _isConverting = false;
+  static const List<String> _displayCurrencies = ['KES', 'USD', 'NGN', 'ZAR'];
   late double _amountKES;
   late String _selectedToken;
   late double _tokenAmount;
@@ -438,9 +439,7 @@ class _CardPaymentDialogState extends State<CardPaymentDialog> {
                   ),
                   dropdownColor: AppTheme.black,
                   style: TextStyle(color: AppTheme.white, fontSize: 12),
-                  items: (_currencyPrices.keys.isNotEmpty
-                          ? _currencyPrices.keys
-                          : ['KES'])
+                  items: _displayCurrencies
                       .map((currency) => DropdownMenuItem(
                             value: currency,
                             child: Text(currency),

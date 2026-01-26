@@ -8,6 +8,7 @@ const gaslessController = require('./controllers/gaslessController');
 const mpesaController = require('./controllers/mpesaController');
 const pesapalController = require('./controllers/pesapalController');
 const storePaymentController = require('./controllers/storePaymentController');
+const moonpayController = require('./controllers/moonpayController');
 const { authenticateWallet, getSignMessage } = require('./middleware/walletAuth');
 const { userRateLimiter, getStats } = require('./middleware/userRateLimiter');
 const walletMonitor = require('./services/walletMonitor');
@@ -47,6 +48,17 @@ const corsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization']
 };
 
+// Raw body parser for MoonPay webhook signature verification
+// Store raw body for all requests (needed for webhook signature verification)
+app.use(
+  express.json({
+    verify: (req, res, buf) => {
+      // Always store raw body for potential webhook signature verification
+      req.rawBody = buf;
+    }
+  })
+);
+
 // Allow PesaPal IPN callbacks regardless of origin
 app.use((req, res, next) => {
   if (req.path.startsWith('/api/pesapal/ipn-callback')) {
@@ -54,7 +66,6 @@ app.use((req, res, next) => {
   }
   return cors(corsOptions)(req, res, next);
 });
-app.use(express.json());
 
 // Rate limiting (IP-based - general protection)
 const limiter = rateLimit({
@@ -184,6 +195,11 @@ app.post('/api/store-payment/verify', storePaymentController.verifyPayment);
 app.post('/api/store-payment/stores/:storeId/webhook', storePaymentController.registerStoreWebhook);
 app.get('/api/store-payment/verify/:orderId', storePaymentController.verifyPaymentForStore);
 app.get('/api/store-payment/stores/:storeId', storePaymentController.getStoreConfig);
+
+// MoonPay Onramp API
+app.get('/api/moonpay/health', moonpayController.healthCheck);
+app.post('/api/get-moonpay-url', authenticateWallet, moonpayController.getMoonPayUrl);
+app.post('/webhooks/moonpay', moonpayController.moonPayWebhook);
 
 // MEE Sponsorship - Get smart account address
 app.get('/api/sponsorship/smart-account', gaslessController.getSmartAccountAddress);

@@ -46,6 +46,7 @@ class _MpesaPurchaseDialogState extends State<MpesaPurchaseDialog> {
   String _displayCurrency = 'KES';
   double _displayAmount = 0.0;
   bool _isConverting = false;
+  static const List<String> _displayCurrencies = ['KES', 'USD', 'NGN', 'ZAR'];
 
   final List<double> _presetAmounts = [10, 50, 100, 500, 1000, 5000];
   
@@ -303,14 +304,12 @@ class _MpesaPurchaseDialogState extends State<MpesaPurchaseDialog> {
                           ),
                           dropdownColor: AppTheme.black,
                           style: TextStyle(color: AppTheme.white, fontSize: 12),
-                          items: [
-                            'KES',
-                            ...CurrencyService.getPopularCurrenciesForRegion('global')
-                                .where((currency) => currency != 'KES'),
-                          ].map((currency) => DropdownMenuItem(
-                                value: currency,
-                                child: Text(currency),
-                              )).toList(),
+                          items: _displayCurrencies
+                              .map((currency) => DropdownMenuItem(
+                                    value: currency,
+                                    child: Text(currency),
+                                  ))
+                              .toList(),
                           onChanged: (value) {
                             if (value == null) return;
                             setState(() => _displayCurrency = value);

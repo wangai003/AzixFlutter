@@ -23,6 +23,7 @@ import '../widgets/custom_thirdweb_onramp.dart';
 import '../widgets/wallet_auth_dialog.dart';
 import '../widgets/store_payment_dialog.dart';
 import 'buy_crypto_screen.dart';
+import 'buy_crypto_page.dart';
 import 'wallet_connect_screen.dart';
 import '../services/secure_wallet_service.dart';
 import '../services/akofa_tag_service.dart';
@@ -43,6 +44,7 @@ class EnhancedWalletScreen extends StatefulWidget {
 class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  final Map<String, bool> _retryInProgress = {};
   bool _isRefreshing = false;
   String? _userAkofaTag;
   bool _isLoadingAkofaTag = false;
@@ -799,28 +801,45 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                       if (orderId.isNotEmpty) ...[
                         const SizedBox(width: 8),
                         TextButton(
-                          onPressed: () async {
-                            final result = await walletProvider.claimPendingPurchase(
-                              orderTrackingId: orderId,
-                            );
-                            if (!mounted) return;
-                            if (result['success'] == true) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Purchase credited successfully.'),
-                                  backgroundColor: Colors.green,
-                                ),
-                              );
-                            } else {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(result['error'] ?? 'Credit failed'),
-                                  backgroundColor: Colors.red,
-                                ),
-                              );
-                            }
-                          },
-                          child: const Text('Retry'),
+                          onPressed: (_retryInProgress[orderId] == true)
+                              ? null
+                              : () async {
+                                  setState(() {
+                                    _retryInProgress[orderId] = true;
+                                  });
+                                  final result = await walletProvider.claimPendingPurchase(
+                                    orderTrackingId: orderId,
+                                  );
+                                  if (!mounted) return;
+                                  setState(() {
+                                    _retryInProgress[orderId] = false;
+                                  });
+                                  if (result['success'] == true) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Purchase credited successfully.'),
+                                        backgroundColor: Colors.green,
+                                      ),
+                                    );
+                                  } else {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(result['error'] ?? 'Credit failed'),
+                                        backgroundColor: Colors.red,
+                                      ),
+                                    );
+                                  }
+                                },
+                          child: (_retryInProgress[orderId] == true)
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppTheme.primaryGold,
+                                  ),
+                                )
+                              : const Text('Retry'),
                         ),
                       ],
                     ],
@@ -828,39 +847,6 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                 );
               }).toList(),
             ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () async {
-                final result = await walletProvider.reconcilePesapalTransactions();
-                if (!mounted) return;
-                if (result['success'] == true) {
-                  final credited = result['credited'] ?? 0;
-                  final checked = result['checked'] ?? 0;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Checked $checked pending purchases. Credited $credited.'),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(result['error'] ?? 'Reconcile failed'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              },
-              icon: const Icon(Icons.sync),
-              label: const Text('Reconcile Purchases'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primaryGold,
-                foregroundColor: AppTheme.black,
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -1133,14 +1119,6 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(
-              child: _buildActionButton(
-                'Buy Crypto',
-                Icons.account_balance_wallet,
-                () => _showThirdWebOnramp(walletProvider),
-              ),
-            ),
-            const SizedBox(width: 12),
             Expanded(
               child: _buildActionButton(
                 'Buy Tokens',
@@ -2042,6 +2020,33 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     );
   }
 
+  /// Show MoonPay buy crypto page
+  void _showMoonPayBuyCrypto(EnhancedWalletProvider walletProvider) {
+    if (walletProvider.address == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Wallet address not available'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Open MoonPay buy crypto page
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (context) => BuyCryptoPage(
+          walletAddress: walletProvider.address!,
+          amountKES: 1000, // Default amount, can be made configurable
+        ),
+      ),
+    ).then((_) {
+      // Refresh wallet when returning from MoonPay
+      walletProvider.refreshWallet();
+    });
+  }
+
   /// Show ThirdWeb onramp dialog
   void _showThirdWebOnramp(EnhancedWalletProvider walletProvider) {
     if (walletProvider.address == null) {
@@ -2107,7 +2112,26 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                 child: const Icon(Icons.credit_card, color: AppTheme.primaryGold),
               ),
               title: Text(
-                'Buy with Card',
+                'Buy with MoonPay',
+                style: TextStyle(color: AppTheme.white),
+              ),
+              subtitle: Text(
+                'Buy USDT with card via MoonPay',
+                style: TextStyle(color: AppTheme.grey, fontSize: 12),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _showMoonPayBuyCrypto(walletProvider);
+              },
+            ),
+            const Divider(color: AppTheme.grey),
+            ListTile(
+              leading: CircleAvatar(
+                backgroundColor: Colors.purple.withOpacity(0.2),
+                child: const Icon(Icons.credit_card, color: Colors.purple),
+              ),
+              title: Text(
+                'Buy with ThirdWeb',
                 style: TextStyle(color: AppTheme.white),
               ),
               subtitle: Text(
@@ -2276,26 +2300,26 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                   _showStorePaymentDialog();
                 },
               ),
-              // Sell Tokens Option
-              const SizedBox(height: 12),
-              ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: Colors.green,
-                  child: const Icon(Icons.sell, color: Colors.white, size: 20),
-                ),
-                title: Text(
-                  'Sell Tokens',
-                  style: TextStyle(color: AppTheme.white),
-                ),
-                subtitle: Text(
-                  'Convert tokens to cash',
-                  style: TextStyle(color: AppTheme.grey, fontSize: 12),
-                ),
-                onTap: () {
-                  Navigator.pop(context);
-                  _showTokenSellDialog();
-                },
-              ),
+              // Sell Tokens Option - TEMPORARILY HIDDEN
+              // const SizedBox(height: 12),
+              // ListTile(
+              //   leading: CircleAvatar(
+              //     backgroundColor: Colors.green,
+              //     child: const Icon(Icons.sell, color: Colors.white, size: 20),
+              //   ),
+              //   title: Text(
+              //     'Sell Tokens',
+              //     style: TextStyle(color: AppTheme.white),
+              //   ),
+              //   subtitle: Text(
+              //     'Convert tokens to cash',
+              //     style: TextStyle(color: AppTheme.grey, fontSize: 12),
+              //   ),
+              //   onTap: () {
+              //     Navigator.pop(context);
+              //     _showTokenSellDialog();
+              //   },
+              // ),
             ],
           ),
         ),
@@ -3413,33 +3437,6 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                 _showReceiveQR(walletProvider.address ?? walletProvider.publicKey ?? '', 'Polygon Network');
               },
             ),
-              ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: Colors.purple,
-                  child: const Text(
-                    'P',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                title: Text(
-                  'Polygon Network',
-                  style: TextStyle(color: AppTheme.white),
-                ),
-                subtitle: Text(
-                  'Receive MATIC, USDT, USDC, DAI',
-                  style: TextStyle(color: AppTheme.grey, fontSize: 12),
-                ),
-                onTap: () {
-                  Navigator.pop(context);
-                  _showReceiveQR(
-                    walletProvider.polygonAddress!,
-                    'Polygon Network',
-                  );
-                },
-              ),
           ],
         ),
       ),

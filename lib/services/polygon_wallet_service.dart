@@ -2950,4 +2950,80 @@ class PolygonWalletService {
       };
     }
   }
+
+  /// Sign a message for backend authentication
+  /// Uses personal_sign format (EIP-191) compatible with ethers.js verifyMessage
+  /// 
+  /// Parameters:
+  /// - userId: Firebase user ID
+  /// - password: Wallet password for decryption
+  /// - message: Message to sign (will be prefixed with "\x19Ethereum Signed Message:\n{length}")
+  /// 
+  /// Returns: Signature string (0x-prefixed hex)
+  static Future<Map<String, dynamic>> signMessage({
+    required String userId,
+    required String password,
+    required String message,
+  }) async {
+    try {
+      print('🔐 [SIGN] Signing message for backend authentication...');
+      
+      // Authenticate and decrypt wallet
+      final authResult = await authenticateAndDecryptPolygonWallet(
+        userId,
+        password,
+      );
+      
+      if (!authResult['success']) {
+        return {
+          'success': false,
+          'error': authResult['error'] ?? 'Authentication failed',
+        };
+      }
+      
+      final privateKey = authResult['privateKey'] as String;
+      final walletAddress = authResult['address'] as String;
+      
+      print('✅ [SIGN] Wallet authenticated: ${walletAddress.substring(0, 10)}...');
+      
+      // Clean private key
+      String cleanKey = privateKey.trim();
+      if (cleanKey.startsWith('0x') || cleanKey.startsWith('0X')) {
+        cleanKey = cleanKey.substring(2);
+      }
+      
+      // Convert to bytes
+      final privateKeyBytes = web3crypto.hexToBytes(cleanKey);
+      
+      // Create EthPrivateKey
+      final ethPrivateKey = web3dart.EthPrivateKey(privateKeyBytes);
+      
+      // Decode message (personal_sign format)
+      // personal_sign expects: "\x19Ethereum Signed Message:\n{length}{message}"
+      final messageBytes = utf8.encode(message);
+      final prefix = utf8.encode('\x19Ethereum Signed Message:\n${messageBytes.length}');
+      final prefixedMessage = Uint8List.fromList([...prefix, ...messageBytes]);
+      
+      // Sign the message
+      final signature = await ethPrivateKey.signPersonalMessage(prefixedMessage);
+      
+      // Convert signature to hex string
+      final signatureHex = '0x${web3crypto.bytesToHex(signature, include0x: false)}';
+      
+      print('✅ [SIGN] Message signed successfully');
+      
+      return {
+        'success': true,
+        'signature': signatureHex,
+        'address': walletAddress,
+      };
+    } catch (e, stackTrace) {
+      print('❌ [SIGN] Error signing message: $e');
+      print('Stack trace: $stackTrace');
+      return {
+        'success': false,
+        'error': e.toString(),
+      };
+    }
+  }
 }

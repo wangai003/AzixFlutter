@@ -114,7 +114,9 @@ class StorePaymentService {
         }
 
         // Execute the payment transaction on Polygon (all are ERC-20 tokens)
-        transactionResult = await PolygonWalletService.sendERC20TokenWithAuth(
+        // Use the same serverless MATIC top-up flow as enhanced wallet sends.
+        print('⛽ [STORE PAYMENT] Using Polygon serverless gas top-up flow');
+        transactionResult = await _sendStorePaymentToken(
           userId: user.uid,
           password: password,
           tokenContractAddress: tokenContractAddress,
@@ -276,6 +278,24 @@ class StorePaymentService {
         PolygonWalletService.setNetwork(isTestnet: wasTestnet);
       }
     }
+  }
+
+  /// Send a store payment token using Polygon serverless MATIC top-ups.
+  /// This intentionally avoids Biconomy gasless relays.
+  static Future<Map<String, dynamic>> _sendStorePaymentToken({
+    required String userId,
+    required String password,
+    required String tokenContractAddress,
+    required String toAddress,
+    required double amount,
+  }) async {
+    return PolygonWalletService.sendERC20TokenWithAuth(
+      userId: userId,
+      password: password,
+      tokenContractAddress: tokenContractAddress,
+      toAddress: toAddress,
+      amount: amount,
+    );
   }
 
   /// Store payment transaction in backend
