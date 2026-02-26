@@ -9,6 +9,7 @@ const mpesaController = require('./controllers/mpesaController');
 const pesapalController = require('./controllers/pesapalController');
 const storePaymentController = require('./controllers/storePaymentController');
 const moonpayController = require('./controllers/moonpayController');
+const thirdwebOnrampController = require('./controllers/thirdwebOnrampController');
 const { authenticateWallet, getSignMessage } = require('./middleware/walletAuth');
 const { userRateLimiter, getStats } = require('./middleware/userRateLimiter');
 const walletMonitor = require('./services/walletMonitor');
@@ -199,7 +200,12 @@ app.get('/api/store-payment/stores/:storeId', storePaymentController.getStoreCon
 // MoonPay Onramp API
 app.get('/api/moonpay/health', moonpayController.healthCheck);
 app.post('/api/get-moonpay-url', moonpayController.getMoonPayUrl);
+app.post('/api/get-moonpay-sell-url', moonpayController.getMoonPaySellUrl);
 app.post('/webhooks/moonpay', moonpayController.moonPayWebhook);
+
+// Thirdweb Onramp API
+app.post('/api/onramp/prepare', thirdwebOnrampController.prepareOnramp);
+app.get('/api/onramp/status/:quoteId', thirdwebOnrampController.getOnrampStatus);
 
 // MEE Sponsorship - Get smart account address
 app.get('/api/sponsorship/smart-account', gaslessController.getSmartAccountAddress);

@@ -118,22 +118,27 @@ async function getMoonPayUrl(req, res) {
     const amount = amountKES || 1000;
 
     // Use Polygon-compatible currency codes
-    // MoonPay uses format: {coin}_{chain} for multi-chain tokens
-    // Options: usdt_polygon, usdc_polygon
+    // According to MoonPay Dashboard, supported Polygon codes are:
+    // - usdc_polygon (USD Coin on Polygon)
+    // - usdt_polygon (Tether on Polygon)
+    // These codes are confirmed to work in both test and production modes
     const currencyCode = process.env.MOONPAY_CURRENCY_CODE || 'usdt_polygon';
     
+    // Validate currency code format
+    if (!currencyCode.match(/^(usdt|usdc)_polygon$/)) {
+      console.warn(`⚠️ [MOONPAY] Currency code '${currencyCode}' may not be valid for Polygon`);
+      console.warn('   Recommended codes: usdt_polygon or usdc_polygon');
+    }
+    
     // Brand customization parameters
-    // Primary brand color (hex without #) - defaults to app's primary gold #FFD700
-    const primaryColor = (process.env.MOONPAY_PRIMARY_COLOR || 'FFD700').replace('#', '');
-    
-    // Theme: 'light' or 'dark' - defaults to dark to match app theme
-    const theme = process.env.MOONPAY_THEME || 'dark';
-    
-    // Logo URL (optional) - should be a publicly accessible URL
-    // If not set, MoonPay will use default branding
-    const logoUrl = process.env.MOONPAY_LOGO_URL;
+    // Color code (hex with #) - defaults to app's primary gold #FFD700
+    // MoonPay uses 'colorCode' parameter (not 'primaryColor')
+    const colorCode = process.env.MOONPAY_COLOR_CODE || '#FFD700';
     
     // Build base URL with required parameters
+    // Note: MoonPay's buy widget supports limited customization parameters
+    // Using only supported parameters: apiKey, currencyCode, walletAddress, 
+    // baseCurrencyAmount, redirectURL, colorCode
     let url =
       `https://buy.moonpay.com` +
       `?apiKey=${apiKey}` +
@@ -141,21 +146,14 @@ async function getMoonPayUrl(req, res) {
       `&walletAddress=${walletAddress}` +
       `&baseCurrencyAmount=${amount}` +
       `&redirectURL=${encodeURIComponent(returnUrl)}` +
-      `&toChainName=polygon` + // Explicitly specify Polygon network
-      `&primaryColor=${primaryColor}` + // Brand primary color
-      `&theme=${theme}`; // Theme (light/dark)
+      `&colorCode=${encodeURIComponent(colorCode)}`; // Brand color (with #)
     
-    // Add logo URL if provided
-    if (logoUrl) {
-      url += `&logoUrl=${encodeURIComponent(logoUrl)}`;
-    }
+    // Note: 'toChainName' is handled via currencyCode (usdt_polygon, usdc_polygon)
+    // Additional customization like theme/logo may require MoonPay SDK or enterprise plan
 
     console.log('✅ Generated MoonPay URL for wallet:', walletAddress);
     console.log(`   Currency: ${currencyCode} on Polygon network`);
-    console.log(`   Theme: ${theme}, Primary Color: #${primaryColor}`);
-    if (logoUrl) {
-      console.log(`   Logo: ${logoUrl}`);
-    }
+    console.log(`   Color: ${colorCode}`);
 
     res.json({ url });
   } catch (error) {
@@ -314,6 +312,75 @@ async function moonPayWebhook(req, res) {
 }
 
 /**
+ * Generate MoonPay sell (offramp) checkout URL
+ * POST /api/get-moonpay-sell-url
+ */
+async function getMoonPaySellUrl(req, res) {
+  try {
+    // Get wallet address and amount from request body
+    const { walletAddress, amountCrypto, currencyCode } = req.body;
+
+    if (!walletAddress) {
+      return res.status(400).json({ 
+        error: 'walletAddress required'
+      });
+    }
+
+    if (!amountCrypto) {
+      return res.status(400).json({ 
+        error: 'amountCrypto required'
+      });
+    }
+
+    const apiKey = process.env.MOONPAY_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ 
+        error: 'MoonPay API key not configured' 
+      });
+    }
+
+    const returnUrl = process.env.APP_RETURN_URL || 'myapp://moonpay-return';
+    
+    // Use Polygon-compatible currency codes for selling
+    // Default to usdt_polygon if not specified
+    const sellCurrencyCode = currencyCode || process.env.MOONPAY_CURRENCY_CODE || 'usdt_polygon';
+    
+    // Validate currency code format
+    if (!sellCurrencyCode.match(/^(usdt|usdc)_polygon$/)) {
+      console.warn(`⚠️ [MOONPAY] Currency code '${sellCurrencyCode}' may not be valid for Polygon`);
+      console.warn('   Recommended codes: usdt_polygon or usdc_polygon');
+    }
+    
+    // Brand customization parameters
+    const colorCode = process.env.MOONPAY_COLOR_CODE || '#FFD700';
+    
+    // Build sell URL with required parameters
+    // MoonPay sell widget uses sell.moonpay.com domain
+    let url =
+      `https://sell.moonpay.com` +
+      `?apiKey=${apiKey}` +
+      `&currencyCode=${sellCurrencyCode}` +
+      `&walletAddress=${walletAddress}` +
+      `&baseCurrencyAmount=${amountCrypto}` +
+      `&redirectURL=${encodeURIComponent(returnUrl)}` +
+      `&colorCode=${encodeURIComponent(colorCode)}`;
+    
+    console.log('✅ Generated MoonPay Sell URL for wallet:', walletAddress);
+    console.log(`   Currency: ${sellCurrencyCode} on Polygon network`);
+    console.log(`   Amount: ${amountCrypto} ${sellCurrencyCode}`);
+    console.log(`   Color: ${colorCode}`);
+
+    res.json({ url });
+  } catch (error) {
+    console.error('❌ Error generating MoonPay Sell URL:', error);
+    res.status(500).json({ 
+      error: 'Failed to generate MoonPay Sell URL',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+}
+
+/**
  * Health check endpoint
  * GET /api/moonpay/health
  */
@@ -338,6 +405,7 @@ function healthCheck(req, res) {
 
 module.exports = {
   getMoonPayUrl,
+  getMoonPaySellUrl,
   moonPayWebhook,
   healthCheck
 };
