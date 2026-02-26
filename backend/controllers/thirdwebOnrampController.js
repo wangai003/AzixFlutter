@@ -1,5 +1,5 @@
 const THIRDWEB_API_BASE = 'https://bridge.thirdweb.com/v1';
-const NATIVE_TOKEN_ADDRESS = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+const NATIVE_TOKEN_ADDRESS = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 
 function normalizeStatus(status) {
   const normalized = (status || '').toString().toUpperCase();
@@ -33,6 +33,12 @@ async function prepareOnramp(req, res) {
       });
     }
 
+    const requestedChainId = Number(chainId);
+    // Thirdweb onramp providers generally support mainnet chains for fiat onramp.
+    // If the app is in Amoy testnet mode, transparently map to Polygon mainnet.
+    const effectiveChainId = requestedChainId === 80002 ? 137 : requestedChainId;
+    const effectiveTokenAddress = (tokenAddress || NATIVE_TOKEN_ADDRESS).toLowerCase();
+
     const response = await fetch(`${THIRDWEB_API_BASE}/onramp/prepare`, {
       method: 'POST',
       headers: {
@@ -41,8 +47,8 @@ async function prepareOnramp(req, res) {
       },
       body: JSON.stringify({
         onramp: onramp || 'transak',
-        chainId: Number(chainId),
-        tokenAddress: tokenAddress || NATIVE_TOKEN_ADDRESS,
+        chainId: effectiveChainId,
+        tokenAddress: effectiveTokenAddress,
         amount: amount.toString(),
         receiver: walletAddress,
         currency: 'USD',
@@ -61,6 +67,7 @@ async function prepareOnramp(req, res) {
       success: true,
       link: data?.data?.link,
       quoteId: data?.data?.quoteId,
+      chainId: effectiveChainId,
     });
   } catch (error) {
     console.error('❌ [THIRDWEB ONRAMP] prepareOnramp failed:', error);
