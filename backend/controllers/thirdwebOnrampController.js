@@ -12,6 +12,15 @@ function normalizeStatus(status) {
   return 'PENDING';
 }
 
+function pickFirstString(candidates) {
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
 async function prepareOnramp(req, res) {
   try {
     const { walletAddress, amount, chainId, tokenAddress, onramp } = req.body || {};
@@ -63,10 +72,42 @@ async function prepareOnramp(req, res) {
       });
     }
 
+    const link = pickFirstString([
+      data?.data?.link,
+      data?.link,
+      data?.result?.link,
+      data?.result?.checkoutLink,
+      data?.checkoutLink,
+      data?.url,
+    ]);
+
+    const quoteId = pickFirstString([
+      data?.data?.quoteId,
+      data?.data?.id,
+      data?.quoteId,
+      data?.id,
+      data?.result?.quoteId,
+      data?.result?.id,
+    ]);
+
+    if (!link || !quoteId) {
+      console.error('❌ [THIRDWEB ONRAMP] Missing link/quoteId in prepare response:', {
+        hasLink: Boolean(link),
+        hasQuoteId: Boolean(quoteId),
+        topLevelKeys: Object.keys(data || {}),
+      });
+      return res.status(502).json({
+        success: false,
+        error: 'Thirdweb prepare response missing checkout link or quote id',
+        details: process.env.NODE_ENV === 'development' ? data : undefined,
+      });
+    }
+
     return res.json({
       success: true,
-      link: data?.data?.link,
-      quoteId: data?.data?.quoteId,
+      link,
+      quoteId,
+      id: quoteId, // compatibility for clients that expect "id"
       chainId: effectiveChainId,
     });
   } catch (error) {
