@@ -103,7 +103,7 @@ async function prepareOnramp(req, res) {
         'x-secret-key': process.env.THIRDWEB_SECRET_KEY,
       },
       body: JSON.stringify({
-        onramp: onramp || 'stripe',
+        onramp: onramp || 'coinbase',
         chainId: effectiveChainId,
         tokenAddress: effectiveTokenAddress,
         amount: normalizedAmount,
