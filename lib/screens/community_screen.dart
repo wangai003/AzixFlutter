@@ -9,6 +9,7 @@ import '../services/chat_service.dart';
 import '../widgets/reaction_bubble.dart';
 import '../widgets/message_bubble.dart';
 import '../providers/chat_provider.dart';
+import '../utils/responsive_layout.dart';
 
 class CommunityScreen extends StatefulWidget {
   const CommunityScreen({Key? key}) : super(key: key);
@@ -20,6 +21,7 @@ class CommunityScreen extends StatefulWidget {
 class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final TextEditingController _messageController = TextEditingController();
+  final FocusNode _messageFocusNode = FocusNode();
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   
@@ -51,6 +53,7 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
   void dispose() {
     _tabController.dispose();
     _messageController.dispose();
+    _messageFocusNode.dispose();
     _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -58,6 +61,7 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
+    final isMobile = ResponsiveLayout.isMobile(context);
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -74,9 +78,9 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
           builder: (context, constraints) {
             return Column(
               children: [
-                _buildAppBar(),
-                _buildSearchBar(),
-                _buildTabBar(),
+                _buildAppBar(isMobile: isMobile),
+                if (!isMobile) _buildSearchBar(),
+                _buildTabBar(isMobile: isMobile),
                 Expanded(
                   child: TabBarView(
                     controller: _tabController,
@@ -94,9 +98,12 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
     );
   }
 
-  Widget _buildAppBar() {
+  Widget _buildAppBar({required bool isMobile}) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+      padding: EdgeInsets.symmetric(
+        horizontal: isMobile ? 12.0 : 20.0,
+        vertical: isMobile ? 8.0 : 16.0,
+      ),
       child: Row(
         children: [
           Text(
@@ -104,25 +111,33 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
             style: AppTheme.headingLarge.copyWith(
               color: AppTheme.primaryGold,
               fontWeight: FontWeight.bold,
+              fontSize: isMobile ? 20 : 24,
             ),
           ),
           const Spacer(),
           IconButton(
-            icon: const Icon(Icons.add_circle_outline, color: AppTheme.primaryGold),
+            icon: Icon(
+              Icons.add_circle_outline,
+              color: AppTheme.primaryGold,
+              size: isMobile ? 20 : 24,
+            ),
+            padding: EdgeInsets.all(isMobile ? 8 : 12),
+            constraints: BoxConstraints(),
             onPressed: () {
               _showCreateCommunityDialog();
             },
           ),
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined, color: AppTheme.primaryGold),
-            onPressed: () {},
-          )
-              .animate(onPlay: (controller) => controller.repeat(reverse: true))
-              .scale(
-                begin: const Offset(1, 1),
-                end: const Offset(1.1, 1.1),
-                duration: const Duration(seconds: 2),
-              ),
+          if (!isMobile)
+            IconButton(
+              icon: const Icon(Icons.notifications_outlined, color: AppTheme.primaryGold),
+              onPressed: () {},
+            )
+                .animate(onPlay: (controller) => controller.repeat(reverse: true))
+                .scale(
+                  begin: const Offset(1, 1),
+                  end: const Offset(1.1, 1.1),
+                  duration: const Duration(seconds: 2),
+                ),
         ],
       ),
     )
@@ -169,9 +184,12 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
         .slideY(begin: -0.2, end: 0, curve: Curves.easeOut);
   }
 
-  Widget _buildTabBar() {
+  Widget _buildTabBar({required bool isMobile}) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
+      margin: EdgeInsets.symmetric(
+        horizontal: isMobile ? 12.0 : 20.0,
+        vertical: isMobile ? 4.0 : 8.0,
+      ),
       decoration: BoxDecoration(
         color: AppTheme.darkGrey.withOpacity(0.3),
         borderRadius: BorderRadius.circular(30),
@@ -184,8 +202,13 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
         ),
         labelColor: AppTheme.black,
         unselectedLabelColor: AppTheme.grey,
-        labelStyle: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.bold),
-        unselectedLabelStyle: AppTheme.bodyMedium,
+        labelStyle: AppTheme.bodyMedium.copyWith(
+          fontWeight: FontWeight.bold,
+          fontSize: isMobile ? 13 : 14,
+        ),
+        unselectedLabelStyle: AppTheme.bodyMedium.copyWith(
+          fontSize: isMobile ? 13 : 14,
+        ),
         tabs: const [
           Tab(text: 'Joined'),
           Tab(text: 'Discover'),
@@ -218,422 +241,52 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
     }
     return Column(
       children: [
-        // Header section (scrollable if needed)
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              // Communities row at the top
-              Container(
-                height: 80,
-                color: AppTheme.black,
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 16.0),
-                  itemCount: chatProvider.communities.length,
-                  itemBuilder: (context, index) {
-                    final community = chatProvider.communities[index];
-                    final isSelected = chatProvider.selectedCommunityIndex == index;
-                    return GestureDetector(
-                      onTap: () {
-                        chatProvider.setSelectedCommunity(index);
-                      },
-                      child: Stack(
-                        children: [
-                          Container(
-                            margin: const EdgeInsets.only(right: 16.0),
-                            width: 48,
-                            height: 48,
-                            decoration: BoxDecoration(
-                              color: isSelected ? AppTheme.primaryGold : AppTheme.darkGrey,
-                              borderRadius: BorderRadius.circular(16.0),
-                              border: Border.all(
-                                color: isSelected ? AppTheme.primaryGold : Colors.transparent,
-                                width: 2,
-                              ),
-                            ),
-                            child: Center(
-                              child: Text(
-                                community.name.substring(0, 2).toUpperCase(),
-                                style: AppTheme.bodyMedium.copyWith(
-                                  color: isSelected ? AppTheme.black : AppTheme.white,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
-                          // Unread badge
-                          if (currentUserId != null)
-                            Positioned(
-                              right: 0,
-                              top: 0,
-                              child: FutureBuilder<int>(
-                                future: chatProvider.getUnreadCount(
-                                  community.id,
-                                  community.channels.isNotEmpty ? community.channels[0].id : 'general',
-                                  currentUserId,
-                                ),
-                                builder: (context, snapshot) {
-                                  if (snapshot.hasData && snapshot.data! > 0) {
-                                    return Container(
-                                      padding: const EdgeInsets.all(6),
-                                      decoration: BoxDecoration(
-                                        color: Colors.red,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Text(
-                                        '${snapshot.data}',
-                                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                                      ),
-                                    );
-                                  }
-                                  return const SizedBox.shrink();
-                                },
-                              ),
-                            ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-              // Community header and channel info
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(16.0),
-                    decoration: BoxDecoration(
-                      color: AppTheme.black,
-                      border: Border(
-                        bottom: BorderSide(
-                          color: AppTheme.grey.withOpacity(0.3),
-                        ),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Text(
-                          selectedCommunity.name,
-                          style: AppTheme.headingSmall.copyWith(
-                            color: AppTheme.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8.0,
-                            vertical: 4.0,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppTheme.darkGrey,
-                            borderRadius: BorderRadius.circular(12.0),
-                          ),
-                          child: Text(
-                            '${selectedCommunity.members} members',
-                            style: AppTheme.bodySmall.copyWith(
-                              color: AppTheme.grey,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        IconButton(
-                          icon: const Icon(Icons.menu, color: AppTheme.grey),
-                          onPressed: () {
-                            _showChannelsBottomSheet(selectedCommunity);
-                          },
-                        ),
-                        if (selectedCommunity.createdBy == currentUserId)
-                          IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () async {
-                              await Provider.of<ChatProvider>(context, listen: false).deleteCommunity(selectedCommunity.id, imageUrl: selectedCommunity.imageUrl);
-                            },
-                          ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                    decoration: BoxDecoration(
-                      color: AppTheme.black,
-                      border: Border(
-                        bottom: BorderSide(
-                          color: AppTheme.grey.withOpacity(0.3),
-                        ),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.tag, color: AppTheme.grey, size: 18),
-                        const SizedBox(width: 8),
-                        Text(
-                          chatProvider.selectedChannel?.name ?? 'general',
-                          style: AppTheme.bodyMedium.copyWith(
-                            color: AppTheme.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Text(
-                          '${chatProvider.selectedChannel?.messages.length ?? 0} messages',
-                          style: AppTheme.bodySmall.copyWith(
-                            color: AppTheme.grey,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        // Messages (real-time)
         Expanded(
-          child: selectedChannel == null
-              ? Center(child: Text('No channel selected'))
-              : StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('communities')
-                      .doc(selectedCommunity.id)
-                      .collection('channels')
-                      .doc(selectedChannel.id)
-                      .collection('messages')
-                      .orderBy('timestamp', descending: false)
-                      .snapshots(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                      return Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.chat_bubble_outline,
-                              color: AppTheme.grey,
-                              size: 64,
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              'No messages yet',
-                              style: AppTheme.bodyLarge.copyWith(color: AppTheme.white),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Be the first to start a conversation!',
-                              style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
-                            ),
-                          ],
-                        ),
-                      );
-                    }
-                    final messages = snapshot.data!.docs;
-                    // Find first unread message
-                    int firstUnread = 0;
-                    if (currentUserId != null) {
-                      for (int i = 0; i < messages.length; i++) {
-                        final data = messages[i].data() as Map<String, dynamic>;
-                        final readBy = List<String>.from(data['readBy'] ?? []);
-                        if (!readBy.contains(currentUserId)) {
-                          firstUnread = i;
-                          break;
-                        } else {
-                          firstUnread = messages.length - 1;
-                        }
-                      }
-                    }
-                    // Scroll to first unread or latest
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (_scrollController.hasClients) {
-                        _scrollController.animateTo(
-                          (firstUnread) * 100.0, // Approximate height per message
-                          duration: const Duration(milliseconds: 300),
-                          curve: Curves.easeInOut,
-                        );
-                      }
-                    });
-                    return ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.all(16.0),
-                      itemCount: messages.length,
-                      itemBuilder: (context, index) {
-                        final data = messages[index].data() as Map<String, dynamic>;
-                        DateTime timestamp;
-                        if (data['timestamp'] is Timestamp) {
-                          timestamp = (data['timestamp'] as Timestamp).toDate();
-                        } else if (data['timestamp'] is DateTime) {
-                          timestamp = data['timestamp'] as DateTime;
-                        } else if (data['timestamp'] is String) {
-                          timestamp = DateTime.tryParse(data['timestamp']) ?? DateTime.now();
-                        } else {
-                          timestamp = DateTime.now();
-                        }
-                        return _buildMessageItem(
-                          Message(
-                            id: messages[index].id,
-                            senderId: data['senderId'] ?? '',
-                            senderName: data['senderName'] ?? '',
-                            content: data['content'] ?? '',
-                            timestamp: timestamp,
-                            reactions: Map<String, List<String>>.from(
-                              (data['reactions'] as Map<String, dynamic>? ?? {}).map(
-                                (key, value) => MapEntry(key, List<String>.from(value ?? [])),
-                              ),
-                            ),
-                            replyToId: data['replyToId'],
-                            replyToContent: data['replyToContent'],
-                            replyToSenderName: data['replyToSenderName'],
-                            imageUrl: data['imageUrl'],
-                          ),
-                          index,
-                        );
-                      },
-                    );
-                  },
-                ),
-        ),
-        
-        // Message input
-        Column(
-          children: [
-            // Reply UI
-            if (chatProvider.replyToMessage != null)
-              Container(
-                padding: const EdgeInsets.all(8.0),
-                decoration: BoxDecoration(
-                  color: AppTheme.darkGrey.withOpacity(0.5),
-                  border: Border(
-                    top: BorderSide(
-                      color: AppTheme.grey.withOpacity(0.3),
-                    ),
-                  ),
-                ),
-                child: Row(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final bool isCompact = constraints.maxWidth < 900;
+              final bool isNarrow = constraints.maxWidth < 600;
+              final isMobile = ResponsiveLayout.isMobile(context);
+              if (isCompact) {
+                return Column(
                   children: [
-                    const SizedBox(width: 8),
-                    Container(
-                      width: 4,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryGold,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
+                    _buildCommunityStrip(chatProvider, currentUserId, isNarrow, isMobile: isMobile),
+                    _buildChatHeader(
+                      selectedCommunity,
+                      chatProvider,
+                      currentUserId,
+                      isCompact: true,
+                      isNarrow: isNarrow,
+                      isMobile: isMobile,
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                'Reply to ${chatProvider.replyToMessage!.senderName}',
-                                style: AppTheme.bodySmall.copyWith(
-                                  color: AppTheme.primaryGold,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            chatProvider.replyToMessage!.content,
-                            style: AppTheme.bodySmall.copyWith(
-                              color: AppTheme.grey,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close, color: AppTheme.grey, size: 20),
-                      onPressed: () {
-                        chatProvider.clearReplyToMessage();
-                      },
-                    ),
+                    _buildMessagesSection(selectedCommunity, selectedChannel, currentUserId, isMobile: isMobile),
+                    _buildComposer(chatProvider, isCompact: true, isMobile: isMobile),
                   ],
-                ),
-              ),
-            
-            // Message input
-            Container(
-              padding: const EdgeInsets.all(16.0),
-              decoration: BoxDecoration(
-                color: AppTheme.darkGrey.withOpacity(0.3),
-                border: Border(
-                  top: BorderSide(
-                    color: AppTheme.grey.withOpacity(0.3),
-                  ),
-                ),
-              ),
-              child: Row(
+                );
+              }
+              return Row(
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.add_circle_outline, color: AppTheme.grey),
-                    onPressed: _showAttachmentOptions,
-                  ),
-                  const SizedBox(width: 8),
+                  _buildCommunityRail(chatProvider, currentUserId),
                   Expanded(
-                    child: TextField(
-                      controller: _messageController,
-                      style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
-                      maxLines: null,
-                      textCapitalization: TextCapitalization.sentences,
-                      decoration: InputDecoration(
-                        hintText: chatProvider.replyToMessage != null 
-                            ? 'Reply to ${chatProvider.replyToMessage!.senderName}...' 
-                            : 'Type a message...',
-                        hintStyle: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(30),
-                          borderSide: BorderSide.none,
+                    child: Column(
+                      children: [
+                        _buildChatHeader(
+                          selectedCommunity,
+                          chatProvider,
+                          currentUserId,
+                          isCompact: false,
+                          isNarrow: false,
+                          isMobile: false,
                         ),
-                        filled: true,
-                        fillColor: AppTheme.darkGrey,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16.0,
-                          vertical: 12.0,
-                        ),
-                      ),
+                        _buildMessagesSection(selectedCommunity, selectedChannel, currentUserId, isMobile: false),
+                        _buildComposer(chatProvider, isCompact: false, isMobile: false),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    icon: const Icon(Icons.image, color: AppTheme.primaryGold),
-                    onPressed: () async {
-                      final file = await Provider.of<ChatProvider>(context, listen: false).pickImageForMessage();
-                      if (file != null) {
-                        setState(() => _isSendingMessage = true);
-                        await Provider.of<ChatProvider>(context, listen: false).sendMessage('', imageFile: file);
-                        setState(() => _isSendingMessage = false);
-                      }
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  _isSendingMessage
-                    ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryGold),
-                        ),
-                      )
-                    : IconButton(
-                        icon: const Icon(Icons.send, color: AppTheme.primaryGold),
-                        onPressed: _sendMessage,
-                      ),
                 ],
-              ),
-            ),
-          ],
+              );
+            },
+          ),
         ),
       ],
     );
@@ -687,7 +340,604 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
     );
   }
 
-  Widget _buildMessageItem(Message message, int index) {
+  Widget _buildCommunityStrip(ChatProvider chatProvider, String? currentUserId, bool isNarrow, {required bool isMobile}) {
+    return Container(
+      height: isMobile ? 50 : (isNarrow ? 64 : 72),
+      decoration: BoxDecoration(
+        color: AppTheme.black,
+        border: Border(
+          bottom: BorderSide(
+            color: AppTheme.grey.withOpacity(0.2),
+          ),
+        ),
+      ),
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: EdgeInsets.symmetric(
+          horizontal: isMobile ? 8.0 : 12.0,
+          vertical: isMobile ? 6.0 : (isNarrow ? 10.0 : 12.0),
+        ),
+        itemCount: chatProvider.communities.length,
+        itemBuilder: (context, index) {
+          final community = chatProvider.communities[index];
+          final isSelected = chatProvider.selectedCommunityIndex == index;
+          return _buildCommunityTile(
+            chatProvider: chatProvider,
+            community: community,
+            isSelected: isSelected,
+            currentUserId: currentUserId,
+            margin: EdgeInsets.only(right: isMobile ? 8.0 : 12.0),
+            isMobile: isMobile,
+            onTap: () => chatProvider.setSelectedCommunity(index),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCommunityRail(ChatProvider chatProvider, String? currentUserId) {
+    return Container(
+      width: 96,
+      decoration: BoxDecoration(
+        color: AppTheme.black,
+        border: Border(
+          right: BorderSide(
+            color: AppTheme.grey.withOpacity(0.2),
+          ),
+        ),
+      ),
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(vertical: 16.0),
+        itemCount: chatProvider.communities.length,
+        itemBuilder: (context, index) {
+          final community = chatProvider.communities[index];
+          final isSelected = chatProvider.selectedCommunityIndex == index;
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6.0),
+            child: _buildCommunityTile(
+              chatProvider: chatProvider,
+              community: community,
+              isSelected: isSelected,
+              currentUserId: currentUserId,
+              margin: EdgeInsets.zero,
+              onTap: () => chatProvider.setSelectedCommunity(index),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCommunityTile({
+    required ChatProvider chatProvider,
+    required Community community,
+    required bool isSelected,
+    required String? currentUserId,
+    required EdgeInsets margin,
+    required VoidCallback onTap,
+    bool isMobile = false,
+  }) {
+    return Tooltip(
+      message: community.name,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              margin: margin,
+              width: isMobile ? 40 : 52,
+              height: isMobile ? 40 : 52,
+              decoration: BoxDecoration(
+                color: isSelected ? AppTheme.primaryGold : AppTheme.darkGrey,
+                borderRadius: BorderRadius.circular(isMobile ? 12.0 : 16.0),
+                border: Border.all(
+                  color: isSelected ? AppTheme.primaryGold : Colors.transparent,
+                  width: 2,
+                ),
+                boxShadow: isSelected
+                    ? [
+                        BoxShadow(
+                          color: AppTheme.primaryGold.withOpacity(0.3),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Center(
+                child: Text(
+                  community.name.substring(0, 2).toUpperCase(),
+                  style: AppTheme.bodyMedium.copyWith(
+                    color: isSelected ? AppTheme.black : AppTheme.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: isMobile ? 12 : 14,
+                  ),
+                ),
+              ),
+            ),
+            if (currentUserId != null)
+              Positioned(
+                right: -2,
+                top: -2,
+                child: FutureBuilder<int>(
+                  future: chatProvider.getUnreadCount(
+                    community.id,
+                    community.channels.isNotEmpty ? community.channels[0].id : 'general',
+                    currentUserId,
+                  ),
+                  builder: (context, snapshot) {
+                    if (snapshot.hasData && snapshot.data! > 0) {
+                      return Container(
+                        padding: const EdgeInsets.all(5),
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          '${snapshot.data}',
+                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                        ),
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChatHeader(
+    Community selectedCommunity,
+    ChatProvider chatProvider,
+    String? currentUserId, {
+    required bool isCompact,
+    required bool isNarrow,
+    required bool isMobile,
+  }) {
+    final channelName = chatProvider.selectedChannel?.name ?? 'general';
+    final messageCount = chatProvider.selectedChannel?.messages.length ?? 0;
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: isMobile ? 10.0 : 16.0,
+        vertical: isMobile ? 6.0 : (isCompact ? 10.0 : 16.0),
+      ),
+      decoration: BoxDecoration(
+        color: AppTheme.black,
+        border: Border(
+          bottom: BorderSide(
+            color: AppTheme.grey.withOpacity(0.2),
+          ),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  selectedCommunity.name,
+                  style: AppTheme.headingSmall.copyWith(
+                    color: AppTheme.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: isMobile ? 16 : 18,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (isNarrow || isMobile)
+                IconButton(
+                  icon: Icon(Icons.menu, color: AppTheme.grey, size: isMobile ? 20 : 24),
+                  padding: EdgeInsets.all(isMobile ? 4 : 8),
+                  constraints: BoxConstraints(),
+                  onPressed: () => _showChannelsBottomSheet(selectedCommunity),
+                )
+              else
+                TextButton.icon(
+                  onPressed: () => _showChannelsBottomSheet(selectedCommunity),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.primaryGold,
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    minimumSize: Size(0, 0),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  icon: const Icon(Icons.tag, size: 18),
+                  label: Text(
+                    channelName,
+                    style: AppTheme.bodySmall.copyWith(
+                      color: AppTheme.primaryGold,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              if (selectedCommunity.createdBy == currentUserId && !isMobile)
+                IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.red, size: 20),
+                  padding: EdgeInsets.all(isMobile ? 4 : 8),
+                  constraints: BoxConstraints(),
+                  onPressed: () async {
+                    await Provider.of<ChatProvider>(context, listen: false)
+                        .deleteCommunity(selectedCommunity.id, imageUrl: selectedCommunity.imageUrl);
+                  },
+                ),
+            ],
+          ),
+          if (!isMobile) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _buildHeaderPill(
+                  icon: Icons.people,
+                  label: '${selectedCommunity.members} members',
+                ),
+                _buildHeaderPill(
+                  icon: Icons.tag,
+                  label: '#$channelName',
+                ),
+                _buildHeaderPill(
+                  icon: Icons.chat_bubble_outline,
+                  label: '$messageCount messages',
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeaderPill({required IconData icon, required String label}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppTheme.darkGrey,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.grey.withOpacity(0.2)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: AppTheme.grey),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: AppTheme.bodySmall.copyWith(
+              color: AppTheme.grey,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMessagesSection(
+    Community selectedCommunity,
+    Channel? selectedChannel,
+    String? currentUserId, {
+    required bool isMobile,
+  }) {
+    return Expanded(
+      child: selectedChannel == null
+          ? Center(
+              child: Text(
+                'No channel selected',
+                style: AppTheme.bodyMedium.copyWith(color: AppTheme.grey),
+              ),
+            )
+          : StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('communities')
+                  .doc(selectedCommunity.id)
+                  .collection('channels')
+                  .doc(selectedChannel.id)
+                  .collection('messages')
+                  .orderBy('timestamp', descending: false)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.chat_bubble_outline,
+                          color: AppTheme.grey,
+                          size: isMobile ? 48 : 64,
+                        ),
+                        SizedBox(height: isMobile ? 12 : 16),
+                        Text(
+                          'No messages yet',
+                          style: AppTheme.bodyLarge.copyWith(
+                            color: AppTheme.white,
+                            fontSize: isMobile ? 16 : 18,
+                          ),
+                        ),
+                        SizedBox(height: isMobile ? 6 : 8),
+                        Text(
+                          'Be the first to start a conversation!',
+                          style: AppTheme.bodyMedium.copyWith(
+                            color: AppTheme.grey,
+                            fontSize: isMobile ? 13 : 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+                final messages = snapshot.data!.docs;
+                
+                // Auto-scroll to latest message when new messages arrive
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (_scrollController.hasClients && messages.isNotEmpty) {
+                    // Use a small delay to ensure ListView has rendered
+                    Future.delayed(const Duration(milliseconds: 100), () {
+                      if (_scrollController.hasClients) {
+                        // Scroll to the bottom (latest message)
+                        _scrollController.animateTo(
+                          _scrollController.position.maxScrollExtent,
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOut,
+                        );
+                      }
+                    });
+                  }
+                });
+                
+                return ListView.builder(
+                  controller: _scrollController,
+                  padding: EdgeInsets.fromLTRB(
+                    isMobile ? 10 : 16,
+                    isMobile ? 8 : 12,
+                    isMobile ? 10 : 16,
+                    isMobile ? 8 : 12,
+                  ),
+                  itemCount: messages.length,
+                  itemBuilder: (context, index) {
+                    final data = messages[index].data() as Map<String, dynamic>;
+                    DateTime timestamp;
+                    if (data['timestamp'] is Timestamp) {
+                      timestamp = (data['timestamp'] as Timestamp).toDate();
+                    } else if (data['timestamp'] is DateTime) {
+                      timestamp = data['timestamp'] as DateTime;
+                    } else if (data['timestamp'] is String) {
+                      timestamp = DateTime.tryParse(data['timestamp']) ?? DateTime.now();
+                    } else {
+                      timestamp = DateTime.now();
+                    }
+                    return _buildMessageItem(
+                      Message(
+                        id: messages[index].id,
+                        senderId: data['senderId'] ?? '',
+                        senderName: data['senderName'] ?? '',
+                        content: data['content'] ?? '',
+                        timestamp: timestamp,
+                        reactions: Map<String, List<String>>.from(
+                          (data['reactions'] as Map<String, dynamic>? ?? {}).map(
+                            (key, value) => MapEntry(key, List<String>.from(value ?? [])),
+                          ),
+                        ),
+                        replyToId: data['replyToId'],
+                        replyToContent: data['replyToContent'],
+                        replyToSenderName: data['replyToSenderName'],
+                        imageUrl: data['imageUrl'],
+                      ),
+                      index,
+                      isMobile: isMobile,
+                    );
+                  },
+                );
+              },
+            ),
+    );
+  }
+
+  Widget _buildComposer(ChatProvider chatProvider, {required bool isCompact, required bool isMobile}) {
+    final viewInsets = MediaQuery.of(context).viewInsets.bottom;
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      padding: EdgeInsets.only(bottom: viewInsets),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (chatProvider.replyToMessage != null)
+              Container(
+                padding: EdgeInsets.all(isMobile ? 6.0 : 8.0),
+                decoration: BoxDecoration(
+                  color: AppTheme.darkGrey.withOpacity(0.5),
+                  border: Border(
+                    top: BorderSide(
+                      color: AppTheme.grey.withOpacity(0.3),
+                    ),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const SizedBox(width: 8),
+                    Container(
+                      width: 4,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryGold,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Reply to ${chatProvider.replyToMessage!.senderName}',
+                            style: AppTheme.bodySmall.copyWith(
+                              color: AppTheme.primaryGold,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            chatProvider.replyToMessage!.content,
+                            style: AppTheme.bodySmall.copyWith(
+                              color: AppTheme.grey,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: AppTheme.grey, size: 20),
+                      onPressed: () {
+                        chatProvider.clearReplyToMessage();
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            Container(
+              padding: EdgeInsets.fromLTRB(
+                isMobile ? 8 : 12,
+                isMobile ? 6 : 10,
+                isMobile ? 8 : 12,
+                isMobile ? 8 : 12,
+              ),
+              decoration: BoxDecoration(
+                color: AppTheme.darkGrey.withOpacity(0.3),
+                border: Border(
+                  top: BorderSide(
+                    color: AppTheme.grey.withOpacity(0.3),
+                  ),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      Icons.add_circle_outline,
+                      color: AppTheme.grey,
+                      size: isMobile ? 20 : 24,
+                    ),
+                    padding: EdgeInsets.all(isMobile ? 4 : 8),
+                    constraints: BoxConstraints(),
+                    onPressed: _showAttachmentOptions,
+                  ),
+                  SizedBox(width: isMobile ? 4 : 6),
+                  Expanded(
+                    child: TextField(
+                      controller: _messageController,
+                      focusNode: _messageFocusNode,
+                      style: AppTheme.bodyMedium.copyWith(
+                        color: AppTheme.white,
+                        fontSize: isMobile ? 14 : 16,
+                      ),
+                      minLines: 1,
+                      maxLines: isMobile ? 3 : (isCompact ? 4 : 6),
+                      keyboardType: TextInputType.multiline,
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: InputDecoration(
+                        hintText: chatProvider.replyToMessage != null
+                            ? 'Reply to ${chatProvider.replyToMessage!.senderName}...'
+                            : 'Type a message...',
+                        hintStyle: AppTheme.bodyMedium.copyWith(
+                          color: AppTheme.grey,
+                          fontSize: isMobile ? 14 : 16,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(isMobile ? 18 : 22),
+                          borderSide: BorderSide.none,
+                        ),
+                        filled: true,
+                        fillColor: AppTheme.darkGrey,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: isMobile ? 12.0 : 14.0,
+                          vertical: isMobile ? 10.0 : 12.0,
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: isMobile ? 4 : 6),
+                  IconButton(
+                    icon: Icon(
+                      Icons.image,
+                      color: AppTheme.primaryGold,
+                      size: isMobile ? 20 : 24,
+                    ),
+                    padding: EdgeInsets.all(isMobile ? 4 : 8),
+                    constraints: BoxConstraints(),
+                    onPressed: () async {
+                      final file = await Provider.of<ChatProvider>(context, listen: false).pickImageForMessage();
+                      if (file != null) {
+                        setState(() => _isSendingMessage = true);
+                        await Provider.of<ChatProvider>(context, listen: false).sendMessage('', imageFile: file);
+                        setState(() => _isSendingMessage = false);
+                        
+                        // Scroll to bottom after sending image
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (_scrollController.hasClients) {
+                            Future.delayed(const Duration(milliseconds: 100), () {
+                              if (_scrollController.hasClients) {
+                                _scrollController.animateTo(
+                                  _scrollController.position.maxScrollExtent,
+                                  duration: const Duration(milliseconds: 300),
+                                  curve: Curves.easeOut,
+                                );
+                              }
+                            });
+                          }
+                        });
+                      }
+                    },
+                  ),
+                  SizedBox(width: isMobile ? 2 : 4),
+                  _isSendingMessage
+                      ? SizedBox(
+                          width: isMobile ? 20 : 24,
+                          height: isMobile ? 20 : 24,
+                          child: const CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryGold),
+                          ),
+                        )
+                      : ValueListenableBuilder<TextEditingValue>(
+                          valueListenable: _messageController,
+                          builder: (context, value, _) {
+                            final hasText = value.text.trim().isNotEmpty;
+                            return IconButton(
+                              icon: Icon(
+                                Icons.send,
+                                size: isMobile ? 20 : 24,
+                                color: hasText ? AppTheme.primaryGold : AppTheme.grey,
+                              ),
+                              padding: EdgeInsets.all(isMobile ? 4 : 8),
+                              constraints: BoxConstraints(),
+                              onPressed: hasText ? _sendMessage : null,
+                            );
+                          },
+                        ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMessageItem(Message message, int index, {bool isMobile = false}) {
     final authProvider = Provider.of<local_auth.AuthProvider>(context);
     final chatProvider = Provider.of<ChatProvider>(context);
     final currentUser = authProvider.user;
@@ -698,18 +948,14 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          margin: const EdgeInsets.only(bottom: 16.0),
+          margin: EdgeInsets.only(bottom: isMobile ? 10.0 : 16.0),
           child: MessageBubble(
             message: message,
             isCurrentUser: isCurrentUser,
             currentUserId: currentUserId,
             onReply: (msg) {
               chatProvider.setReplyToMessage(msg);
-              // Focus the text field
-              FocusScope.of(context).requestFocus(FocusNode());
-              Future.delayed(const Duration(milliseconds: 100), () {
-                FocusScope.of(context).requestFocus(FocusNode());
-              });
+              FocusScope.of(context).requestFocus(_messageFocusNode);
             },
             onShowOptions: (msg) {
               _showMessageOptions(msg);
@@ -738,7 +984,7 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
         if (index < chatProvider.selectedChannel!.messages.length - 1)
           Divider(
             color: AppTheme.grey.withOpacity(0.1),
-            height: 1,
+            height: isMobile ? 0.5 : 1,
           ),
       ],
     );
@@ -1264,17 +1510,28 @@ class _CommunityScreenState extends State<CommunityScreen> with SingleTickerProv
   // Send a message
   Future<void> _sendMessage() async {
     if (_messageController.text.isEmpty) return;
-    
+
     setState(() {
       _isSendingMessage = true;
     });
-    
+
     try {
       final content = _messageController.text.trim();
       final chatProvider = Provider.of<ChatProvider>(context, listen: false);
       
       await chatProvider.sendMessage(content);
       _messageController.clear();
+      
+      // Scroll to bottom after sending message
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

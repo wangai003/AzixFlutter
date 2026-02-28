@@ -46,6 +46,7 @@ class _StorePaymentDialogState extends State<StorePaymentDialog> {
   String? _successMessage;
   bool _isValidInput = false;
   String _selectedAssetCode = 'AKOFA'; // Default to AKOFA (Polygon ERC-20)
+  String _selectedNetwork = 'polygon'; // 'polygon' or 'ethereum'
 
   @override
   void initState() {
@@ -101,8 +102,8 @@ class _StorePaymentDialogState extends State<StorePaymentDialog> {
     });
 
     try {
-      // Check if input is a valid Polygon address
-      if (_isValidPolygonAddress(input)) {
+      // Check if input is a valid EVM address (works for both Polygon and Ethereum)
+      if (_isValidEVMAddress(input)) {
         setState(() {
           _resolvedAddress = input;
           _resolvedName = null;
@@ -110,10 +111,10 @@ class _StorePaymentDialogState extends State<StorePaymentDialog> {
           _isValidInput = true;
         });
       } else {
-        // Try to resolve as AKOFA tag (Polygon blockchain)
+        // Try to resolve as AKOFA tag (supports both blockchains)
         final result = await AkofaTagService.resolveTag(
           input,
-          blockchain: 'polygon',
+          blockchain: _selectedNetwork,
         );
 
         if (result['success']) {
@@ -144,8 +145,8 @@ class _StorePaymentDialogState extends State<StorePaymentDialog> {
     }
   }
 
-  bool _isValidPolygonAddress(String address) {
-    // Polygon addresses start with '0x' and are 42 characters long
+  bool _isValidEVMAddress(String address) {
+    // EVM addresses (Polygon and Ethereum) start with '0x' and are 42 characters long
     return address.startsWith('0x') && address.length == 42;
   }
 
@@ -180,9 +181,9 @@ class _StorePaymentDialogState extends State<StorePaymentDialog> {
       return;
     }
 
-    // Show password dialog for secure transaction
-    final password = await _showPasswordDialog();
-    if (password == null) return; // User cancelled
+    // Show seed phrase dialog for secure transaction
+    final seedPhrase = await _showSeedPhraseDialog();
+    if (seedPhrase == null) return; // User cancelled
 
     setState(() {
       _isProcessing = true;
@@ -212,7 +213,8 @@ class _StorePaymentDialogState extends State<StorePaymentDialog> {
         recipientAddress: _resolvedAddress!,
         amount: amount,
         assetCode: _selectedAssetCode,
-        password: password, // Required for Polygon wallet authentication
+        seedPhrase: seedPhrase, // Required for wallet authentication
+        network: _selectedNetwork, // Pass selected network
         storeId: storeId,
         storeName: storeName,
         memo: memo,
@@ -245,9 +247,9 @@ class _StorePaymentDialogState extends State<StorePaymentDialog> {
     }
   }
 
-  Future<String?> _showPasswordDialog() async {
-    String password = '';
-    bool obscurePassword = true;
+  Future<String?> _showSeedPhraseDialog() async {
+    String seedPhrase = '';
+    bool obscureSeedPhrase = true;
 
     return showDialog<String>(
       context: context,
@@ -256,23 +258,24 @@ class _StorePaymentDialogState extends State<StorePaymentDialog> {
         builder: (context, setState) => AlertDialog(
           backgroundColor: AppTheme.darkGrey,
           title: Text(
-            'Enter Password',
+            'Enter Seed Phrase',
             style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'Confirm your password to process payment',
+                'Enter your seed phrase to authorize this payment',
                 style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
               ),
               const SizedBox(height: 16),
               TextField(
-                obscureText: obscurePassword,
-                onChanged: (value) => password = value,
+                obscureText: obscureSeedPhrase,
+                maxLines: obscureSeedPhrase ? 1 : 4,
+                onChanged: (value) => seedPhrase = value,
                 style: AppTheme.bodyLarge.copyWith(color: AppTheme.white),
                 decoration: InputDecoration(
-                  hintText: 'Enter your password',
+                  hintText: 'Enter your 12-word recovery phrase',
                   hintStyle: AppTheme.bodyMedium.copyWith(
                     color: AppTheme.grey.withOpacity(0.5),
                   ),
@@ -286,11 +289,11 @@ class _StorePaymentDialogState extends State<StorePaymentDialog> {
                   ),
                   suffixIcon: IconButton(
                     icon: Icon(
-                      obscurePassword ? Icons.visibility_off : Icons.visibility,
+                      obscureSeedPhrase ? Icons.visibility_off : Icons.visibility,
                       color: AppTheme.primaryGold,
                     ),
                     onPressed: () =>
-                        setState(() => obscurePassword = !obscurePassword),
+                        setState(() => obscureSeedPhrase = !obscureSeedPhrase),
                   ),
                 ),
               ),
@@ -305,7 +308,9 @@ class _StorePaymentDialogState extends State<StorePaymentDialog> {
               ),
             ),
             ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(password),
+              onPressed: seedPhrase.trim().isEmpty
+                  ? null
+                  : () => Navigator.of(context).pop(seedPhrase.trim()),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primaryGold,
                 foregroundColor: AppTheme.black,
@@ -397,9 +402,120 @@ class _StorePaymentDialogState extends State<StorePaymentDialog> {
 
             const SizedBox(height: 24),
 
+            // Network Selector
+            Text(
+              'Network *',
+              style: AppTheme.labelMedium.copyWith(color: AppTheme.grey),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: AppTheme.darkGrey.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppTheme.primaryGold.withOpacity(0.3),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _selectedNetwork = 'polygon';
+                          // Reset asset to first available for Polygon
+                          if (!['AKOFA', 'USDC', 'USDT'].contains(_selectedAssetCode)) {
+                            _selectedAssetCode = 'AKOFA';
+                          }
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                        decoration: BoxDecoration(
+                          color: _selectedNetwork == 'polygon' 
+                              ? Colors.purple.withOpacity(0.2) 
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                          border: _selectedNetwork == 'polygon'
+                              ? Border.all(color: Colors.purple, width: 2)
+                              : null,
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.hexagon,
+                              color: _selectedNetwork == 'polygon' ? Colors.purple : AppTheme.grey,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Polygon',
+                              style: AppTheme.bodyMedium.copyWith(
+                                color: _selectedNetwork == 'polygon' ? Colors.purple : AppTheme.grey,
+                                fontWeight: _selectedNetwork == 'polygon' ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _selectedNetwork = 'ethereum';
+                          // Reset asset to first available for Ethereum
+                          if (!['USDC', 'USDT', 'DAI', 'WETH'].contains(_selectedAssetCode)) {
+                            _selectedAssetCode = 'USDC';
+                          }
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                        decoration: BoxDecoration(
+                          color: _selectedNetwork == 'ethereum' 
+                              ? Colors.blue.withOpacity(0.2) 
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                          border: _selectedNetwork == 'ethereum'
+                              ? Border.all(color: Colors.blue, width: 2)
+                              : null,
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.account_balance,
+                              color: _selectedNetwork == 'ethereum' ? Colors.blue : AppTheme.grey,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Ethereum',
+                              style: AppTheme.bodyMedium.copyWith(
+                                color: _selectedNetwork == 'ethereum' ? Colors.blue : AppTheme.grey,
+                                fontWeight: _selectedNetwork == 'ethereum' ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 24),
+
             // Recipient Input (Store Address or Tag)
             Text(
-              'Store Address (AKOFA Tag or Polygon Address) *',
+              'Store Address (AKOFA Tag or ${_selectedNetwork == 'ethereum' ? 'Ethereum' : 'Polygon'} Address) *',
               style: AppTheme.labelMedium.copyWith(color: AppTheme.grey),
             ),
             const SizedBox(height: 8),
@@ -500,7 +616,7 @@ class _StorePaymentDialogState extends State<StorePaymentDialog> {
 
             const SizedBox(height: 24),
 
-            // Asset Selection (Only AKOFA, USDC, USDT allowed)
+            // Asset Selection (varies by network)
             Text(
               'Asset *',
               style: AppTheme.labelMedium.copyWith(color: AppTheme.grey),
@@ -530,7 +646,9 @@ class _StorePaymentDialogState extends State<StorePaymentDialog> {
               ),
               dropdownColor: AppTheme.darkGrey,
               style: AppTheme.bodyLarge.copyWith(color: AppTheme.white),
-              items: ['AKOFA', 'USDC', 'USDT'].map((asset) {
+              items: (_selectedNetwork == 'polygon' 
+                  ? ['AKOFA', 'USDC', 'USDT']
+                  : ['USDC', 'USDT', 'DAI', 'WETH']).map((asset) {
                 return DropdownMenuItem(
                   value: asset,
                   child: Text(asset),

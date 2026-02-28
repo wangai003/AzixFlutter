@@ -1,5 +1,7 @@
 const THIRDWEB_API_BASE = 'https://bridge.thirdweb.com/v1';
 const NATIVE_TOKEN_ADDRESS = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+const POLYGON_USDC_TOKEN_ADDRESS = '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359';
+const ETHEREUM_USDC_TOKEN_ADDRESS = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
 
 function normalizeStatus(status) {
   const normalized = (status || '').toString().toUpperCase();
@@ -19,6 +21,12 @@ function pickFirstString(candidates) {
     }
   }
   return null;
+}
+
+function getDefaultTokenAddress(chainId) {
+  if (chainId === 137) return POLYGON_USDC_TOKEN_ADDRESS;
+  if (chainId === 1) return ETHEREUM_USDC_TOKEN_ADDRESS;
+  return NATIVE_TOKEN_ADDRESS;
 }
 
 async function prepareOnramp(req, res) {
@@ -46,7 +54,9 @@ async function prepareOnramp(req, res) {
     // Thirdweb onramp providers generally support mainnet chains for fiat onramp.
     // If the app is in Amoy testnet mode, transparently map to Polygon mainnet.
     const effectiveChainId = requestedChainId === 80002 ? 137 : requestedChainId;
-    const effectiveTokenAddress = (tokenAddress || NATIVE_TOKEN_ADDRESS).toLowerCase();
+    const effectiveTokenAddress = (
+      tokenAddress || getDefaultTokenAddress(effectiveChainId)
+    ).toLowerCase();
 
     const response = await fetch(`${THIRDWEB_API_BASE}/onramp/prepare`, {
       method: 'POST',
@@ -55,7 +65,7 @@ async function prepareOnramp(req, res) {
         'x-secret-key': process.env.THIRDWEB_SECRET_KEY,
       },
       body: JSON.stringify({
-        onramp: onramp || 'transak',
+        onramp: onramp || 'coinbase',
         chainId: effectiveChainId,
         tokenAddress: effectiveTokenAddress,
         amount: amount.toString(),

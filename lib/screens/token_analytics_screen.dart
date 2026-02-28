@@ -438,6 +438,234 @@ class _TokenAnalyticsBody extends StatelessWidget {
     );
   }
 
+  String _formatAddress(String value) {
+    if (value.length <= 20) return value;
+    return "${value.substring(0, 10)}...${value.substring(value.length - 8)}";
+  }
+
+  double _safePercent(double value, double total) {
+    if (total <= 0) return 0;
+    return (value / total).clamp(0.0, 1.0);
+  }
+
+  Widget _legendItem(Color color, String label, String value) {
+    return Row(
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3)),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(color: AppTheme.grey, fontSize: 12),
+          ),
+        ),
+        Text(
+          value,
+          style: const TextStyle(
+            color: AppTheme.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSupplyVisual(TokenAnalyticsController ctrl) {
+    final total = ctrl.totalSupplyReadable;
+    final circulating = ctrl.circulatingSupplyReadable.clamp(0, total).toDouble();
+    final burned = max(total - circulating, 0).toDouble();
+    final slices = [
+      _DonutSlice(value: circulating, color: AppTheme.primaryGold),
+      _DonutSlice(value: burned, color: AppTheme.red.withOpacity(0.8)),
+    ];
+
+    return _card(
+      "Supply Composition",
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 140,
+            height: 140,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                CustomPaint(
+                  size: const Size(140, 140),
+                  painter: _DonutChartPainter(
+                    backgroundColor: AppTheme.black,
+                    slices: slices,
+                  ),
+                ),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      "Supply",
+                      style: TextStyle(color: AppTheme.grey, fontSize: 11),
+                    ),
+                    Text(
+                      "${(_safePercent(circulating, total) * 100).toStringAsFixed(1)}%",
+                      style: const TextStyle(
+                        color: AppTheme.primaryGold,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const Text(
+                      "circulating",
+                      style: TextStyle(color: AppTheme.grey, fontSize: 10),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              children: [
+                _legendItem(
+                  AppTheme.primaryGold,
+                  "Circulating",
+                  "${circulating.toStringAsFixed(0)} ${ctrl.symbol}",
+                ),
+                const SizedBox(height: 10),
+                _legendItem(
+                  AppTheme.red.withOpacity(0.8),
+                  "Burned / Locked",
+                  "${burned.toStringAsFixed(0)} ${ctrl.symbol}",
+                ),
+                const SizedBox(height: 10),
+                _legendItem(
+                  AppTheme.grey,
+                  "Total",
+                  "${total.toStringAsFixed(0)} ${ctrl.symbol}",
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopHolderBars(TokenAnalyticsController ctrl) {
+    final holders = ctrl.topHolders.take(5).toList();
+    final total = ctrl.totalSupplyReadable;
+
+    return _card(
+      "Top Holder Distribution",
+      holders.isEmpty
+          ? const Text("No holder data", style: TextStyle(color: AppTheme.grey))
+          : Column(
+              children: holders.map((h) {
+                final balance = (h['balance'] as double?) ?? 0;
+                final widthFactor = _safePercent(balance, total);
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _formatAddress("${h['address']}"),
+                              style: const TextStyle(
+                                color: AppTheme.white,
+                                fontSize: 12,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ),
+                          Text(
+                            "${(widthFactor * 100).toStringAsFixed(2)}%",
+                            style: const TextStyle(
+                              color: AppTheme.primaryGold,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: LinearProgressIndicator(
+                          minHeight: 10,
+                          value: widthFactor,
+                          backgroundColor: AppTheme.black,
+                          valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.primaryGold),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+    );
+  }
+
+  Widget _buildTransferVolumeBars(TokenAnalyticsController ctrl) {
+    final bars = ctrl.recentTransfers.take(8).toList().reversed.toList();
+    final values = bars.map((e) => (e['value'] as double?) ?? 0).toList();
+    final maxValue = values.isEmpty ? 1.0 : max(1.0, values.reduce(max));
+
+    return _card(
+      "Recent Transfer Volumes",
+      bars.isEmpty
+          ? const Text("No transfer data", style: TextStyle(color: AppTheme.grey))
+          : SizedBox(
+              height: 160,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: List.generate(bars.length, (index) {
+                  final v = values[index];
+                  final normalized = (v / maxValue).clamp(0.0, 1.0);
+                  return Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Text(
+                            v.toStringAsFixed(0),
+                            style: const TextStyle(color: AppTheme.grey, fontSize: 10),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 6),
+                          Container(
+                            height: 100 * normalized + 8,
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [AppTheme.primaryGold, AppTheme.orange],
+                                begin: Alignment.bottomCenter,
+                                end: Alignment.topCenter,
+                              ),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            "${index + 1}",
+                            style: const TextStyle(color: AppTheme.grey, fontSize: 10),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ctrl = Provider.of<TokenAnalyticsController>(context);
@@ -538,6 +766,15 @@ class _TokenAnalyticsBody extends StatelessWidget {
           ),
           const SizedBox(height: 24),
 
+          _buildSupplyVisual(ctrl),
+          const SizedBox(height: 16),
+
+          _buildTopHolderBars(ctrl),
+          const SizedBox(height: 16),
+
+          _buildTransferVolumeBars(ctrl),
+          const SizedBox(height: 24),
+
           // Top Holders
           _card(
             "Top Holders",
@@ -572,9 +809,7 @@ class _TokenAnalyticsBody extends StatelessWidget {
                             const SizedBox(width: 12),
                             Expanded(
                               child: Text(
-                                "${h['address']}".substring(0, 10) +
-                                    "..." +
-                                    "${h['address']}".substring("${h['address']}".length - 8),
+                                _formatAddress("${h['address']}"),
                                 style: const TextStyle(
                                   color: AppTheme.white,
                                   fontSize: 14,
@@ -762,6 +997,66 @@ class _TokenAnalyticsBody extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _DonutSlice {
+  final double value;
+  final Color color;
+  const _DonutSlice({required this.value, required this.color});
+}
+
+class _DonutChartPainter extends CustomPainter {
+  final Color backgroundColor;
+  final List<_DonutSlice> slices;
+
+  const _DonutChartPainter({
+    required this.backgroundColor,
+    required this.slices,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final strokeWidth = size.width * 0.18;
+    final rect = Rect.fromCircle(center: center, radius: (size.width / 2) - strokeWidth / 2);
+    final total = slices.fold<double>(0, (sum, slice) => sum + max(0, slice.value));
+
+    final basePaint = Paint()
+      ..color = backgroundColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.butt;
+    canvas.drawArc(rect, 0, pi * 2, false, basePaint);
+
+    if (total <= 0) return;
+
+    var start = -pi / 2;
+    for (final slice in slices) {
+      final value = max(0, slice.value);
+      if (value <= 0) continue;
+      final sweep = (value / total) * pi * 2;
+      final paint = Paint()
+        ..color = slice.color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth
+        ..strokeCap = StrokeCap.round;
+      canvas.drawArc(rect, start, sweep, false, paint);
+      start += sweep;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DonutChartPainter oldDelegate) {
+    if (backgroundColor != oldDelegate.backgroundColor) return true;
+    if (slices.length != oldDelegate.slices.length) return true;
+    for (var i = 0; i < slices.length; i++) {
+      if (slices[i].value != oldDelegate.slices[i].value ||
+          slices[i].color != oldDelegate.slices[i].color) {
+        return true;
+      }
+    }
+    return false;
   }
 }
 

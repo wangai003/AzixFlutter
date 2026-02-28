@@ -9,6 +9,7 @@ import '../services/payment_security_service.dart';
 import '../services/moonpay_service.dart';
 import '../services/moonpay_callback_service.dart';
 import '../services/polygon_wallet_service.dart';
+import '../services/ethereum_wallet_service.dart';
 import '../services/blockchain_transaction_service.dart';
 import '../models/transaction.dart' as app_transaction;
 import '../models/asset_config.dart';
@@ -56,14 +57,18 @@ class EnhancedWalletProvider extends ChangeNotifier {
   Map<String, Map<String, dynamic>> _polygonTokens = {};
   bool _isProcessingPolygonTransaction = false;
   
+  // Ethereum token balances
+  Map<String, Map<String, dynamic>> _ethereumTokens = {};
+  
+  // Network selection state
+  String _selectedNetwork = 'polygon'; // 'polygon' or 'ethereum'
+  bool _isTestnet = true; // Default to testnet
+  
   // Gasless transaction support
   // Using Biconomy MEE "Pay Gas With ERC-20" feature
   // Users can pay gas with USDC/USDT instead of MATIC
   bool _gaslessEnabled = true;
   bool _useGaslessWhenPossible = true;
-  
-  // Network configuration
-  bool _isTestnet = true; // Default to Amoy testnet
 
   // Getters
   bool get isLoading => _isLoading;
@@ -147,7 +152,17 @@ class EnhancedWalletProvider extends ChangeNotifier {
   bool get hasPolygonWallet => _hasWallet; // Unified wallet
   String? get polygonAddress => _address;
   Map<String, dynamic> get polygonBalances => _balances;
+  
+  // Network selection getters
+  String get selectedNetwork => _selectedNetwork;
+  bool get isTestnet => _isTestnet;
   Map<String, Map<String, dynamic>> get polygonTokens => _polygonTokens;
+  Map<String, Map<String, dynamic>> get ethereumTokens => _ethereumTokens;
+  
+  /// Get balances for the currently selected network
+  Map<String, Map<String, dynamic>> get currentNetworkTokens {
+    return _selectedNetwork == 'ethereum' ? _ethereumTokens : _polygonTokens;
+  }
   bool get isProcessingPolygonTransaction => _isProcessingPolygonTransaction;
   String get polygonBalance => _balances['matic']?.toString() ?? '0';
   List<Map<String, dynamic>> get polygonTransactions => _transactions;
@@ -161,7 +176,6 @@ class EnhancedWalletProvider extends ChangeNotifier {
       _transactions.take(10).toList();
   
   // Network getters
-  bool get isTestnet => _isTestnet;
   Map<String, dynamic> get networkInfo => PolygonWalletService.getNetworkInfo();
   
   // Gasless transaction getters
@@ -346,7 +360,17 @@ class EnhancedWalletProvider extends ChangeNotifier {
     }
   }
 
-  /// Load wallet balances (Polygon)
+  /// Set selected network (polygon or ethereum)
+  void setSelectedNetwork(String network) {
+    if (network == 'polygon' || network == 'ethereum') {
+      _selectedNetwork = network;
+      notifyListeners();
+      // Reload balances for the selected network
+      loadBalances();
+    }
+  }
+
+  /// Load wallet balances for both Polygon and Ethereum
   /// Uses the derived wallet address to ensure correct balances are displayed
   Future<void> loadBalances() async {
     if (_address == null) {
@@ -356,12 +380,14 @@ class EnhancedWalletProvider extends ChangeNotifier {
 
     try {
       debugPrint('💰 [BALANCES] Loading balances for derived address: $_address');
-      final balanceResult = await PolygonWalletService.getAllPolygonTokenBalances(_address!);
-      if (balanceResult['success'] == true) {
-        final tokens = balanceResult['tokens'] as Map<String, dynamic>;
+      
+      // Load Polygon balances
+      final polygonBalanceResult = await PolygonWalletService.getAllPolygonTokenBalances(_address!);
+      if (polygonBalanceResult['success'] == true) {
+        final tokens = polygonBalanceResult['tokens'] as Map<String, dynamic>;
         _polygonTokens = Map<String, Map<String, dynamic>>.from(tokens);
         
-        debugPrint('✅ [BALANCES] Loaded ${_polygonTokens.length} token balances');
+        debugPrint('✅ [BALANCES] Loaded ${_polygonTokens.length} Polygon token balances');
         
         // Update balances map for backward compatibility
         if (_polygonTokens.containsKey('MATIC')) {
@@ -373,15 +399,27 @@ class EnhancedWalletProvider extends ChangeNotifier {
           debugPrint('   AKOFA: ${_balances['akofa']}');
         }
       } else {
-        debugPrint('⚠️ [BALANCES] Failed to load balances: ${balanceResult['error']}');
+        debugPrint('⚠️ [BALANCES] Failed to load Polygon balances: ${polygonBalanceResult['error']}');
       }
+      
+      // Load Ethereum balances
+      final ethereumBalanceResult = await EthereumWalletService.getAllEthereumTokenBalances(_address!);
+      if (ethereumBalanceResult['success'] == true) {
+        final tokens = ethereumBalanceResult['tokens'] as Map<String, dynamic>;
+        _ethereumTokens = Map<String, Map<String, dynamic>>.from(tokens);
+        
+        debugPrint('✅ [BALANCES] Loaded ${_ethereumTokens.length} Ethereum token balances');
+      } else {
+        debugPrint('⚠️ [BALANCES] Failed to load Ethereum balances: ${ethereumBalanceResult['error']}');
+      }
+      
       notifyListeners();
     } catch (e) {
-      debugPrint('❌ [BALANCES] Error loading Polygon balances: $e');
+      debugPrint('❌ [BALANCES] Error loading balances: $e');
     }
   }
 
-  /// Load transactions (Polygon)
+  /// Load transactions from both Polygon and Ethereum networks
   /// Uses the derived wallet address to ensure correct transactions are displayed
   Future<void> loadTransactions({bool forceRefresh = false}) async {
     if (_isLoading && !forceRefresh) {
@@ -399,24 +437,69 @@ class EnhancedWalletProvider extends ChangeNotifier {
       notifyListeners();
       
       debugPrint('═══════════════════════════════════════════════════════════════');
-      debugPrint('🔄 [TRANSACTIONS] Loading transactions from derived address');
+      debugPrint('🔄 [TRANSACTIONS] Loading transactions from both networks');
       debugPrint('📍 [TRANSACTIONS] Address: $_address');
       debugPrint('═══════════════════════════════════════════════════════════════');
       
-      _transactions = await PolygonWalletService.getPolygonTransactionHistory(
-        _address!,
-        limit: 50,
-      );
+      // Load transactions from both networks in parallel with error handling
+      // Use Future.wait with error handling so one network failure doesn't block the other
+      List<Map<String, dynamic>> polygonTxs = [];
+      List<Map<String, dynamic>> ethereumTxs = [];
+      
+      // Load Polygon transactions
+      try {
+        polygonTxs = await PolygonWalletService.getPolygonTransactionHistory(
+          _address!,
+          limit: 50,
+        );
+        debugPrint('✅ [TRANSACTIONS] Polygon: ${polygonTxs.length} transactions');
+      } catch (e) {
+        debugPrint('⚠️ [TRANSACTIONS] Failed to load Polygon transactions: $e');
+        debugPrint('   Continuing with Ethereum transactions only...');
+      }
+      
+      // Load Ethereum transactions
+      try {
+        ethereumTxs = await EthereumWalletService.getEthereumTransactionHistory(
+          _address!,
+          limit: 50,
+        );
+        debugPrint('✅ [TRANSACTIONS] Ethereum: ${ethereumTxs.length} transactions');
+      } catch (e) {
+        debugPrint('⚠️ [TRANSACTIONS] Failed to load Ethereum transactions: $e');
+        debugPrint('   Continuing with Polygon transactions only...');
+      }
+      
+      // Merge transactions from both networks
+      final allTransactions = <Map<String, dynamic>>[];
+      allTransactions.addAll(polygonTxs);
+      allTransactions.addAll(ethereumTxs);
+      
+      // Sort by timestamp (newest first)
+      allTransactions.sort((a, b) {
+        final aTime = a['timestamp'] as DateTime? ?? DateTime(1970);
+        final bTime = b['timestamp'] as DateTime? ?? DateTime(1970);
+        return bTime.compareTo(aTime);
+      });
+      
+      _transactions = allTransactions;
       
       debugPrint('═══════════════════════════════════════════════════════════════');
-      debugPrint('✅ [TRANSACTIONS] Successfully loaded ${_transactions.length} transactions');
+      debugPrint('✅ [TRANSACTIONS] Successfully loaded ${_transactions.length} total transactions');
+      debugPrint('   Polygon: ${polygonTxs.length}, Ethereum: ${ethereumTxs.length}');
+      if (polygonTxs.isEmpty && ethereumTxs.isEmpty) {
+        debugPrint('   ⚠️ No transactions found. This may be due to:');
+        debugPrint('      - API key configuration issues');
+        debugPrint('      - Network connectivity problems');
+        debugPrint('      - No transactions on this address');
+      }
       debugPrint('═══════════════════════════════════════════════════════════════');
       
       _isLoading = false;
       notifyListeners();
     } catch (e, stackTrace) {
       debugPrint('═══════════════════════════════════════════════════════════════');
-      debugPrint('❌ [TRANSACTIONS] Error loading Polygon transactions: $e');
+      debugPrint('❌ [TRANSACTIONS] Error loading transactions: $e');
       debugPrint('Stack trace: $stackTrace');
       debugPrint('═══════════════════════════════════════════════════════════════');
       _transactions = [];
@@ -482,25 +565,26 @@ class EnhancedWalletProvider extends ChangeNotifier {
   }
 
   /// Send XLM (alias for sendMatic - backward compatibility)
+  /// Note: This method now requires seedPhrase instead of password
   Future<Map<String, dynamic>> sendXLM({
     required String recipientAddress,
     required double amount,
     String? memo,
-    String? password,
+    String? seedPhrase,
   }) async {
-    // If password is provided, use sendMatic
-    if (password != null) {
+    // If seedPhrase is provided, use sendMatic
+    if (seedPhrase != null) {
       return await sendMatic(
         recipientAddress: recipientAddress,
         amount: amount,
-        password: password,
+        seedPhrase: seedPhrase,
       );
     }
     
-    // Otherwise return error - password required for Polygon
+    // Otherwise return error - seed phrase required for Polygon
     return {
       'success': false,
-      'error': 'Password required for Polygon transactions',
+      'error': 'Seed phrase required for Polygon transactions',
     };
   }
 
@@ -696,20 +780,22 @@ class EnhancedWalletProvider extends ChangeNotifier {
     return false;
   }
   
-  /// Send any asset (generic method - Polygon with gasless support)
+  /// Send any asset (generic method - supports both Polygon and Ethereum)
   Future<Map<String, dynamic>> sendAsset({
     required String recipientAddress,
     required AssetConfig asset,
     required double amount,
     String? memo,
-    required String password, // Required password for Polygon transactions
+    required String seedPhrase, // Required seed phrase for transactions
     bool? forceGasless, // Optional: force gasless transaction
+    String? network, // Optional: 'polygon' or 'ethereum', defaults to selectedNetwork
   }) async {
     _setLoading(true);
     _setError(null);
 
     try {
-      debugPrint('🔄 Sending ${asset.symbol} on Polygon - Address: $_address');
+      final targetNetwork = network ?? _selectedNetwork;
+      debugPrint('🔄 Sending ${asset.symbol} on $targetNetwork - Address: $_address');
       
       if (_address == null) {
         throw Exception('No wallet found');
@@ -720,39 +806,73 @@ class EnhancedWalletProvider extends ChangeNotifier {
         throw Exception('User not authenticated');
       }
 
-      // For MATIC (native token) - always use regular transaction
-      if (asset.code == 'MATIC' || asset.isNative) {
-        return await sendMatic(
-          recipientAddress: recipientAddress,
-          amount: amount,
-          password: password,
-        );
-      }
-
-      // For ERC-20 tokens - check if gasless should be used
-      if (asset.contractAddress != null && asset.contractAddress!.isNotEmpty) {
-        debugPrint('🔄 Sending ERC-20 token: ${asset.symbol}');
-        debugPrint('📍 Contract: ${asset.contractAddress}');
+      // Route to appropriate network service
+      if (targetNetwork == 'ethereum') {
+        // Ethereum network
+        if (asset.code == 'ETH' || asset.isNative) {
+          return await sendEth(
+            recipientAddress: recipientAddress,
+            amount: amount,
+            seedPhrase: seedPhrase,
+          );
+        }
         
-        Map<String, dynamic> result;
-        
-        // Use standard send with serverless MATIC top-up if needed
-        debugPrint('⛽ Using standard transaction with serverless gas top-up when required');
-        result = await PolygonWalletService.sendERC20TokenWithAuth(
-          userId: user.uid,
-          password: password,
-          tokenContractAddress: asset.contractAddress!,
-          toAddress: recipientAddress,
-          amount: amount,
-        );
+        // ERC-20 tokens on Ethereum
+        if (asset.contractAddress != null && asset.contractAddress!.isNotEmpty) {
+          debugPrint('🔄 Sending ERC-20 token on Ethereum: ${asset.symbol}');
+          debugPrint('📍 Contract: ${asset.contractAddress}');
+          
+          final result = await EthereumWalletService.sendERC20TokenWithSeedPhrase(
+            userId: user.uid,
+            seedPhrase: seedPhrase,
+            tokenContractAddress: asset.contractAddress!,
+            toAddress: recipientAddress,
+            amount: amount,
+          );
 
-        if (result['success'] == true) {
-          // Refresh balances and transactions after successful transaction
-          await Future.wait([loadBalances(), loadTransactions(forceRefresh: true)]);
+          if (result['success'] == true) {
+            await Future.wait([loadBalances(), loadTransactions(forceRefresh: true)]);
+          }
+
+          _setLoading(false);
+          return result;
+        }
+      } else {
+        // Polygon network (default)
+        // For MATIC (native token) - always use regular transaction
+        if (asset.code == 'MATIC' || asset.isNative) {
+          return await sendMatic(
+            recipientAddress: recipientAddress,
+            amount: amount,
+            seedPhrase: seedPhrase,
+          );
         }
 
-        _setLoading(false);
-        return result;
+        // For ERC-20 tokens - use seed phrase authentication
+        if (asset.contractAddress != null && asset.contractAddress!.isNotEmpty) {
+          debugPrint('🔄 Sending ERC-20 token on Polygon: ${asset.symbol}');
+          debugPrint('📍 Contract: ${asset.contractAddress}');
+          
+          Map<String, dynamic> result;
+          
+          // Use seed phrase authentication
+          debugPrint('⛽ Using seed phrase authentication for transaction');
+          result = await PolygonWalletService.sendERC20TokenWithSeedPhrase(
+            userId: user.uid,
+            seedPhrase: seedPhrase,
+            tokenContractAddress: asset.contractAddress!,
+            toAddress: recipientAddress,
+            amount: amount,
+          );
+
+          if (result['success'] == true) {
+            // Refresh balances and transactions after successful transaction
+            await Future.wait([loadBalances(), loadTransactions(forceRefresh: true)]);
+          }
+
+          _setLoading(false);
+          return result;
+        }
       }
 
       // No contract address provided for non-native token
@@ -828,7 +948,7 @@ class EnhancedWalletProvider extends ChangeNotifier {
   Future<Map<String, dynamic>> sendMatic({
     required String recipientAddress,
     required double amount,
-    required String password,
+    required String seedPhrase,
   }) async {
     if (!_hasWallet || _address == null) {
       return {'success': false, 'error': 'No Polygon wallet found'};
@@ -844,9 +964,9 @@ class EnhancedWalletProvider extends ChangeNotifier {
         throw Exception('User not authenticated');
       }
 
-      final result = await PolygonWalletService.sendMaticTransaction(
+      final result = await PolygonWalletService.sendMaticTransactionWithSeedPhrase(
         userId: user.uid,
-        password: password,
+        seedPhrase: seedPhrase,
         toAddress: recipientAddress,
         amountMatic: amount,
       );
@@ -861,6 +981,49 @@ class EnhancedWalletProvider extends ChangeNotifier {
       return result;
     } catch (e) {
       _setError('Failed to send MATIC: $e');
+      _isProcessingPolygonTransaction = false;
+      notifyListeners();
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// Send ETH tokens (Ethereum native token)
+  Future<Map<String, dynamic>> sendEth({
+    required String recipientAddress,
+    required double amount,
+    required String seedPhrase,
+  }) async {
+    if (!_hasWallet || _address == null) {
+      return {'success': false, 'error': 'No Ethereum wallet found'};
+    }
+
+    _isProcessingPolygonTransaction = true; // Reuse flag for Ethereum too
+    _setError(null);
+    notifyListeners();
+
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        throw Exception('User not authenticated');
+      }
+
+      final result = await EthereumWalletService.sendEthTransactionWithSeedPhrase(
+        userId: user.uid,
+        seedPhrase: seedPhrase,
+        toAddress: recipientAddress,
+        amountEth: amount,
+      );
+
+      if (result['success'] == true) {
+        // Refresh balances and transactions after successful transaction
+        await Future.wait([loadBalances(), loadTransactions(forceRefresh: true)]);
+      }
+
+      _isProcessingPolygonTransaction = false;
+      notifyListeners();
+      return result;
+    } catch (e) {
+      _setError('Failed to send ETH: $e');
       _isProcessingPolygonTransaction = false;
       notifyListeners();
       return {'success': false, 'error': e.toString()};

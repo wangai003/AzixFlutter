@@ -126,6 +126,48 @@ class WalletSessionProvider extends ChangeNotifier {
     }
   }
 
+  /// Authenticate wallet with seed phrase
+  Future<Map<String, dynamic>> authenticateWithSeedPhrase(String seedPhrase) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        return {
+          'success': false,
+          'error': 'User not authenticated',
+        };
+      }
+
+      print('🔐 [SESSION] Attempting seed phrase authentication...');
+
+      // Try Polygon wallet authentication first
+      try {
+        final polygonResult = await PolygonWalletService.authenticateWithSeedPhrase(
+          userId: user.uid,
+          seedPhrase: seedPhrase,
+        );
+        
+        if (polygonResult['success'] == true) {
+          _setWalletAuthenticated();
+          print('✅ [SESSION] Polygon wallet authenticated successfully with seed phrase');
+          return {'success': true, 'message': 'Wallet authenticated successfully'};
+        }
+      } catch (polygonError) {
+        print('⚠️ [SESSION] Polygon wallet seed phrase auth failed: $polygonError');
+      }
+
+      return {
+        'success': false,
+        'error': 'Invalid seed phrase',
+      };
+    } catch (e) {
+      print('❌ [SESSION] Seed phrase authentication error: $e');
+      return {
+        'success': false,
+        'error': 'Authentication failed: $e',
+      };
+    }
+  }
+
   /// Authenticate wallet with password
   Future<Map<String, dynamic>> authenticateWithPassword(String password) async {
     try {

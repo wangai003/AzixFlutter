@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
 import 'dart:ui';
 import '../theme/app_theme.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/custom_button.dart';
 import '../utils/responsive_layout.dart';
-// Auth flow is handled by the root Wrapper; we navigate back to it after landing.
+import '../providers/auth_provider.dart' as local_auth;
+import 'main_navigation.dart';
+import 'auth/modern_auth_screen.dart';
+import 'auth/email_verification_screen.dart';
+import 'user_registration_screen.dart';
 
 class LandingScreen extends StatefulWidget {
   const LandingScreen({Key? key}) : super(key: key);
@@ -58,17 +62,54 @@ class _LandingScreenState extends State<LandingScreen> {
     );
   }
 
-  Future<void> _markLandingAsSeen() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('has_seen_landing', true);
-  }
-
-  Future<void> _navigateToAuth() async {
-    await _markLandingAsSeen();
+  Future<void> _navigateToApp() async {
     if (!mounted) return;
 
-    // Return to the root route (Wrapper) so it can orchestrate auth/navigation
-    Navigator.of(context).pushReplacementNamed('/');
+    // Check authentication state and navigate accordingly
+    final authProvider = Provider.of<local_auth.AuthProvider>(context, listen: false);
+    
+    // Wait for auth state to be initialized
+    if (authProvider.authState == local_auth.AuthState.initial) {
+      // Wait a bit for auth to initialize
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+
+    if (!mounted) return;
+
+    // If user is not authenticated, navigate to auth screen
+    if (!authProvider.isAuthenticated) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const ModernAuthScreen()),
+      );
+      return;
+    }
+
+    // User is authenticated - check if they need email verification
+    final needsEmailVerification = await authProvider.needsEmailVerification();
+    if (!mounted) return;
+
+    if (needsEmailVerification) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const EmailVerificationScreen()),
+      );
+      return;
+    }
+
+    // Check if profile completion is needed
+    final needsProfileCompletion = await authProvider.needsProfileCompletion();
+    if (!mounted) return;
+
+    if (needsProfileCompletion) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const UserRegistrationScreen()),
+      );
+      return;
+    }
+
+    // User is fully authenticated and profile is complete - navigate to main app
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (context) => const MainNavigation()),
+    );
   }
 
   @override
@@ -288,7 +329,7 @@ class _LandingScreenState extends State<LandingScreen> {
                         width: isMobile ? double.infinity : 200,
                         child: CustomButton(
                           text: 'Explore Azix',
-                          onPressed: _navigateToAuth,
+                          onPressed: _navigateToApp,
                         )
                             .animate()
                             .fadeIn(duration: 1000.ms, delay: 800.ms)
@@ -825,7 +866,7 @@ class _LandingScreenState extends State<LandingScreen> {
             width: isMobile ? double.infinity : 240,
             child: CustomButton(
               text: 'Explore Azix',
-              onPressed: _navigateToAuth,
+              onPressed: _navigateToApp,
             ).animate().fadeIn(duration: 600.ms).scale(),
           ),
         ],

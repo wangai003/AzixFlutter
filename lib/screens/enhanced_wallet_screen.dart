@@ -21,17 +21,19 @@ import '../widgets/bank_transfer_dialog.dart';
 import '../widgets/token_purchase_dialog.dart';
 import '../widgets/moonpay_purchase_dialog.dart';
 import '../widgets/moonpay_button.dart';
-import '../widgets/custom_thirdweb_onramp.dart';
 import '../widgets/wallet_auth_dialog.dart';
 import '../widgets/store_payment_dialog.dart';
 import 'buy_crypto_screen.dart';
 import 'buy_crypto_page.dart';
 import 'wallet_connect_screen.dart';
+import 'thirdweb_onramp_checkout_screen.dart';
 import '../widgets/moonpay_payment_webview.dart';
+import '../widgets/moonpay_sell_webview.dart';
 import '../services/secure_wallet_service.dart';
 import '../services/akofa_tag_service.dart';
 import '../services/biometric_service.dart';
 import '../services/polygon_wallet_service.dart';
+import '../services/thirdweb_backend_onramp_service.dart';
 import '../providers/auth_provider.dart' as local_auth;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'secure_wallet_creation_screen.dart';
@@ -100,14 +102,109 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     // First check if user has a secure wallet
     final hasSecureWallet = await walletProvider.checkSecureWalletStatus();
     
-    // Only prompt for password if user has an existing secure wallet
+    // Only prompt for seed phrase if user has an existing secure wallet
     if (!hasSecureWallet) {
       // User doesn't have a secure wallet yet - skip authentication
       debugPrint('🔓 No secure wallet found - skipping session check');
       return;
     }
     
-    // User has a secure wallet - check if session is valid
+    // Check if wallet has seed phrase hash (for existing wallets)
+    try {
+      final authProvider = Provider.of<local_auth.AuthProvider>(
+        context,
+        listen: false,
+      );
+      final user = authProvider.user;
+      if (user != null) {
+        final walletDoc = await FirebaseFirestore.instance
+            .collection('polygon_wallets')
+            .doc(user.uid)
+            .get();
+        
+        if (walletDoc.exists) {
+          final walletData = walletDoc.data()!;
+          final seedPhraseHash = walletData['seedPhraseHash'] as String?;
+          
+          if (seedPhraseHash == null) {
+            // Existing wallet without seed phrase hash - needs to be recreated
+            if (mounted) {
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => AlertDialog(
+                  backgroundColor: AppTheme.darkGrey,
+                  title: Text(
+                    'Wallet Update Required',
+                    style: TextStyle(color: AppTheme.primaryGold),
+                  ),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.warning, color: Colors.orange, size: 48),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Your wallet was created before seed phrase authentication was enabled.',
+                        style: TextStyle(color: AppTheme.white),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'To use seed phrase authentication, you need to recreate your wallet. '
+                        'Make sure you have your recovery phrase saved before proceeding.',
+                        style: TextStyle(color: Colors.orange),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.red.withOpacity(0.3)),
+                        ),
+                        child: Text(
+                          '⚠️ Warning: Recreating your wallet will create a new address. '
+                          'Any funds in your current wallet will remain at the old address.',
+                          style: TextStyle(color: Colors.red, fontSize: 12),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ],
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        Navigator.of(context).pop(); // Go back from wallet screen
+                      },
+                      child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
+                    ),
+                    ElevatedButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        Navigator.of(context).pop(); // Go back from wallet screen
+                        // User can recreate wallet from secure wallet creation screen
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryGold,
+                        foregroundColor: AppTheme.black,
+                      ),
+                      child: const Text('I Understand'),
+                    ),
+                  ],
+                ),
+              );
+            }
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error checking seed phrase hash: $e');
+    }
+    
+    // User has a secure wallet with seed phrase - check if session is valid
     if (!sessionProvider.isSessionValid()) {
       // Show authentication dialog
       final authenticated = await showWalletAuthDialog(context);
@@ -389,19 +486,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
           ),
           Consumer<EnhancedWalletProvider>(
             builder: (context, walletProvider, child) {
-              if (walletProvider.hasSecureWallet) {
-                return IconButton(
-                  icon: const Icon(
-                    Icons.visibility,
-                    color: AppTheme.primaryGold,
-                  ),
-                  onPressed: () {
-                    _recordActivity();
-                    _showWalletCredentials(walletProvider);
-                  },
-                  tooltip: 'View Wallet Credentials',
-                );
-              }
+              // Credentials viewing removed - seed phrase authentication only
               return const SizedBox.shrink();
             },
           ),
@@ -856,7 +941,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
   }
 
   Widget _buildTransactionsTab(EnhancedWalletProvider walletProvider) {
-    // Transactions tab displays only transactions from the derived user's wallet address
+    // Transactions tab displays transactions from both Polygon and Ethereum networks
     // The provider ensures the correct derived address is used for fetching transactions
     
     // Auto-load transactions when tab opens
@@ -865,6 +950,17 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
         walletProvider.loadTransactions();
       });
     }
+
+    // Count transactions by network
+    final polygonCount = walletProvider.transactions.where((tx) {
+      final network = tx['network'] as String? ?? '';
+      return network.contains('polygon');
+    }).length;
+    
+    final ethereumCount = walletProvider.transactions.where((tx) {
+      final network = tx['network'] as String? ?? '';
+      return network.contains('ethereum');
+    }).length;
 
     return Container(
       color: AppTheme.black,
@@ -882,9 +978,34 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
               : RefreshIndicator(
                   onRefresh: () => walletProvider.loadTransactions(forceRefresh: true),
                   color: AppTheme.primaryGold,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: walletProvider.transactions.length,
+                  child: Column(
+                    children: [
+                      // Network Summary Header
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            _buildNetworkSummaryChip(
+                              'Polygon',
+                              Icons.hexagon,
+                              Colors.purple,
+                              polygonCount,
+                            ),
+                            _buildNetworkSummaryChip(
+                              'Ethereum',
+                              Icons.account_balance,
+                              Colors.blue,
+                              ethereumCount,
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Transactions List
+                      Expanded(
+                        child: ListView.builder(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          itemCount: walletProvider.transactions.length,
                     itemBuilder: (context, index) {
                       final tx = walletProvider.transactions[index];
                       
@@ -896,6 +1017,12 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                       final from = tx['from'] as String? ?? '';
                       final to = tx['to'] as String? ?? '';
                       final status = tx['status'] as String? ?? 'success';
+                      final network = tx['network'] as String? ?? 'polygon-mainnet';
+                      
+                      // Determine network info
+                      final isEthereum = network.contains('ethereum');
+                      final networkName = isEthereum ? 'Ethereum' : 'Polygon';
+                      final networkColor = isEthereum ? Colors.blue : Colors.purple;
                       
                       final isReceive = type == 'receive';
                       final color = isReceive ? Colors.green : Colors.red;
@@ -926,6 +1053,43 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                                           color: AppTheme.white,
                                           fontSize: 16,
                                           fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      // Network Badge
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: networkColor.withOpacity(0.2),
+                                          borderRadius: BorderRadius.circular(4),
+                                          border: Border.all(
+                                            color: networkColor.withOpacity(0.5),
+                                            width: 1,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              isEthereum 
+                                                  ? Icons.account_balance 
+                                                  : Icons.hexagon,
+                                              size: 10,
+                                              color: networkColor,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              networkName,
+                                              style: TextStyle(
+                                                color: networkColor,
+                                                fontSize: 9,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
                                     ],
@@ -963,36 +1127,103 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                               ),
                               const SizedBox(height: 8),
                               
-                              // Status Badge
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: status == 'success' 
-                                      ? Colors.green.withOpacity(0.2)
-                                      : Colors.orange.withOpacity(0.2),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  status.toUpperCase(),
-                                  style: TextStyle(
-                                    color: status == 'success' 
-                                        ? Colors.green 
-                                        : Colors.orange,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
+                              // Status and Network Info Row
+                              Row(
+                                children: [
+                                  // Status Badge
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: status == 'success' 
+                                          ? Colors.green.withOpacity(0.2)
+                                          : Colors.orange.withOpacity(0.2),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      status.toUpperCase(),
+                                      style: TextStyle(
+                                        color: status == 'success' 
+                                            ? Colors.green 
+                                            : Colors.orange,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
                                   ),
-                                ),
+                                  const SizedBox(width: 8),
+                                  // Network Info
+                                  Text(
+                                    network,
+                                    style: TextStyle(
+                                      color: AppTheme.grey.withOpacity(0.7),
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
                         ),
                       );
                     },
+                        ),
+                      ),
+                    ],
                   ),
                 ),
+    );
+  }
+
+  Widget _buildNetworkSummaryChip(
+    String networkName,
+    IconData icon,
+    Color color,
+    int count,
+  ) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: color.withOpacity(0.3),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 18),
+          const SizedBox(width: 8),
+          Text(
+            networkName,
+            style: TextStyle(
+              color: color,
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              '$count',
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1142,11 +1373,25 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
           ],
         ),
         const SizedBox(height: 12),
-        _buildActionButton(
-          'Transaction History',
-          Icons.history,
-          () => _tabController.animateTo(1),
-          fullWidth: true,
+        Row(
+          children: [
+            Expanded(
+              child: _buildActionButton(
+                'Sell Crypto',
+                Icons.sell,
+                _showSellCryptoOptions,
+                disabled: false,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildActionButton(
+                'Transaction History',
+                Icons.history,
+                () => _tabController.animateTo(1),
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -1283,25 +1528,46 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
   }
 
   Widget _buildWalletAssetsOverview(EnhancedWalletProvider walletProvider) {
-    // Get all assets with balance > 0 from polygonTokens
-    final assetsWithBalance = walletProvider.polygonTokens.entries
-        .where((entry) {
-          final balance = entry.value['balance'];
-          if (balance is double) {
-            return balance > 0;
-          } else if (balance is num) {
-            return balance.toDouble() > 0;
-          }
-          return false;
-        })
-        .toList();
+    bool hasPositiveBalance(dynamic balance) {
+      if (balance is num) return balance.toDouble() > 0;
+      return false;
+    }
+
+    final combinedAssets = <Map<String, dynamic>>[];
+
+    void addNetworkAssets(
+      Map<String, Map<String, dynamic>> tokens,
+      String network,
+    ) {
+      for (final token in tokens.values) {
+        if (!hasPositiveBalance(token['balance'])) continue;
+        combinedAssets.add({
+          ...token,
+          'network': network,
+        });
+      }
+    }
+
+    addNetworkAssets(walletProvider.polygonTokens, 'Polygon');
+    addNetworkAssets(walletProvider.ethereumTokens, 'Ethereum');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Your Assets',
-          style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Your Assets',
+              style: AppTheme.headingMedium.copyWith(color: AppTheme.primaryGold),
+            ),
+            Text(
+              '${combinedAssets.length} assets',
+              style: AppTheme.bodySmall.copyWith(
+                color: AppTheme.grey.withOpacity(0.8),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 16),
         Container(
@@ -1314,19 +1580,19 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
               width: 1,
             ),
           ),
-          child: assetsWithBalance.isEmpty
+          child: combinedAssets.isEmpty
               ? _buildNoAssetsFound()
               : Column(
-                  children: assetsWithBalance
+                  children: combinedAssets
                       .asMap()
                       .entries
                       .map((entry) {
                         final index = entry.key;
-                        final tokenEntry = entry.value;
-                        final token = tokenEntry.value;
+                        final token = entry.value;
                         final symbol = token['symbol'] as String;
                         final name = token['name'] as String;
                         final balance = token['formattedBalance'] as String;
+                        final network = token['network'] as String;
 
                         // Choose appropriate icon based on token
                         IconData icon;
@@ -1371,6 +1637,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                             balance,
                             icon,
                             color,
+                            network,
                           ),
                         );
                       })
@@ -1401,7 +1668,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
           ),
           const SizedBox(height: 8),
           Text(
-            'Your Polygon wallet will display assets here once you receive tokens.',
+            'Your wallet will display assets here once you receive tokens.',
             style: AppTheme.bodySmall.copyWith(
               color: AppTheme.grey.withOpacity(0.7),
             ),
@@ -1418,7 +1685,13 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     String balance,
     IconData icon,
     Color color,
+    String network,
   ) {
+    final isEthereum = network == 'Ethereum';
+    final networkHintColor = isEthereum
+        ? const Color(0xFF8EA8E8)
+        : const Color(0xFFA78BC7);
+
     return Row(
       children: [
         CircleAvatar(
@@ -1437,9 +1710,30 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              Text(
-                name,
-                style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+              Row(
+                children: [
+                  Text(
+                    name,
+                    style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: networkHintColor.withOpacity(0.10),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: networkHintColor.withOpacity(0.24),
+                        width: 1,
+                      ),
+                    ),
+                    child: Icon(
+                      isEthereum ? Icons.account_balance : Icons.hexagon,
+                      size: 11,
+                      color: networkHintColor.withOpacity(0.88),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -2134,8 +2428,8 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     }
   }
 
-  /// Show ThirdWeb onramp dialog
-  void _showThirdWebOnramp(EnhancedWalletProvider walletProvider) {
+  /// Show MoonPay sell crypto page
+  void _showMoonPaySellCrypto(EnhancedWalletProvider walletProvider) async {
     if (walletProvider.address == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -2146,24 +2440,287 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
       return;
     }
 
-    // Open Custom ThirdWeb Onramp UI
-    // Your own branded UI using ThirdWeb's Pay API
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (context) => CustomThirdWebOnramp(
-          walletAddress: walletProvider.address!,
-          network: walletProvider.isTestnet ? 'polygon-amoy' : 'polygon',
-          onClose: () {
-            // Refresh wallet when closing
-            walletProvider.refreshWallet();
-          },
+    try {
+      // Get backend URL
+      final backendUrl = const String.fromEnvironment(
+        'AZIX_BACKEND_URL',
+        defaultValue: 'https://azix-flutter.vercel.app',
+      );
+
+      // Show loading dialog
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Center(
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppTheme.darkGrey,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryGold),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Preparing sell page...',
+                  style: TextStyle(color: AppTheme.white),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      // Get sell URL from backend
+      // For now, using default values - you may want to add an amount input dialog
+      const currencyCode = 'usdt_polygon'; // Default currency
+      const amountCrypto = 100.0; // Default amount - consider adding input dialog
+
+      final response = await http.post(
+        Uri.parse("$backendUrl/api/get-moonpay-sell-url"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "walletAddress": walletProvider.address!,
+          "amountCrypto": amountCrypto,
+          "currencyCode": currencyCode,
+        }),
+      );
+
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading dialog
+
+      if (response.statusCode != 200) {
+        final errorData = jsonDecode(response.body);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(errorData["error"] ?? "Failed to get sell URL"),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      final data = jsonDecode(response.body);
+      final paymentUrl = data["url"] as String;
+
+      // Open sell webview (same pattern as buy)
+      if (!mounted) return;
+      final result = await showMoonPaySellWebView(
+        context: context,
+        paymentUrl: paymentUrl,
+        walletAddress: walletProvider.address!,
+        amountCrypto: amountCrypto,
+        currencyCode: currencyCode,
+      );
+
+      // Refresh wallet when returning from sell
+      if (result != null && result['status'] == 'completed') {
+        walletProvider.refreshWallet();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<String?> _getOnrampWalletAddress(
+    EnhancedWalletProvider walletProvider,
+  ) async {
+    final providerAddress = walletProvider.address;
+    if (providerAddress != null && providerAddress.isNotEmpty) {
+      return providerAddress;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return null;
+
+    // Always fall back to the derived wallet address source to avoid stale/missing values.
+    return PolygonWalletService.getCorrectWalletAddress(user.uid);
+  }
+
+  /// Start Thirdweb onramp flow: prepare -> webview checkout -> status polling
+  Future<void> _showThirdWebOnramp(EnhancedWalletProvider walletProvider) async {
+    final walletAddress = await _getOnrampWalletAddress(walletProvider);
+    if (!mounted) return;
+
+    if (walletAddress == null || walletAddress.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Wallet address not available'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    var loadingShown = false;
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Center(
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppTheme.darkGrey,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryGold),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Preparing onramp checkout...',
+                  style: TextStyle(color: AppTheme.white),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      loadingShown = true;
+
+      final onrampService = ThirdwebBackendOnrampService();
+      // Thirdweb onramp providers do not consistently support testnet chain IDs.
+      // Use Polygon mainnet for quote preparation even when app is in testnet mode.
+      final chainId = 137;
+
+      if (walletProvider.isTestnet) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Onramp runs on Polygon mainnet (chain 137).'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+
+      final session = await onrampService.prepareOnramp(
+        walletAddress: walletAddress,
+        amount: '1000000000000000000',
+        chainId: chainId,
+        tokenAddress: ThirdwebBackendOnrampService.polygonUsdcTokenAddress,
+      );
+
+      if (!mounted) return;
+      if (loadingShown) {
+        Navigator.of(context).pop();
+        loadingShown = false;
+      }
+
+      final result = await Navigator.of(context).push<Map<String, dynamic>>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => ThirdwebOnrampCheckoutScreen(
+            checkoutUrl: session.checkoutUrl,
+            quoteId: session.quoteId,
+          ),
+        ),
+      );
+
+      if (!mounted) return;
+
+      if (result != null && result['status'] == 'completed') {
+        walletProvider.refreshWallet();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Onramp completed successfully. Refreshing balances...'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else if (result != null && result['status'] == 'failed') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Onramp payment failed. Please try again.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted && loadingShown) {
+        Navigator.of(context).pop();
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Thirdweb onramp error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  /// Show sell crypto options (MoonPay only)
+  void _showSellCryptoOptions() {
+    final walletProvider = Provider.of<EnhancedWalletProvider>(
+      context,
+      listen: false,
+    );
+    
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.darkGrey,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Sell Your Crypto',
+              style: AppTheme.headingMedium.copyWith(
+                color: AppTheme.primaryGold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Sell USDT for fiat',
+              style: TextStyle(color: AppTheme.grey, fontSize: 14),
+            ),
+            const SizedBox(height: 24),
+            ListTile(
+              leading: CircleAvatar(
+                backgroundColor: AppTheme.primaryGold.withOpacity(0.2),
+                child: const Icon(Icons.account_balance, color: AppTheme.primaryGold),
+              ),
+              title: Text(
+                'Sell with Card',
+                style: TextStyle(color: AppTheme.white),
+              ),
+              subtitle: Text(
+                'Sell USDT for fiat',
+                style: TextStyle(color: AppTheme.grey, fontSize: 12),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _showMoonPaySellCrypto(walletProvider);
+              },
+            ),
+          ],
         ),
       ),
     );
   }
 
-  /// Show buy crypto options (MoonPay only)
+  /// Show buy crypto options
   void _showBuyCryptoOptions() {
     final walletProvider = Provider.of<EnhancedWalletProvider>(
       context,
@@ -2189,10 +2746,29 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
             ),
             const SizedBox(height: 8),
             Text(
-              'Buy USDT with card',
+              'Choose your top-up method',
               style: TextStyle(color: AppTheme.grey, fontSize: 14),
             ),
             const SizedBox(height: 24),
+            ListTile(
+              leading: CircleAvatar(
+                backgroundColor: AppTheme.primaryGold.withOpacity(0.2),
+                child: const Icon(Icons.currency_exchange, color: AppTheme.primaryGold),
+              ),
+              title: Text(
+                'Buy with Thirdweb',
+                style: TextStyle(color: AppTheme.white),
+              ),
+              subtitle: Text(
+                'Prepare checkout + in-app status tracking',
+                style: TextStyle(color: AppTheme.grey, fontSize: 12),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _showThirdWebOnramp(walletProvider);
+              },
+            ),
+            const Divider(color: Colors.white12),
             ListTile(
               leading: CircleAvatar(
                 backgroundColor: AppTheme.primaryGold.withOpacity(0.2),
@@ -2259,12 +2835,12 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                 style: TextStyle(color: AppTheme.grey, fontSize: 14),
               ),
               const SizedBox(height: 24),
-              // Polygon Network Assets - Dynamic tokens only
+              // Polygon Network Assets
               if (walletProvider.hasPolygonWallet) ...[
                 Text(
                   'Polygon Network',
                   style: AppTheme.bodyLarge.copyWith(
-                    color: AppTheme.primaryGold,
+                    color: Colors.purple,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -2323,6 +2899,76 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                         onTap: () {
                           Navigator.pop(context);
                           _showSendPolygonAssetDialog(walletProvider, token);
+                        },
+                      );
+                    }),
+              ],
+              // Ethereum Network Assets
+              if (walletProvider.hasPolygonWallet && walletProvider.ethereumTokens.isNotEmpty) ...[
+                const SizedBox(height: 24),
+                Text(
+                  'Ethereum Network',
+                  style: AppTheme.bodyLarge.copyWith(
+                    color: Colors.blue,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // Ethereum tokens with balances > 0
+                ...walletProvider.ethereumTokens.entries
+                    .where((entry) => (entry.value['balance'] as double) > 0)
+                    .map((entry) {
+                      final token = entry.value;
+                      final symbol = token['symbol'] as String;
+                      final name = token['name'] as String;
+                      final balance = token['balance'] as double;
+                      final formattedBalance = balance.toStringAsFixed(6);
+
+                      // Choose appropriate icon based on token
+                      IconData icon;
+                      Color color;
+                      switch (symbol) {
+                        case 'ETH':
+                          icon = Icons.account_balance;
+                          color = Colors.blue;
+                          break;
+                        case 'USDT':
+                          icon = Icons.currency_exchange;
+                          color = Colors.green;
+                          break;
+                        case 'USDC':
+                          icon = Icons.attach_money;
+                          color = Colors.blue;
+                          break;
+                        case 'DAI':
+                          icon = Icons.account_balance_wallet;
+                          color = Colors.orange;
+                          break;
+                        case 'WETH':
+                          icon = Icons.currency_bitcoin;
+                          color = Colors.teal;
+                          break;
+                        default:
+                          icon = Icons.token;
+                          color = Colors.grey;
+                      }
+
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: color.withOpacity(0.2),
+                          child: Icon(icon, color: color, size: 20),
+                        ),
+                        title: Text(
+                          'Send $symbol',
+                          style: TextStyle(color: AppTheme.white),
+                        ),
+                        subtitle: Text(
+                          '$name • Balance: $formattedBalance',
+                          style: TextStyle(color: AppTheme.grey, fontSize: 12),
+                        ),
+                        onTap: () {
+                          Navigator.pop(context);
+                          _showSendEthereumAssetDialog(walletProvider, token);
                         },
                       );
                     }),
@@ -2627,53 +3273,11 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                         amount.toString(),
                         recipientController.text,
                       );
-                      if (authResult == null || authResult['password'] == null) {
+                      if (authResult == null || authResult['seedPhrase'] == null) {
                         return; // User cancelled
                       }
 
-                      final password = authResult['password'] as String;
-                      // Biometric verification is optional - if wallet has biometrics, it's required
-                      // If wallet doesn't have biometrics, password-only is fine
-                      // The service will handle this automatically
-
-                      // Verify password with Firebase Auth
-                      final authProvider = Provider.of<local_auth.AuthProvider>(
-                        context,
-                        listen: false,
-                      );
-                      final currentUser = authProvider.user;
-                      if (currentUser == null || currentUser.email == null) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Authentication required. Please log in again.',
-                            ),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        return;
-                      }
-
-                      try {
-                        // Re-authenticate user with password
-                        final credential = EmailAuthProvider.credential(
-                          email: currentUser.email!,
-                          password: password,
-                        );
-                        await currentUser.reauthenticateWithCredential(
-                          credential,
-                        );
-                      } catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Invalid password. Please try again.',
-                            ),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        return;
-                      }
+                      final seedPhrase = authResult['seedPhrase'] as String;
 
                       final shouldProceed = await _confirmGasTopUpIfNeeded(
                         walletProvider: walletProvider,
@@ -2728,7 +3332,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                           asset: asset,
                           amount: amount,
                           memo: memoText,
-                          password: password, // Pass the password for secure wallets
+                          seedPhrase: seedPhrase, // Pass the seed phrase for authentication
                         );
 
                         // Close loading dialog
@@ -2781,12 +3385,11 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
 
   void _showSendPolygonAssetDialog(
     EnhancedWalletProvider walletProvider,
-    Map<String, dynamic> token,
-  ) {
+    Map<String, dynamic> token, {
+    String network = 'polygon',
+  }) {
     final recipientController = TextEditingController();
     final amountController = TextEditingController();
-    final passwordController = TextEditingController();
-    bool obscurePassword = true;
     bool isResolving = false;
     String? resolvedAddress;
     String? resolvedName;
@@ -2874,7 +3477,9 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Send $name to Akofa Tag or Polygon address',
+                  network == 'ethereum'
+                      ? 'Send $name to Akofa Tag or Ethereum address'
+                      : 'Send $name to Akofa Tag or Polygon address',
                   style: TextStyle(color: AppTheme.grey, fontSize: 14),
                   textAlign: TextAlign.center,
                 ),
@@ -3004,35 +3609,6 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: passwordController,
-                  obscureText: obscurePassword,
-                  style: TextStyle(color: AppTheme.white),
-                  decoration: InputDecoration(
-                    labelText: 'Wallet Password',
-                    labelStyle: TextStyle(color: AppTheme.primaryGold),
-                    hintText: 'Enter your wallet password',
-                    hintStyle: TextStyle(color: AppTheme.grey),
-                    enabledBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: AppTheme.primaryGold),
-                    ),
-                    focusedBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: AppTheme.primaryGold),
-                    ),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        obscurePassword
-                            ? Icons.visibility_off
-                            : Icons.visibility,
-                        color: AppTheme.grey,
-                      ),
-                      onPressed: () {
-                        setState(() => obscurePassword = !obscurePassword);
-                      },
-                    ),
-                  ),
-                ),
                 const SizedBox(height: 8),
                 Text(
                   'Available: $balance $symbol',
@@ -3064,13 +3640,11 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
               onPressed:
                   !isValidInput ||
                       resolvedAddress == null ||
-                      amountController.text.trim().isEmpty ||
-                      passwordController.text.trim().isEmpty
+                      amountController.text.trim().isEmpty
                   ? null
                   : () async {
                       final recipientAddress = resolvedAddress!; // Use resolved address
                       final amountText = amountController.text.trim();
-                      final password = passwordController.text.trim();
 
                       final amount = double.tryParse(amountText);
                       if (amount == null || amount <= 0) {
@@ -3118,6 +3692,18 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                       if (!mounted) return;
                       Navigator.of(context).pop();
 
+                      // Show transaction auth dialog with seed phrase
+                      final authResult = await _showTransactionAuthDialog(
+                        symbol,
+                        amount.toString(),
+                        recipientAddress,
+                      );
+                      if (authResult == null || authResult['seedPhrase'] == null) {
+                        return; // User cancelled
+                      }
+
+                      final seedPhrase = authResult['seedPhrase'] as String;
+
                       // Show loading
                       if (!mounted) return;
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -3130,19 +3716,31 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                       Map<String, dynamic> result;
                       
                       try {
-                        result = isNative
-                            ? await walletProvider.sendMatic(
-                                recipientAddress: recipientAddress,
-                                amount: amount,
-                                password: password,
-                              )
-                            : await _sendPolygonToken(
-                                walletProvider,
-                                token,
-                                recipientAddress,
-                                amount,
-                                password,
-                              );
+                        final symbol = token['symbol'] as String;
+                        if (isNative || symbol == 'MATIC' || symbol == 'ETH') {
+                          if (network == 'ethereum' || symbol == 'ETH') {
+                            result = await walletProvider.sendEth(
+                              recipientAddress: recipientAddress,
+                              amount: amount,
+                              seedPhrase: seedPhrase,
+                            );
+                          } else {
+                            result = await walletProvider.sendMatic(
+                              recipientAddress: recipientAddress,
+                              amount: amount,
+                              seedPhrase: seedPhrase,
+                            );
+                          }
+                        } else {
+                          result = await _sendPolygonToken(
+                            walletProvider,
+                            token,
+                            recipientAddress,
+                            amount,
+                            seedPhrase,
+                            network: network,
+                          );
+                        }
 
                         // Refresh balances
                         await walletProvider.loadBalances();
@@ -3384,22 +3982,30 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     Map<String, dynamic> token,
     String recipientAddress,
     double amount,
-    String password,
-  ) async {
+    String seedPhrase, {
+    String network = 'polygon',
+  }) async {
     try {
       final isNative = token['isNative'] as bool? ?? false;
       final symbol = token['symbol'] as String;
       
-      // For MATIC (native token)
-      if (isNative || symbol == 'MATIC') {
-        return await walletProvider.sendMatic(
-          recipientAddress: recipientAddress,
-          amount: amount,
-          password: password,
-        );
+      // For native tokens (MATIC on Polygon, ETH on Ethereum)
+      if (isNative || symbol == 'MATIC' || symbol == 'ETH') {
+        if (network == 'ethereum' || symbol == 'ETH') {
+          return await walletProvider.sendEth(
+            recipientAddress: recipientAddress,
+            amount: amount,
+            seedPhrase: seedPhrase,
+          );
+        } else {
+          return await walletProvider.sendMatic(
+            recipientAddress: recipientAddress,
+            amount: amount,
+            seedPhrase: seedPhrase,
+          );
+        }
       }
-      // For ERC-20 tokens, use the serverless flow that tops up MATIC and
-      // charges a USDC/USDT fee when needed.
+      // For ERC-20 tokens, use seed phrase authentication
       final contractAddress = token['contractAddress'] as String?;
       if (contractAddress == null || contractAddress.isEmpty) {
         return {
@@ -3422,7 +4028,8 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
         recipientAddress: recipientAddress,
         asset: asset,
         amount: amount,
-        password: password,
+        seedPhrase: seedPhrase,
+        network: network, // Pass network parameter
       );
     } catch (e) {
       return {
@@ -3430,6 +4037,16 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
         'error': e.toString(),
       };
     }
+  }
+
+  // Ethereum send dialog - similar to Polygon but for Ethereum network
+  void _showSendEthereumAssetDialog(
+    EnhancedWalletProvider walletProvider,
+    Map<String, dynamic> token,
+  ) {
+    // Reuse the Polygon dialog structure but with Ethereum-specific settings
+    // For simplicity, we'll create a similar dialog
+    _showSendPolygonAssetDialog(walletProvider, token, network: 'ethereum');
   }
 
   void _showReceiveOptions() {
@@ -3461,17 +4078,11 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
               style: TextStyle(color: AppTheme.grey, fontSize: 14),
             ),
             const SizedBox(height: 24),
-            // Polygon Network Option (Primary)
+            // Polygon Network Option
             ListTile(
               leading: CircleAvatar(
                 backgroundColor: Colors.purple,
-                child: const Text(
-                  'P',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                child: const Icon(Icons.hexagon, color: Colors.white, size: 20),
               ),
               title: Text(
                 'Polygon Network',
@@ -3484,6 +4095,26 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
               onTap: () {
                 Navigator.pop(context);
                 _showReceiveQR(walletProvider.address ?? walletProvider.publicKey ?? '', 'Polygon Network');
+              },
+            ),
+            const SizedBox(height: 12),
+            // Ethereum Network Option
+            ListTile(
+              leading: CircleAvatar(
+                backgroundColor: Colors.blue,
+                child: const Icon(Icons.account_balance, color: Colors.white, size: 20),
+              ),
+              title: Text(
+                'Ethereum Network',
+                style: TextStyle(color: AppTheme.white),
+              ),
+              subtitle: Text(
+                'Receive ETH, USDC, USDT, DAI, WETH',
+                style: TextStyle(color: AppTheme.grey, fontSize: 12),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _showReceiveQR(walletProvider.address ?? walletProvider.publicKey ?? '', 'Ethereum Network');
               },
             ),
           ],
@@ -3707,421 +4338,12 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     );
   }
 
-  Future<void> _showWalletCredentials(
-    EnhancedWalletProvider walletProvider,
-  ) async {
-    // Show biometric authentication dialog first
-    final biometricResult = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.darkGrey,
-        title: Text(
-          'Authenticate to View Credentials',
-          style: TextStyle(color: AppTheme.white),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.fingerprint, size: 48, color: AppTheme.primaryGold),
-            const SizedBox(height: 16),
-            Text(
-              'Biometric authentication is required to view your wallet credentials.',
-              style: TextStyle(color: AppTheme.grey),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'This will temporarily decrypt your private key for display.',
-              style: TextStyle(color: Colors.orange, fontSize: 12),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primaryGold,
-              foregroundColor: AppTheme.black,
-            ),
-            child: const Text('Authenticate'),
-          ),
-        ],
-      ),
-    );
+  // Removed: Private key viewing feature - not needed with seed phrase authentication
+  // Removed: _showWalletCredentials - private key viewing not needed with seed phrase authentication
 
-    if (biometricResult != true) return;
-
-    // Show loading dialog
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.darkGrey,
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(color: AppTheme.primaryGold),
-            const SizedBox(height: 16),
-            Text(
-              'Decrypting wallet credentials...',
-              style: TextStyle(color: AppTheme.white),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    try {
-      // Get current user ID
-      final authProvider = Provider.of<local_auth.AuthProvider>(
-        context,
-        listen: false,
-      );
-      final user = authProvider.user;
-
-      if (user == null) {
-        // Close loading dialog
-        Navigator.of(context).pop();
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('User not authenticated. Please sign in first.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-
-      print('🔐 Attempting to decrypt wallet for user: ${user.uid}');
-
-      // Show password input dialog
-      final password = await _showPasswordInputDialog();
-      if (password == null || password.isEmpty) {
-        // Close loading dialog
-        Navigator.of(context).pop();
-        return;
-      }
-
-      // Attempt to decrypt wallet credentials
-      final result = await SecureWalletService.authenticateAndDecryptWallet(
-        user.uid,
-        password,
-      );
-
-      // Close loading dialog
-      Navigator.of(context).pop();
-
-      if (result['success'] == true) {
-        // Get Polygon address and private key
-        // ALWAYS use the derived address (from private key) as authoritative
-        final address = result['address'] ?? result['publicKey'] ?? '';
-        final privateKey = result['privateKey'] ?? result['secretKey'] ?? '';
-        final storedAddress = result['storedAddress'] as String?;
-        final addressesMatch = result['addressesMatch'] as bool? ?? true;
-        
-        // Validate that we have valid credentials
-        if (address.isEmpty || privateKey.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Failed to retrieve wallet credentials'),
-              backgroundColor: Colors.red,
-            ),
-          );
-          return;
-        }
-        
-        print('📍 [CREDS] Displaying wallet credentials:');
-        print('   Authoritative address (from key): $address');
-        print('   Previously stored address: $storedAddress');
-        print('   Addresses match: $addressesMatch');
-        
-        // Show credentials dialog with DERIVED address and private key
-        _showCredentialsDialog(
-          publicKey: address,  // This is now the derived address (authoritative)
-          secretKey: privateKey,
-          derivedAddress: storedAddress,  // Show old stored address for reference
-          addressesMatch: addressesMatch,
-        );
-      } else {
-        // Show error
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Failed to decrypt credentials: ${result['error'] ?? 'Unknown error'}',
-            ),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } catch (e) {
-      // Close loading dialog
-      Navigator.of(context).pop();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error decrypting credentials: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  void _showCredentialsDialog({
-    required String publicKey,
-    required String secretKey,
-    String? derivedAddress,
-    bool addressesMatch = true,
-  }) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.darkGrey,
-        title: Text(
-          'Polygon Wallet Credentials',
-          style: TextStyle(color: AppTheme.primaryGold),
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '⚠️ Security Warning',
-                style: TextStyle(
-                  color: Colors.orange,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Never share your private key with anyone. Keep it secure and never store it in plain text.',
-                style: TextStyle(color: AppTheme.grey, fontSize: 12),
-              ),
-              const SizedBox(height: 24),
-              
-              // Show mismatch warning if addresses don't match
-              if (!addressesMatch && derivedAddress != null) ...[
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.red.withOpacity(0.3)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.warning, color: Colors.red, size: 16),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Address Mismatch Detected',
-                            style: TextStyle(
-                              color: Colors.red,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Your wallet data was automatically corrected. The address shown above is the correct one (derived from your private key). '
-                        'If you had tokens at the old address below, you need to transfer them to your current address.',
-                        style: TextStyle(color: Colors.red, fontSize: 11),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-              
-              Text(
-                'Wallet Address:',
-                style: TextStyle(
-                  color: AppTheme.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '✅ Authoritative address (derived from your private key)',
-                style: TextStyle(color: Colors.green, fontSize: 11),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppTheme.black.withOpacity(0.5),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: addressesMatch
-                        ? AppTheme.primaryGold.withOpacity(0.3)
-                        : Colors.red.withOpacity(0.3),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        publicKey,
-                        style: TextStyle(color: AppTheme.white, fontSize: 12),
-                      ),
-                    ),
-                    IconButton(
-                      icon: Icon(
-                        Icons.copy,
-                        color: AppTheme.primaryGold,
-                        size: 16,
-                      ),
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: publicKey));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Wallet address copied to clipboard'),
-                            backgroundColor: Colors.green,
-                          ),
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              
-              // Show old stored address if it differs from current address
-              if (derivedAddress != null && !addressesMatch) ...[
-                Text(
-                  'Previous Stored Address:',
-                  style: TextStyle(
-                    color: AppTheme.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '⚠️ Old address from database (now corrected)',
-                  style: TextStyle(color: Colors.orange, fontSize: 11),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppTheme.black.withOpacity(0.5),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.orange.withOpacity(0.5)),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          derivedAddress,
-                          style: TextStyle(color: Colors.orange, fontSize: 12),
-                        ),
-                      ),
-                      IconButton(
-                        icon: Icon(Icons.copy, color: Colors.orange, size: 16),
-                        onPressed: () {
-                          Clipboard.setData(ClipboardData(text: derivedAddress));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Old address copied to clipboard'),
-                              backgroundColor: Colors.orange,
-                            ),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'If you had tokens at this address, transfer them to your current wallet address above.',
-                  style: TextStyle(color: Colors.orange.withOpacity(0.8), fontSize: 10, fontStyle: FontStyle.italic),
-                ),
-                const SizedBox(height: 16),
-              ],
-              
-              Text(
-                'Private Key:',
-                style: TextStyle(
-                  color: AppTheme.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Your Polygon wallet private key (keep this secret!)',
-                style: TextStyle(color: Colors.red.withOpacity(0.8), fontSize: 11),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppTheme.black.withOpacity(0.5),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.withOpacity(0.3)),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        secretKey,
-                        style: TextStyle(color: AppTheme.white, fontSize: 12),
-                      ),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.copy, color: Colors.red, size: 16),
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: secretKey));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Private key copied to clipboard'),
-                            backgroundColor: Colors.orange,
-                          ),
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.withOpacity(0.3)),
-                ),
-                child: Text(
-                  '🔒 These credentials will be automatically cleared from memory after this dialog is closed.',
-                  style: TextStyle(color: Colors.red, fontSize: 12),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text('Close', style: TextStyle(color: AppTheme.grey)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<String?> _showPasswordInputDialog() async {
-    final passwordController = TextEditingController();
-    bool obscurePassword = true;
+  Future<String?> _showSeedPhraseInputDialog() async {
+    final seedPhraseController = TextEditingController();
+    bool obscureSeedPhrase = true;
 
     return await showDialog<String>(
       context: context,
@@ -4130,24 +4352,25 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
         builder: (context, setState) => AlertDialog(
           backgroundColor: AppTheme.darkGrey,
           title: Text(
-            'Enter Wallet Password',
+            'Enter Seed Phrase',
             style: TextStyle(color: AppTheme.white),
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'Enter your wallet password to decrypt and view your credentials.',
+                'Enter your 12-word recovery phrase to access your wallet.',
                 style: TextStyle(color: AppTheme.grey, fontSize: 14),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
               TextField(
-                controller: passwordController,
-                obscureText: obscurePassword,
+                controller: seedPhraseController,
+                obscureText: obscureSeedPhrase,
+                maxLines: obscureSeedPhrase ? 1 : 4,
                 style: TextStyle(color: AppTheme.white),
                 decoration: InputDecoration(
-                  hintText: 'Enter password',
+                  hintText: 'Enter your 12-word seed phrase',
                   hintStyle: TextStyle(color: AppTheme.grey),
                   enabledBorder: UnderlineInputBorder(
                     borderSide: BorderSide(color: AppTheme.primaryGold),
@@ -4157,11 +4380,11 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
                   ),
                   suffixIcon: IconButton(
                     icon: Icon(
-                      obscurePassword ? Icons.visibility_off : Icons.visibility,
+                      obscureSeedPhrase ? Icons.visibility_off : Icons.visibility,
                       color: AppTheme.grey,
                     ),
                     onPressed: () {
-                      setState(() => obscurePassword = !obscurePassword);
+                      setState(() => obscureSeedPhrase = !obscureSeedPhrase);
                     },
                   ),
                 ),
@@ -4175,12 +4398,12 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
             ),
             ElevatedButton(
               onPressed: () =>
-                  Navigator.of(context).pop(passwordController.text),
+                  Navigator.of(context).pop(seedPhraseController.text),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primaryGold,
                 foregroundColor: AppTheme.black,
               ),
-              child: const Text('Decrypt'),
+              child: const Text('Authenticate'),
             ),
           ],
         ),
@@ -4348,80 +4571,7 @@ class _EnhancedWalletScreenState extends State<EnhancedWalletScreen>
     );
   }
 
-  Future<String?> _showTransactionPasswordDialog(
-    String assetSymbol,
-    String amount,
-    String recipient,
-  ) async {
-    final controller = TextEditingController();
-    return await showDialog<String>(
-      context: context,
-      barrierDismissible: false, // Prevent dismissing by tapping outside
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: AppTheme.darkGrey,
-          title: Text(
-            'Confirm Transaction',
-            style: AppTheme.headingSmall.copyWith(color: AppTheme.primaryGold),
-            textAlign: TextAlign.center,
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Enter your password to sign and send $amount $assetSymbol to $recipient',
-                style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: controller,
-                obscureText: true,
-                decoration: InputDecoration(
-                  labelText: 'Password',
-                  labelStyle: TextStyle(color: AppTheme.grey),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(
-                      color: AppTheme.grey.withOpacity(0.3),
-                    ),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(
-                      color: AppTheme.grey.withOpacity(0.3),
-                    ),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: AppTheme.primaryGold),
-                  ),
-                ),
-                style: const TextStyle(color: AppTheme.white),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, null),
-              child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, controller.text),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primaryGold,
-                foregroundColor: AppTheme.black,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              child: const Text('Confirm & Send'),
-            ),
-          ],
-        );
-      },
-    );
-  }
+  // Removed: _showTransactionPasswordDialog - replaced with seed phrase authentication
 
   /// Show success dialog for successful transactions
   void _showTransactionSuccessDialog(
@@ -5770,60 +5920,17 @@ class _TransactionAuthDialog extends StatefulWidget {
 }
 
 class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
-  int _currentStep = 0; // 0 = password, 1 = biometric/confirmation
-  final TextEditingController _passwordController = TextEditingController();
-  bool _obscurePassword = true;
+  int _currentStep = 0; // 0 = seed phrase, 1 = confirmation
+  final TextEditingController _seedPhraseController = TextEditingController();
+  bool _obscureSeedPhrase = true;
   bool _isAuthenticating = false;
   String? _error;
-  bool _passwordVerified = false;
-  bool _biometricVerified = false;
-  bool _biometricsEnabled = false;
-  bool _biometricsChecked = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _checkBiometricStatus();
-  }
+  bool _seedPhraseVerified = false;
 
   @override
   void dispose() {
-    _passwordController.dispose();
+    _seedPhraseController.dispose();
     super.dispose();
-  }
-
-  Future<void> _checkBiometricStatus() async {
-    try {
-      final authProvider = Provider.of<local_auth.AuthProvider>(
-        context,
-        listen: false,
-      );
-      final user = authProvider.user;
-      if (user == null) return;
-
-      final walletDoc = await FirebaseFirestore.instance
-          .collection('secure_wallets')
-          .doc(user.uid)
-          .get();
-
-      if (walletDoc.exists) {
-        final walletData = walletDoc.data()!;
-        setState(() {
-          _biometricsEnabled = walletData['biometricsEnabled'] as bool? ?? false;
-          _biometricsChecked = true;
-        });
-      } else {
-        setState(() {
-          _biometricsEnabled = false;
-          _biometricsChecked = true;
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _biometricsEnabled = false;
-        _biometricsChecked = true;
-      });
-    }
   }
 
   @override
@@ -5841,7 +5948,7 @@ class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
-          if (_biometricsChecked) _buildStepIndicator(),
+          _buildStepIndicator(),
         ],
       ),
       content: SizedBox(
@@ -5877,12 +5984,10 @@ class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
             ),
             const SizedBox(height: 24),
             // Step Content
-            if (!_biometricsChecked)
-              const Center(child: CircularProgressIndicator())
-            else if (_currentStep == 0)
-              _buildPasswordStep()
+            if (_currentStep == 0)
+              _buildSeedPhraseStep()
             else if (_currentStep == 1)
-              _biometricsEnabled ? _buildBiometricStep() : _buildConfirmationStep(),
+              _buildConfirmationStep(),
             // Error Message
             if (_error != null) ...[
               const SizedBox(height: 16),
@@ -5919,7 +6024,7 @@ class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
             child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
           ),
           ElevatedButton(
-            onPressed: _isAuthenticating ? null : _verifyPassword,
+            onPressed: _isAuthenticating ? null : _verifySeedPhrase,
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.primaryGold,
               foregroundColor: AppTheme.black,
@@ -5930,25 +6035,21 @@ class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('Verify Password'),
+                : const Text('Verify Seed Phrase'),
           ),
         ] else if (_currentStep == 1) ...[
           TextButton(
             onPressed: () {
               setState(() {
                 _currentStep = 0;
-                _biometricVerified = false;
+                _seedPhraseVerified = false;
                 _error = null;
               });
             },
             child: Text('Back', style: TextStyle(color: AppTheme.grey)),
           ),
           ElevatedButton(
-            onPressed: _isAuthenticating
-                ? null
-                : _biometricsEnabled
-                    ? _authenticateBiometric
-                    : _confirmTransaction,
+            onPressed: _isAuthenticating ? null : _confirmTransaction,
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.primaryGold,
               foregroundColor: AppTheme.black,
@@ -5959,9 +6060,7 @@ class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : Text(_biometricsEnabled
-                    ? 'Authenticate with Biometrics'
-                    : 'Confirm Transaction'),
+                : const Text('Confirm Transaction'),
           ),
         ],
       ],
@@ -5969,11 +6068,10 @@ class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
   }
 
   Widget _buildStepIndicator() {
-    final step2Label = _biometricsEnabled ? 'Biometric' : 'Confirm';
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        _buildStepDot(0, 'Password', _currentStep >= 0),
+        _buildStepDot(0, 'Seed Phrase', _currentStep >= 0),
         Container(
           width: 40,
           height: 2,
@@ -5981,7 +6079,7 @@ class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
               ? AppTheme.primaryGold
               : AppTheme.grey.withOpacity(0.3),
         ),
-        _buildStepDot(1, step2Label, _currentStep >= 1),
+        _buildStepDot(1, 'Confirm', _currentStep >= 1),
       ],
     );
   }
@@ -6042,13 +6140,13 @@ class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
     );
   }
 
-  Widget _buildPasswordStep() {
+  Widget _buildSeedPhraseStep() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          'Step 1: Enter Password',
+          'Step 1: Enter Seed Phrase',
           style: AppTheme.bodyMedium.copyWith(
             color: AppTheme.white,
             fontWeight: FontWeight.bold,
@@ -6056,19 +6154,20 @@ class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
         ),
         const SizedBox(height: 8),
         Text(
-          'Enter your wallet password to verify your identity',
+          'Enter your 12-word recovery phrase to sign this transaction',
           style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
         ),
         const SizedBox(height: 16),
         TextField(
-          controller: _passwordController,
-          obscureText: _obscurePassword,
+          controller: _seedPhraseController,
+          obscureText: _obscureSeedPhrase,
           enabled: !_isAuthenticating,
+          maxLines: _obscureSeedPhrase ? 1 : 4,
           style: TextStyle(color: AppTheme.white),
           decoration: InputDecoration(
-            labelText: 'Password',
+            labelText: 'Seed Phrase',
             labelStyle: TextStyle(color: AppTheme.grey),
-            hintText: 'Enter your password',
+            hintText: 'Enter your 12-word recovery phrase',
             hintStyle: TextStyle(color: AppTheme.grey.withOpacity(0.5)),
             filled: true,
             fillColor: AppTheme.darkGrey.withOpacity(0.5),
@@ -6090,16 +6189,16 @@ class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
             ),
             suffixIcon: IconButton(
               icon: Icon(
-                _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                _obscureSeedPhrase ? Icons.visibility_off : Icons.visibility,
                 color: AppTheme.grey,
               ),
               onPressed: () {
-                setState(() => _obscurePassword = !_obscurePassword);
+                setState(() => _obscureSeedPhrase = !_obscureSeedPhrase);
               },
             ),
           ),
         ),
-        if (_passwordVerified) ...[
+        if (_seedPhraseVerified) ...[
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(12),
@@ -6114,7 +6213,7 @@ class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Password verified successfully',
+                    'Seed phrase verified successfully',
                     style: TextStyle(color: Colors.green, fontSize: 12),
                   ),
                 ),
@@ -6140,7 +6239,7 @@ class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
         ),
         const SizedBox(height: 8),
         Text(
-          'Please confirm this transaction. Your password has been verified.',
+          'Please confirm this transaction. Your seed phrase has been verified.',
           style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
         ),
         const SizedBox(height: 24),
@@ -6148,9 +6247,7 @@ class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
           child: Icon(
             Icons.verified_user,
             size: 80,
-            color: _biometricVerified
-                ? Colors.green
-                : AppTheme.primaryGold,
+            color: AppTheme.primaryGold,
           ),
         ),
         const SizedBox(height: 16),
@@ -6193,7 +6290,7 @@ class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Your wallet uses password-only protection. Tap confirm to proceed with the transaction.',
+                  'Tap confirm to sign and send this transaction using your seed phrase.',
                   style: TextStyle(color: Colors.orange, fontSize: 12),
                 ),
               ),
@@ -6204,132 +6301,24 @@ class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
     );
   }
 
-  Widget _buildBiometricStep() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          'Step 2: Biometric Authentication',
-          style: AppTheme.bodyMedium.copyWith(
-            color: AppTheme.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Use your fingerprint or Face ID to sign the transaction',
-          style: AppTheme.bodySmall.copyWith(color: AppTheme.grey),
-        ),
-        const SizedBox(height: 24),
-        Center(
-          child: Icon(
-            Icons.fingerprint,
-            size: 80,
-            color: _biometricVerified
-                ? Colors.green
-                : AppTheme.primaryGold,
-          ),
-        ),
-        const SizedBox(height: 16),
-        if (_biometricVerified) ...[
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.green.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.green.withOpacity(0.3)),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.check_circle, color: Colors.green, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Biometric authentication successful',
-                    style: TextStyle(color: Colors.green, fontSize: 12),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ] else ...[
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.blue.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.blue.withOpacity(0.3)),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.info_outline, color: Colors.blue, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Tap the button below to authenticate with biometrics',
-                    style: TextStyle(color: Colors.blue, fontSize: 12),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Future<void> _verifyPassword() async {
-    if (_passwordController.text.isEmpty) {
+  Future<void> _verifySeedPhrase() async {
+    final seedPhrase = _seedPhraseController.text.trim();
+    if (seedPhrase.isEmpty) {
       setState(() {
-        _error = 'Please enter your password';
+        _error = 'Please enter your seed phrase';
       });
       return;
     }
 
-    setState(() {
-      _isAuthenticating = true;
-      _error = null;
-    });
-
-    // Verify password with Firebase Auth
-    try {
-      final authProvider = Provider.of<local_auth.AuthProvider>(
-        context,
-        listen: false,
-      );
-      final currentUser = authProvider.user;
-      if (currentUser == null || currentUser.email == null) {
-        throw Exception('User not authenticated');
-      }
-
-      final credential = EmailAuthProvider.credential(
-        email: currentUser.email!,
-        password: _passwordController.text,
-      );
-      await currentUser.reauthenticateWithCredential(credential);
-
+    // Validate seed phrase format
+    final words = seedPhrase.split(RegExp(r'\s+'));
+    if (words.length != 12 && words.length != 24) {
       setState(() {
-        _passwordVerified = true;
-        _isAuthenticating = false;
-        _error = null;
+        _error = 'Seed phrase must be 12 or 24 words';
       });
-
-      // Move to next step after a short delay
-      await Future.delayed(const Duration(milliseconds: 500));
-      setState(() {
-        _currentStep = 1;
-      });
-    } catch (e) {
-      setState(() {
-        _error = 'Invalid password. Please try again.';
-        _isAuthenticating = false;
-        _passwordVerified = false;
-      });
+      return;
     }
-  }
 
-  Future<void> _authenticateBiometric() async {
     setState(() {
       _isAuthenticating = true;
       _error = null;
@@ -6345,48 +6334,32 @@ class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
         throw Exception('User not authenticated');
       }
 
-      // Authenticate with biometrics using BiometricService
-      // First get the wallet to retrieve credential ID
-      final walletDoc = await FirebaseFirestore.instance
-          .collection('secure_wallets')
-          .doc(user.uid)
-          .get();
-      
-      if (!walletDoc.exists) {
-        throw Exception('Secure wallet not found');
-      }
-
-      final walletData = walletDoc.data()!;
-      final biometricData = walletData['biometricData'] as Map<String, dynamic>?;
-      final credentialId = biometricData?['credentialId'] as String?;
-
-      final biometricResult = await BiometricService.authenticateWithBiometrics(
-        localizedReason: 'Authenticate to sign this transaction',
-        credentialId: credentialId,
+      // Verify seed phrase
+      final verifyResult = await PolygonWalletService.verifySeedPhrase(
+        userId: user.uid,
+        seedPhrase: seedPhrase,
       );
 
-      if (biometricResult['success'] == true) {
-        setState(() {
-          _biometricVerified = true;
-          _isAuthenticating = false;
-        });
+      if (verifyResult['success'] == true) {
+      setState(() {
+          _seedPhraseVerified = true;
+        _isAuthenticating = false;
+        _error = null;
+      });
 
-        // Return success result
-        await Future.delayed(const Duration(milliseconds: 500));
-        if (mounted) {
-          Navigator.of(context).pop({
-            'password': _passwordController.text,
-            'biometricVerified': true,
-          });
-        }
+      // Move to next step after a short delay
+      await Future.delayed(const Duration(milliseconds: 500));
+      setState(() {
+        _currentStep = 1;
+      });
       } else {
-        throw Exception(biometricResult['error'] ?? 'Biometric authentication failed');
+        throw Exception(verifyResult['error'] ?? 'Invalid seed phrase');
       }
     } catch (e) {
       setState(() {
-        _error = 'Biometric authentication failed: $e';
+        _error = 'Invalid seed phrase. Please check your words and try again.';
         _isAuthenticating = false;
-        _biometricVerified = false;
+        _seedPhraseVerified = false;
       });
     }
   }
@@ -6398,27 +6371,17 @@ class _TransactionAuthDialogState extends State<_TransactionAuthDialog> {
     });
 
     try {
-      // For password-only wallets, just confirm and return
-      await Future.delayed(const Duration(milliseconds: 500));
-      
-      setState(() {
-        _biometricVerified = true; // Mark as verified for consistency
-        _isAuthenticating = false;
-      });
-
-      // Return success result
+      // Return success result with seed phrase
       await Future.delayed(const Duration(milliseconds: 500));
       if (mounted) {
         Navigator.of(context).pop({
-          'password': _passwordController.text,
-          'biometricVerified': false, // No biometrics, but transaction confirmed
+          'seedPhrase': _seedPhraseController.text.trim(),
         });
       }
     } catch (e) {
       setState(() {
         _error = 'Transaction confirmation failed: $e';
         _isAuthenticating = false;
-        _biometricVerified = false;
       });
     }
   }

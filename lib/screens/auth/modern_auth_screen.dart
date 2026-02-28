@@ -8,6 +8,9 @@ import '../../providers/auth_provider.dart';
 import '../../theme/app_theme.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'dart:ui';
+import '../main_navigation.dart';
+import 'email_verification_screen.dart';
+import '../user_registration_screen.dart';
 
 class ModernAuthScreen extends StatefulWidget {
   const ModernAuthScreen({Key? key}) : super(key: key);
@@ -81,8 +84,54 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> {
       );
     }
 
-    // Success is handled by the Wrapper routing
-    // No need to show success message or navigate manually
+    if (success && mounted) {
+      // Navigate to appropriate screen based on auth state
+      await _navigateAfterAuth();
+    }
+  }
+
+  Future<void> _navigateAfterAuth() async {
+    if (!mounted) return;
+
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    
+    // Wait a moment for auth state to update
+    await Future.delayed(const Duration(milliseconds: 300));
+    
+    if (!mounted) return;
+
+    // Check if email verification is needed
+    final needsEmailVerification = await authProvider.needsEmailVerification();
+    if (!mounted) return;
+
+    if (needsEmailVerification) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (context) => const EmailVerificationScreen(),
+        ),
+      );
+      return;
+    }
+
+    // Check if profile completion is needed
+    final needsProfileCompletion = await authProvider.needsProfileCompletion();
+    if (!mounted) return;
+
+    if (needsProfileCompletion) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (context) => const UserRegistrationScreen(),
+        ),
+      );
+      return;
+    }
+
+    // User is fully authenticated and profile is complete - navigate to main app
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (context) => const MainNavigation(),
+      ),
+    );
   }
 
   void _toggleAuthMode() {

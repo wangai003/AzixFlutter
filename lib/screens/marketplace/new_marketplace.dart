@@ -497,54 +497,15 @@ class _WebViewPageState extends State<WebViewPage> {
                         return;
                       }
 
-                      // Show password confirmation dialog
-                      final password = await _showTransactionPasswordDialog(
+                      // Show seed phrase confirmation dialog
+                      final seedPhrase = await _showTransactionSeedPhraseDialog(
                         context,
                         asset.symbol,
                         amount.toString(),
                         recipientController.text,
                       );
-                      if (password == null || password.isEmpty) {
+                      if (seedPhrase == null || seedPhrase.isEmpty) {
                         return; // User cancelled
-                      }
-
-                      // Verify password with Firebase Auth
-                      final authProvider = Provider.of<local_auth.AuthProvider>(
-                        context,
-                        listen: false,
-                      );
-                      final currentUser = authProvider.user;
-                      if (currentUser == null || currentUser.email == null) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Authentication required. Please log in again.',
-                            ),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        return;
-                      }
-
-                      try {
-                        // Re-authenticate user with password
-                        final credential = EmailAuthProvider.credential(
-                          email: currentUser.email!,
-                          password: password,
-                        );
-                        await currentUser.reauthenticateWithCredential(
-                          credential,
-                        );
-                      } catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Invalid password. Please try again.',
-                            ),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
-                        return;
                       }
 
                       Navigator.of(context).pop();
@@ -563,7 +524,7 @@ class _WebViewPageState extends State<WebViewPage> {
                           asset: asset,
                           amount: amount,
                           memo: memoText,
-                          password: password, // Password from dialog
+                          seedPhrase: seedPhrase, // Seed phrase from dialog
                         );
 
                         if (result['success'] == true) {
@@ -625,7 +586,7 @@ class _WebViewPageState extends State<WebViewPage> {
     });
   }
 
-  Future<String?> _showTransactionPasswordDialog(
+  Future<String?> _showTransactionSeedPhraseDialog(
     BuildContext context,
     String assetSymbol,
     String amount,
@@ -640,66 +601,11 @@ class _WebViewPageState extends State<WebViewPage> {
       context: context,
       barrierDismissible: false, // Prevent dismissing by tapping outside
       builder: (context) {
-        return AlertDialog(
-          backgroundColor: AppTheme.darkGrey,
-          title: Text(
-            'Confirm Transaction',
-            style: AppTheme.headingSmall.copyWith(color: AppTheme.primaryGold),
-            textAlign: TextAlign.center,
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Enter your password to sign and send $amount $assetSymbol to $recipient',
-                style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: controller,
-                obscureText: true,
-                decoration: InputDecoration(
-                  labelText: 'Password',
-                  labelStyle: TextStyle(color: AppTheme.grey),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(
-                      color: AppTheme.grey.withOpacity(0.3),
-                    ),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(
-                      color: AppTheme.grey.withOpacity(0.3),
-                    ),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: AppTheme.primaryGold),
-                  ),
-                ),
-                style: const TextStyle(color: AppTheme.white),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, null),
-              child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, controller.text),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primaryGold,
-                foregroundColor: AppTheme.black,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              child: const Text('Confirm & Send'),
-            ),
-          ],
+        return _TransactionSeedPhraseDialogContent(
+          controller: controller,
+          assetSymbol: assetSymbol,
+          amount: amount,
+          recipient: recipient,
         );
       },
     );
@@ -829,6 +735,106 @@ class _WebViewPageState extends State<WebViewPage> {
             color: AppTheme.primaryGold,
             fontWeight: FontWeight.w600,
           ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TransactionSeedPhraseDialogContent extends StatefulWidget {
+  final TextEditingController controller;
+  final String assetSymbol;
+  final String amount;
+  final String recipient;
+
+  const _TransactionSeedPhraseDialogContent({
+    required this.controller,
+    required this.assetSymbol,
+    required this.amount,
+    required this.recipient,
+  });
+
+  @override
+  State<_TransactionSeedPhraseDialogContent> createState() => _TransactionSeedPhraseDialogContentState();
+}
+
+class _TransactionSeedPhraseDialogContentState extends State<_TransactionSeedPhraseDialogContent> {
+  bool _obscureSeedPhrase = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppTheme.darkGrey,
+      title: Text(
+        'Confirm Transaction',
+        style: AppTheme.headingSmall.copyWith(color: AppTheme.primaryGold),
+        textAlign: TextAlign.center,
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Enter your seed phrase to sign and send ${widget.amount} ${widget.assetSymbol} to ${widget.recipient}',
+            style: AppTheme.bodyMedium.copyWith(color: AppTheme.white),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: widget.controller,
+            obscureText: _obscureSeedPhrase,
+            maxLines: _obscureSeedPhrase ? 1 : 4,
+            decoration: InputDecoration(
+              labelText: 'Seed Phrase (12 words)',
+              labelStyle: TextStyle(color: AppTheme.grey),
+              hintText: 'Enter your 12-word recovery phrase',
+              hintStyle: TextStyle(color: AppTheme.grey.withOpacity(0.5)),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(
+                  color: AppTheme.grey.withOpacity(0.3),
+                ),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(
+                  color: AppTheme.grey.withOpacity(0.3),
+                ),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: AppTheme.primaryGold),
+              ),
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _obscureSeedPhrase ? Icons.visibility_off : Icons.visibility,
+                  color: AppTheme.grey,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _obscureSeedPhrase = !_obscureSeedPhrase;
+                  });
+                },
+              ),
+            ),
+            style: const TextStyle(color: AppTheme.white),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, null),
+          child: Text('Cancel', style: TextStyle(color: AppTheme.grey)),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(context, widget.controller.text.trim()),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.primaryGold,
+            foregroundColor: AppTheme.black,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+          child: const Text('Confirm & Send'),
         ),
       ],
     );

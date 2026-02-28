@@ -7,6 +7,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import 'package:web3dart/web3dart.dart' as web3dart;
 import 'package:web3dart/crypto.dart' as web3crypto;
+import 'package:bip39/bip39.dart' as bip39;
+import 'package:crypto/crypto.dart' as crypto;
 import '../config/api_config.dart';
 
 /// Secure Polygon Wallet Service implementing password-based AES-GCM encryption
@@ -182,29 +184,72 @@ class PolygonWalletService {
   }
 
   /// Generate a new Polygon wallet (ECDSA keypair using web3dart)
-  Map<String, String> _generatePolygonWallet() {
-    // Generate random private key using web3dart
-    final privateKey = web3dart.EthPrivateKey.createRandom(Random.secure());
-    final address = privateKey.address;
+  /// If seedPhrase is provided, derives wallet from it (deterministic)
+  /// Otherwise, generates a random wallet
+  Map<String, String> _generatePolygonWallet({String? seedPhrase}) {
+    Uint8List privateKeyBytes;
+    String privateKeyWithPrefix;
+    String address;
     
-    // Get private key as hex string
-    // privateKey.privateKey is a Uint8List, convert it to hex
-    final privateKeyBytes = privateKey.privateKey;
-    // Convert Uint8List to hex string manually
-    final privateKeyHex = privateKeyBytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join().padLeft(64, '0');
+    if (seedPhrase != null && seedPhrase.trim().isNotEmpty) {
+      // Derive wallet from seed phrase (deterministic - same seed = same address)
+      print('🔑 [GEN] Deriving wallet from seed phrase...');
+      
+      // Validate seed phrase format
+      final seedPhraseTrimmed = seedPhrase.trim();
+      final words = seedPhraseTrimmed.split(RegExp(r'\s+'));
+      
+      if (words.length != 12 && words.length != 24) {
+        throw Exception('Invalid seed phrase format. Must be 12 or 24 words.');
+      }
+      
+      // Validate mnemonic
+      if (!bip39.validateMnemonic(seedPhraseTrimmed)) {
+        throw Exception('Invalid seed phrase. Please check your words and try again.');
+      }
+      
+      // Derive private key from seed phrase
+      // Note: This uses the first 32 bytes of the BIP39 seed
+      // For full BIP44 compatibility, you'd need proper HD wallet derivation
+      // But this approach ensures the same seed phrase always generates the same address
+      final seed = bip39.mnemonicToSeed(seedPhraseTrimmed);
+      privateKeyBytes = seed.sublist(0, 32);
+      
+      // Convert to hex string
+      final privateKeyHex = privateKeyBytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+      privateKeyWithPrefix = '0x$privateKeyHex';
+      
+      // Derive address from private key
+      final ethPrivateKey = web3dart.EthPrivateKey(privateKeyBytes);
+      address = ethPrivateKey.address.hex;
+      
+      print('🔑 [GEN] Derived private key from seed phrase');
+      print('🔑 [GEN] Derived address: $address');
+      print('✅ [GEN] Same seed phrase will always generate this address');
+    } else {
+      // Generate random private key using web3dart
+      print('🔑 [GEN] Generating random wallet...');
+      final privateKey = web3dart.EthPrivateKey.createRandom(Random.secure());
+      address = privateKey.address.hex;
+      
+      // Get private key as hex string
+      privateKeyBytes = privateKey.privateKey;
+      // Convert Uint8List to hex string manually
+      final privateKeyHex = privateKeyBytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join().padLeft(64, '0');
+      
+      // Add 0x prefix for consistency with Ethereum standards
+      privateKeyWithPrefix = '0x$privateKeyHex';
+      
+      print('🔑 [GEN] Generated random private key length: ${privateKeyWithPrefix.length} (with 0x prefix)');
+      print('🔑 [GEN] Generated address: $address');
+    }
     
-    // Add 0x prefix for consistency with Ethereum standards
-    final privateKeyWithPrefix = '0x$privateKeyHex';
-    
-    print('🔑 [GEN] Generated private key length: ${privateKeyWithPrefix.length} (with 0x prefix)');
-    print('🔑 [GEN] Generated address: ${address.hex}');
-    
-    // Verify that the generated private key derives to the same address
+    // Verify that the private key derives to the same address
     try {
       final verifyPrivateKey = web3dart.EthPrivateKey(privateKeyBytes);
       final verifyAddress = verifyPrivateKey.address.hex;
       print('🔍 [GEN] Verification - derived address: $verifyAddress');
-      if (verifyAddress.toLowerCase() != address.hex.toLowerCase()) {
+      if (verifyAddress.toLowerCase() != address.toLowerCase()) {
         throw Exception('Address verification failed during generation!');
       }
       print('✅ [GEN] Address verification passed');
@@ -215,7 +260,7 @@ class PolygonWalletService {
     
     return {
       'privateKey': privateKeyWithPrefix,  // Now includes 0x prefix (66 chars)
-      'address': address.hex,  // Includes 0x prefix (42 chars)
+      'address': address,  // Includes 0x prefix (42 chars)
     };
   }
 
@@ -233,10 +278,20 @@ class PolygonWalletService {
 
       print('🔑 Generating new Polygon wallet...');
       final service = PolygonWalletService();
-      final walletKeys = service._generatePolygonWallet();
+      
+      // If recovery phrase is provided, derive wallet from it (deterministic)
+      // This ensures the same seed phrase always generates the same address
+      // Works for both Polygon and Ethereum since they're EVM-compatible
+      final walletKeys = service._generatePolygonWallet(seedPhrase: recoveryPhrase);
       final address = walletKeys['address']!;
       final privateKey = walletKeys['privateKey']!;
-      print('✅ Polygon wallet generated: ${address.substring(0, 10)}...');
+      
+      if (recoveryPhrase != null) {
+        print('✅ Polygon wallet derived from seed phrase: ${address.substring(0, 10)}...');
+        print('✅ Same seed phrase will generate the same address on Polygon and Ethereum');
+      } else {
+        print('✅ Polygon wallet generated: ${address.substring(0, 10)}...');
+      }
 
       // Encrypt the private key with password
       print('🔐 Encrypting Polygon wallet credentials...');
@@ -283,19 +338,29 @@ class PolygonWalletService {
 
       // Encrypt recovery phrase if provided
       Map<String, String>? encryptedRecoveryPhrase;
+      String? seedPhraseHash; // Store hash for seed phrase authentication
       if (recoveryPhrase != null) {
         encryptedRecoveryPhrase = await service._encryptPrivateKey(
           password,
           recoveryPhrase,
         );
+        // Also store a hash of the seed phrase for authentication
+        final normalizedSeedPhrase = recoveryPhrase.trim().toLowerCase();
+        final seedPhraseBytes = utf8.encode(normalizedSeedPhrase);
+        final hash = crypto.sha256.convert(seedPhraseBytes);
+        seedPhraseHash = hash.toString();
+        print('🔐 [STORE] Stored seed phrase hash for authentication');
       }
 
       // Store encrypted wallet data in Firestore
       final walletData = {
         'userId': userId,
         'address': address, // This MUST match what private key derives to
+        // Note: This same address works on Ethereum mainnet too (EVM-compatible)
         'encryptedPrivateKey': encryptedPrivateKey,
         'encryptedRecoveryPhrase': encryptedRecoveryPhrase,
+        'seedPhraseHash': seedPhraseHash, // Hash for seed phrase authentication
+        'derivedFromSeedPhrase': recoveryPhrase != null, // Indicates if wallet was derived from seed phrase
         'createdAt': FieldValue.serverTimestamp(),
         'lastAccessed': FieldValue.serverTimestamp(),
         'version': '1.0',
@@ -336,13 +401,19 @@ class PolygonWalletService {
       return {
         'success': true,
         'address': address,
-        'message': 'Secure Polygon wallet created successfully',
+        'message': recoveryPhrase != null 
+            ? 'Secure Polygon wallet created from seed phrase. Same address works on Ethereum too!'
+            : 'Secure Polygon wallet created successfully',
         'network': _isTestnet ? 'polygon-amoy' : 'polygon-mainnet',
         'chainId': _chainId,
+        'derivedFromSeedPhrase': recoveryPhrase != null,
+        'ethereumCompatible': true, // Polygon is EVM-compatible, same address works on Ethereum
         'securityFeatures': [
           'AES-GCM encryption',
           'PBKDF2 key derivation',
           'Password-based protection',
+          if (recoveryPhrase != null) 'Seed phrase derivation (deterministic)',
+          if (recoveryPhrase != null) 'Ethereum-compatible address',
           'Recovery phrase support',
         ],
       };
@@ -1058,6 +1129,7 @@ class PolygonWalletService {
   }
 
   /// Send MATIC transaction
+  /// Send MATIC Transaction (password-based, for backward compatibility)
   static Future<Map<String, dynamic>> sendMaticTransaction({
     required String userId,
     required String password,
@@ -1106,6 +1178,148 @@ class PolygonWalletService {
           requiredGasFee: totalRequired,
           userId: userId,
           password: password,
+          distributorPrivateKey: null, // Will use default distributor
+        );
+        
+        if (!maticCheck['success']) {
+          throw Exception('Failed to ensure sufficient MATIC: ${maticCheck['error']}');
+        }
+        
+        if (maticCheck['toppedUp'] == true) {
+          print('✅ [MATIC TX] MATIC topped up successfully, proceeding with transaction');
+        }
+        
+        // Convert amount to wei
+        final amountWei = BigInt.from(amountMatic * 1e18);
+        
+        // Create credentials from private key
+        final privateKeyBytes = web3crypto.hexToBytes(
+          privateKey.startsWith('0x') ? privateKey.substring(2) : privateKey,
+        );
+        final credentials = web3dart.EthPrivateKey(privateKeyBytes);
+        
+        // Get nonce (may have changed if we topped up)
+        final nonce = await client.getTransactionCount(credentials.address);
+        
+        // Create transaction (use web3dart Transaction)
+        final transaction = web3dart.Transaction(
+          to: web3dart.EthereumAddress.fromHex(toAddress),
+          value: web3dart.EtherAmount.fromBigInt(web3dart.EtherUnit.wei, amountWei),
+          gasPrice: currentGasPrice,
+          maxGas: currentGasLimit,
+          nonce: nonce,
+        );
+        
+        // Sign and send transaction
+        final txHash = await client.sendTransaction(
+          credentials,
+          transaction,
+          chainId: _chainId,
+        );
+        
+        await client.dispose();
+
+        return {
+          'success': true,
+          'txHash': txHash,
+          'from': fromAddress,
+          'to': toAddress,
+          'amount': amountMatic,
+          'gasUsed': currentGasLimit,
+          'message': 'MATIC transaction sent successfully',
+          'maticToppedUp': maticCheck['toppedUp'] ?? false,
+          'topUpTxHash': maticCheck['topUpTxHash'],
+        };
+      } finally {
+        await client.dispose();
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Failed to send MATIC transaction',
+      };
+    }
+  }
+
+  /// Send MATIC Transaction with Seed Phrase Authentication
+  static Future<Map<String, dynamic>> sendMaticTransactionWithSeedPhrase({
+    required String userId,
+    required String seedPhrase,
+    required String toAddress,
+    required double amountMatic,
+    int? gasLimit,
+    int? gasPrice,
+  }) async {
+    try {
+      // Verify seed phrase and derive wallet
+      final verifyResult = await verifySeedPhrase(
+        userId: userId,
+        seedPhrase: seedPhrase,
+      );
+
+      if (!verifyResult['success']) {
+        throw Exception('Seed phrase verification failed: ${verifyResult['error']}');
+      }
+
+      // Derive private key from seed phrase
+      final seedPhraseTrimmed = seedPhrase.trim();
+      final seed = bip39.mnemonicToSeed(seedPhraseTrimmed);
+      final privateKeyBytes = seed.sublist(0, 32);
+      final ethPrivateKey = web3dart.EthPrivateKey(privateKeyBytes);
+      final fromAddress = ethPrivateKey.address.hex;
+      final privateKeyHex = '0x${web3crypto.bytesToHex(privateKeyBytes, include0x: false)}';
+
+      // Get stored wallet address to verify
+      final walletDoc = await _firestore
+          .collection('polygon_wallets')
+          .doc(userId)
+          .get();
+
+      if (!walletDoc.exists) {
+        throw Exception('Wallet not found');
+      }
+
+      final walletData = walletDoc.data()!;
+      final storedAddress = walletData['address'] as String?;
+
+      // Verify derived address matches stored address
+      if (storedAddress != null && 
+          fromAddress.toLowerCase() != storedAddress.toLowerCase()) {
+        throw Exception(
+          'This wallet was not created from a seed phrase. Please recreate your wallet with a seed phrase.'
+        );
+      }
+
+      final privateKey = privateKeyHex;
+
+      // Create web3dart client for gas estimation
+      final client = web3dart.Web3Client(_currentRpcUrl, http.Client());
+      
+      try {
+        // Get gas price and estimate gas fee
+        final currentGasPrice = gasPrice != null
+            ? web3dart.EtherAmount.fromBigInt(web3dart.EtherUnit.gwei, BigInt.from(gasPrice))
+            : await client.getGasPrice();
+        final currentGasLimit = gasLimit ?? 21000;
+        
+        // Calculate gas fee
+        final gasFeeWei = currentGasPrice.getInWei * BigInt.from(currentGasLimit);
+        final gasFeeMatic = gasFeeWei.toDouble() / 1e18;
+        
+        // Calculate total required (amount + gas)
+        final totalRequired = amountMatic + gasFeeMatic;
+        
+        print('⛽ [MATIC TX] Estimated gas fee: $gasFeeMatic MATIC');
+        print('💰 [MATIC TX] Total required: $totalRequired MATIC (amount: $amountMatic + gas: $gasFeeMatic)');
+        
+        // Check and ensure sufficient MATIC for gas (supports both password and seed phrase)
+        final maticCheck = await ensureSufficientMaticForGas(
+          userAddress: fromAddress,
+          requiredGasFee: totalRequired,
+          userId: userId,
+          seedPhrase: seedPhrase,
+          distributorPrivateKey: null, // Will use default distributor
         );
         
         if (!maticCheck['success']) {
@@ -1540,13 +1754,168 @@ class PolygonWalletService {
     }
   }
 
+  /// Charge fee using seed phrase authentication
+  /// Derives private key from seed phrase to sign the fee transaction
+  static Future<Map<String, dynamic>> chargeMaticTopUpFeeWithSeedPhrase({
+    required String userId,
+    required String seedPhrase,
+    required String userAddress,
+    required double feeAmount,
+    required String feeTokenSymbol, // 'USDT' or 'USDC'
+    required String distributorPrivateKey, // Need distributor key to send MATIC for gas
+    String? feeWalletAddress,
+  }) async {
+    try {
+      print('💳 [FEE] Charging fee with seed phrase for MATIC top-up...');
+      print('💰 [FEE] Fee amount: $feeAmount $feeTokenSymbol');
+      print('📍 [FEE] User address: $userAddress');
+
+      // Verify seed phrase first
+      final verifyResult = await verifySeedPhrase(
+        userId: userId,
+        seedPhrase: seedPhrase,
+      );
+
+      if (!verifyResult['success']) {
+        throw Exception('Seed phrase verification failed: ${verifyResult['error']}');
+      }
+
+      // Derive private key from seed phrase
+      final seedPhraseTrimmed = seedPhrase.trim();
+      final seed = bip39.mnemonicToSeed(seedPhraseTrimmed);
+      final privateKeyBytes = seed.sublist(0, 32);
+      final ethPrivateKey = web3dart.EthPrivateKey(privateKeyBytes);
+      final derivedAddress = ethPrivateKey.address.hex;
+      final privateKeyHex = '0x${web3crypto.bytesToHex(privateKeyBytes, include0x: false)}';
+
+      // Verify derived address matches user address
+      if (derivedAddress.toLowerCase() != userAddress.toLowerCase()) {
+        throw Exception(
+          'Seed phrase does not match wallet address. Derived: $derivedAddress, Expected: $userAddress'
+        );
+      }
+
+      print('✅ [FEE] Seed phrase verified, derived address matches');
+
+      // First, estimate gas for the fee transaction
+      final contractAddresses = {
+        'USDT': '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
+        'USDC': '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',
+      };
+      
+      final contractAddress = contractAddresses[feeTokenSymbol.toUpperCase()];
+      if (contractAddress == null) {
+        throw Exception('Unsupported fee token: $feeTokenSymbol');
+      }
+
+      // Estimate gas for fee transaction
+      final gasEstimate = await estimateERC20GasFee(
+        fromAddress: userAddress,
+        tokenContractAddress: contractAddress,
+        toAddress: feeWalletAddress,
+        amount: feeAmount,
+      );
+
+      if (gasEstimate['success'] != true) {
+        throw Exception('Failed to estimate gas for fee transaction: ${gasEstimate['error']}');
+      }
+
+      final feeGasRequired = gasEstimate['gasFee'] as double;
+      print('⛽ [FEE] Gas required for fee transaction: $feeGasRequired MATIC');
+
+      // Check if user has MATIC for fee transaction gas
+      final balanceResult = await getPolygonBalance(userAddress);
+      final currentMaticBalance = balanceResult['balance'] as double? ?? 0.0;
+
+      // If user doesn't have enough MATIC for the fee transaction, send it first
+      if (currentMaticBalance < feeGasRequired) {
+        final maticNeeded = feeGasRequired - currentMaticBalance;
+        final maticToSend = maticNeeded * 1.1; // 10% buffer
+        
+        print('⚠️ [FEE] User needs MATIC for fee transaction. Sending $maticToSend MATIC...');
+        
+        final maticResult = await sendMaticFromDistributor(
+          toAddress: userAddress,
+          amountMatic: maticToSend,
+          distributorPrivateKey: distributorPrivateKey,
+        );
+
+        if (maticResult['success'] != true) {
+          throw Exception('Failed to send MATIC for fee transaction: ${maticResult['error']}');
+        }
+
+        // Wait for MATIC to be available
+        await Future.delayed(const Duration(seconds: 2));
+        print('✅ [FEE] MATIC sent for fee transaction gas');
+      }
+
+      // Determine fee wallet address
+      String feeWallet;
+      
+      if (feeWalletAddress != null && feeWalletAddress!.isNotEmpty) {
+        feeWallet = feeWalletAddress!;
+        print('📍 [FEE] Using parameter fee wallet: $feeWallet');
+      } else if (PolygonWalletService.feeWalletAddress != null && 
+                 PolygonWalletService.feeWalletAddress!.isNotEmpty) {
+        feeWallet = PolygonWalletService.feeWalletAddress!;
+        print('📍 [FEE] Using configured fee wallet: $feeWallet');
+      } else {
+        // Use distributor wallet as fee wallet
+        String cleanKey = distributorPrivateKey.trim();
+        if (cleanKey.startsWith('0x') || cleanKey.startsWith('0X')) {
+          cleanKey = cleanKey.substring(2);
+        }
+        final privateKeyBytes = web3crypto.hexToBytes(cleanKey);
+        final credentials = web3dart.EthPrivateKey(privateKeyBytes);
+        feeWallet = credentials.address.hex;
+        print('📍 [FEE] Using distributor wallet as fee wallet: $feeWallet');
+      }
+      
+      print('📍 [FEE] Fee wallet: $feeWallet');
+
+      // Transfer fee from user to fee wallet using seed phrase-derived private key
+      final feeResult = await sendERC20Token(
+        tokenContractAddress: contractAddress,
+        toAddress: feeWallet,
+        amount: feeAmount,
+        distributorPrivateKey: privateKeyHex, // Use derived private key
+      );
+
+      if (feeResult['success'] == true) {
+        print('✅ [FEE] Successfully charged fee: $feeAmount $feeTokenSymbol');
+        print('📋 [FEE] Transaction hash: ${feeResult['txHash']}');
+        
+        return {
+          'success': true,
+          'feeAmount': feeAmount,
+          'feeToken': feeTokenSymbol.toUpperCase(),
+          'feeTxHash': feeResult['txHash'],
+          'feeWallet': feeWallet,
+          'message': 'Fee charged successfully',
+        };
+      } else {
+        throw Exception('Failed to charge fee: ${feeResult['error']}');
+      }
+    } catch (e, stackTrace) {
+      print('❌ [FEE] Error charging fee with seed phrase: $e');
+      print('❌ [FEE] Stack trace: $stackTrace');
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Failed to charge fee',
+      };
+    }
+  }
+
   /// Check if user has enough MATIC for gas and top-up from distributor if needed
   /// Charges fee in USDT/USDC (10% more than MATIC value) before sending MATIC
+  /// Supports both password and seed phrase authentication
   static Future<Map<String, dynamic>> ensureSufficientMaticForGas({
     required String userAddress,
     required double requiredGasFee,
     String? userId,
     String? password,
+    String? seedPhrase,
     String? distributorPrivateKey,
   }) async {
     try {
@@ -1605,12 +1974,13 @@ class PolygonWalletService {
       print('   Breakdown: MATIC ($topUpAmount) + Gas ($gasCostForMaticTransfer) × 1.1 = $feeAmount');
 
       // Check if user has USDT or USDC to pay the fee
-      if (userId == null || password == null) {
+      // Require either password OR seed phrase for authentication
+      if (userId == null || (password == null && seedPhrase == null)) {
         return {
           'success': false,
           'toppedUp': false,
           'error': 'User credentials required to charge fee',
-          'message': 'Cannot charge fee without user authentication',
+          'message': 'Cannot charge fee without user authentication (password or seed phrase required)',
           'requiredFee': feeAmount,
         };
       }
@@ -1672,14 +2042,23 @@ class PolygonWalletService {
 
       // Charge the fee before sending MATIC
       print('💳 [MATIC TOP-UP] Charging fee: $feeAmount $feeTokenSymbol');
-      final feeResult = await chargeMaticTopUpFee(
-        userId: userId,
-        password: password,
-        userAddress: userAddress,
-        feeAmount: feeAmount,
-        feeTokenSymbol: feeTokenSymbol!,
-        distributorPrivateKey: distributorKey,
-      );
+      final feeResult = password != null
+          ? await chargeMaticTopUpFee(
+              userId: userId,
+              password: password,
+              userAddress: userAddress,
+              feeAmount: feeAmount,
+              feeTokenSymbol: feeTokenSymbol!,
+              distributorPrivateKey: distributorKey,
+            )
+          : await chargeMaticTopUpFeeWithSeedPhrase(
+              userId: userId,
+              seedPhrase: seedPhrase!,
+              userAddress: userAddress,
+              feeAmount: feeAmount,
+              feeTokenSymbol: feeTokenSymbol!,
+              distributorPrivateKey: distributorKey,
+            );
 
       if (feeResult['success'] != true) {
         print('❌ [MATIC TOP-UP] Failed to charge fee: ${feeResult['error']}');
@@ -2427,6 +2806,94 @@ class PolygonWalletService {
     }
   }
 
+  /// Send ERC-20 Token with User Authentication (password-based, for backward compatibility)
+  /// This version requires user password to decrypt their wallet
+  static Future<Map<String, dynamic>> sendERC20TokenWithAuth({
+    required String userId,
+    required String password,
+    required String tokenContractAddress,
+    required String toAddress,
+    required double amount,
+    int? gasLimit,
+    int? gasPrice,
+  }) async {
+    try {
+      // Authenticate and decrypt wallet
+      final authResult = await authenticateAndDecryptPolygonWallet(
+        userId,
+        password,
+      );
+
+      if (!authResult['success']) {
+        throw Exception('Authentication failed: ${authResult['error']}');
+      }
+
+      final privateKey = authResult['privateKey'] as String;
+      final fromAddress = authResult['address'] as String;
+
+      print('🔐 [ERC20] User authenticated: ${fromAddress.substring(0, 10)}...');
+
+      // Estimate gas fee for ERC-20 transaction
+      final gasEstimate = await estimateERC20GasFee(
+        fromAddress: fromAddress,
+        tokenContractAddress: tokenContractAddress,
+        toAddress: toAddress,
+        amount: amount,
+      );
+
+      if (gasEstimate['success'] != true) {
+        throw Exception('Failed to estimate gas fee: ${gasEstimate['error']}');
+      }
+
+      final requiredGasFee = gasEstimate['gasFee'] as double;
+      print('⛽ [ERC20] Estimated gas fee: $requiredGasFee MATIC');
+
+      // Check and ensure sufficient MATIC for gas
+      final maticCheck = await ensureSufficientMaticForGas(
+        userAddress: fromAddress,
+        requiredGasFee: requiredGasFee,
+        userId: userId,
+        password: password,
+        distributorPrivateKey: null,
+      );
+
+      if (!maticCheck['success']) {
+        throw Exception('Failed to ensure sufficient MATIC: ${maticCheck['error']}');
+      }
+
+      if (maticCheck['toppedUp'] == true) {
+        print('✅ [ERC20] MATIC topped up successfully');
+      }
+
+      // Use the main sendERC20Token method with user's private key
+      final result = await sendERC20Token(
+        tokenContractAddress: tokenContractAddress,
+        toAddress: toAddress,
+        amount: amount,
+        distributorPrivateKey: privateKey,
+        gasLimit: gasLimit,
+        gasPrice: gasPrice,
+      );
+
+      // Add top-up info to result if applicable
+      if (maticCheck['toppedUp'] == true) {
+        result['maticToppedUp'] = true;
+        result['topUpTxHash'] = maticCheck['topUpTxHash'];
+        result['feeCharged'] = maticCheck['feeCharged'];
+        result['feeToken'] = maticCheck['feeToken'];
+        result['feeTxHash'] = maticCheck['feeTxHash'];
+      }
+
+      return result;
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Failed to send ERC-20 token',
+      };
+    }
+  }
+
   /// Send ERC-20 Token Transaction
   /// Used for sending AKOFA or other ERC-20 tokens on Polygon
   static Future<Map<String, dynamic>> sendERC20Token({
@@ -2586,11 +3053,11 @@ class PolygonWalletService {
     }
   }
 
-  /// Send ERC-20 Token with User Authentication
-  /// This version requires user password to decrypt their wallet
-  static Future<Map<String, dynamic>> sendERC20TokenWithAuth({
+  /// Send ERC-20 Token with Seed Phrase Authentication
+  /// This version requires user seed phrase to derive their wallet
+  static Future<Map<String, dynamic>> sendERC20TokenWithSeedPhrase({
     required String userId,
-    required String password,
+    required String seedPhrase,
     required String tokenContractAddress,
     required String toAddress,
     required double amount,
@@ -2598,18 +3065,48 @@ class PolygonWalletService {
     int? gasPrice,
   }) async {
     try {
-      // Authenticate and decrypt wallet
-      final authResult = await authenticateAndDecryptPolygonWallet(
-        userId,
-        password,
+      // Verify seed phrase and get wallet info
+      final verifyResult = await verifySeedPhrase(
+        userId: userId,
+        seedPhrase: seedPhrase,
       );
 
-      if (!authResult['success']) {
-        throw Exception('Authentication failed: ${authResult['error']}');
+      if (!verifyResult['success']) {
+        throw Exception('Seed phrase verification failed: ${verifyResult['error']}');
       }
 
-      final privateKey = authResult['privateKey'] as String;
-      final fromAddress = authResult['address'] as String;
+      // Derive private key from seed phrase
+      final seedPhraseTrimmed = seedPhrase.trim();
+      final seed = bip39.mnemonicToSeed(seedPhraseTrimmed);
+      final privateKeyBytes = seed.sublist(0, 32);
+      final ethPrivateKey = web3dart.EthPrivateKey(privateKeyBytes);
+      final fromAddress = ethPrivateKey.address.hex;
+      final privateKeyHex = '0x${web3crypto.bytesToHex(privateKeyBytes, include0x: false)}';
+
+      print('🔐 [ERC20] Seed phrase verified, derived address: ${fromAddress.substring(0, 10)}...');
+
+      // Get stored wallet address to verify
+      final walletDoc = await _firestore
+          .collection('polygon_wallets')
+          .doc(userId)
+          .get();
+
+      if (!walletDoc.exists) {
+        throw Exception('Wallet not found');
+      }
+
+      final walletData = walletDoc.data()!;
+      final storedAddress = walletData['address'] as String?;
+
+      // Verify derived address matches stored address
+      if (storedAddress != null && 
+          fromAddress.toLowerCase() != storedAddress.toLowerCase()) {
+        throw Exception(
+          'This wallet was not created from a seed phrase. Please recreate your wallet with a seed phrase.'
+        );
+      }
+
+      final privateKey = privateKeyHex;
 
       print('🔐 [ERC20] User authenticated: ${fromAddress.substring(0, 10)}...');
 
@@ -2695,12 +3192,13 @@ class PolygonWalletService {
         }
       }
 
-      // Check and ensure sufficient MATIC for gas (will charge fee if needed)
+      // Check and ensure sufficient MATIC for gas (supports both password and seed phrase)
       final maticCheck = await ensureSufficientMaticForGas(
         userAddress: fromAddress,
         requiredGasFee: requiredGasFee,
         userId: userId,
-        password: password,
+        seedPhrase: seedPhrase,
+        distributorPrivateKey: null, // Will use default distributor
       );
 
       if (!maticCheck['success']) {
@@ -3023,6 +3521,143 @@ class PolygonWalletService {
       return {
         'success': false,
         'error': e.toString(),
+      };
+    }
+  }
+
+  /// Verify seed phrase by comparing hash with stored hash
+  static Future<Map<String, dynamic>> verifySeedPhrase({
+    required String userId,
+    required String seedPhrase,
+  }) async {
+    try {
+      print('🔐 [SEED] Verifying seed phrase for user: $userId');
+      
+      // Validate seed phrase format
+      final seedPhraseTrimmed = seedPhrase.trim();
+      final words = seedPhraseTrimmed.split(RegExp(r'\s+'));
+      
+      if (words.length != 12 && words.length != 24) {
+        return {
+          'success': false,
+          'error': 'Invalid seed phrase format. Must be 12 or 24 words.',
+        };
+      }
+
+      // Validate mnemonic
+      if (!bip39.validateMnemonic(seedPhraseTrimmed)) {
+        return {
+          'success': false,
+          'error': 'Invalid seed phrase. Please check your words and try again.',
+        };
+      }
+
+      // Get wallet data
+      final walletDoc = await _firestore
+          .collection('polygon_wallets')
+          .doc(userId)
+          .get();
+
+      if (!walletDoc.exists) {
+        return {
+          'success': false,
+          'error': 'Wallet not found',
+        };
+      }
+
+      final walletData = walletDoc.data()!;
+      final storedHash = walletData['seedPhraseHash'] as String?;
+
+      if (storedHash == null) {
+        return {
+          'success': false,
+          'error': 'No seed phrase hash found for this wallet. This wallet may have been created without a seed phrase, or it was created before seed phrase authentication was enabled.',
+        };
+      }
+
+      // Compute hash of input seed phrase
+      final normalizedSeedPhrase = seedPhraseTrimmed.toLowerCase();
+      final seedPhraseBytes = utf8.encode(normalizedSeedPhrase);
+      final inputHash = crypto.sha256.convert(seedPhraseBytes).toString();
+      
+      // Compare hashes
+      if (inputHash == storedHash) {
+        print('✅ [SEED] Seed phrase verified successfully');
+        return {
+          'success': true,
+          'message': 'Seed phrase verified successfully',
+        };
+      } else {
+        print('❌ [SEED] Seed phrase hash mismatch');
+        return {
+          'success': false,
+          'error': 'Invalid seed phrase. The words do not match your wallet.',
+        };
+      }
+    } catch (e) {
+      print('❌ [SEED] Seed phrase verification error: $e');
+      return {
+        'success': false,
+        'error': 'Failed to verify seed phrase: $e',
+      };
+    }
+  }
+
+  /// Authenticate wallet using seed phrase instead of password
+  /// This verifies the seed phrase and returns wallet info if successful
+  static Future<Map<String, dynamic>> authenticateWithSeedPhrase({
+    required String userId,
+    required String seedPhrase,
+  }) async {
+    try {
+      print('🔐 [AUTH] Authenticating with seed phrase for user: $userId');
+      
+      // First verify the seed phrase
+      final verifyResult = await verifySeedPhrase(
+        userId: userId,
+        seedPhrase: seedPhrase,
+      );
+      
+      if (verifyResult['success'] != true) {
+        return verifyResult;
+      }
+      
+      // If verification succeeds, get wallet info
+      final walletDoc = await _firestore
+          .collection('polygon_wallets')
+          .doc(userId)
+          .get();
+      
+      if (!walletDoc.exists) {
+        return {
+          'success': false,
+          'error': 'Wallet not found',
+        };
+      }
+      
+      final walletData = walletDoc.data()!;
+      final address = walletData['address'] as String?;
+      
+      if (address == null) {
+        return {
+          'success': false,
+          'error': 'Wallet address not found',
+        };
+      }
+      
+      print('✅ [AUTH] Seed phrase authentication successful');
+      return {
+        'success': true,
+        'address': address,
+        'message': 'Wallet authenticated with seed phrase',
+        'network': walletData['network'] as String? ?? 'polygon-amoy',
+        'chainId': walletData['chainId'] as int? ?? 80002,
+      };
+    } catch (e) {
+      print('❌ [AUTH] Seed phrase authentication error: $e');
+      return {
+        'success': false,
+        'error': 'Authentication failed: $e',
       };
     }
   }

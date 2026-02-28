@@ -9,9 +9,57 @@ import '../widgets/custom_button.dart';
 import '../widgets/google_sign_in_button.dart';
 import 'auth/login_screen.dart';
 import 'auth/register_screen.dart';
+import 'main_navigation.dart';
+import 'auth/email_verification_screen.dart';
+import 'user_registration_screen.dart';
 
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({Key? key}) : super(key: key);
+
+  static Future<void> _navigateAfterAuth(
+    BuildContext context,
+    AuthProvider authProvider,
+  ) async {
+    if (!context.mounted) return;
+
+    // Wait a moment for auth state to update
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    if (!context.mounted) return;
+
+    // Check if email verification is needed
+    final needsEmailVerification = await authProvider.needsEmailVerification();
+    if (!context.mounted) return;
+
+    if (needsEmailVerification) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (context) => const EmailVerificationScreen(),
+        ),
+      );
+      return;
+    }
+
+    // Check if profile completion is needed
+    final needsProfileCompletion = await authProvider.needsProfileCompletion();
+    if (!context.mounted) return;
+
+    if (needsProfileCompletion) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (context) => const UserRegistrationScreen(),
+        ),
+      );
+      return;
+    }
+
+    // User is fully authenticated and profile is complete - navigate to main app
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (context) => const MainNavigation(),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -107,9 +155,7 @@ class WelcomeScreen extends StatelessWidget {
                   onPressed: () async {
                     final success = await authProvider.signInWithGoogle();
                     if (success && context.mounted) {
-                      // After successful Google sign-in, let the Wrapper handle the flow
-                      // Don't manually navigate here - let the authentication state change
-                      // trigger the proper flow in the Wrapper
+                      await _navigateAfterAuth(context, authProvider);
                     }
                   },
                   isLoading: authProvider.isLoading,

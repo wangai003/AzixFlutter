@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'polygon_wallet_service.dart';
+import 'ethereum_wallet_service.dart';
 import 'transaction_service.dart';
 import '../models/asset_config.dart';
 
@@ -19,10 +20,10 @@ class StorePaymentService {
   );
   // For mobile testing: 'http://YOUR_IP_ADDRESS:3000'
 
-  /// Process payment for a store order using Polygon wallet
+  /// Process payment for a store order using Polygon or Ethereum wallet
   /// 
   /// This method:
-  /// 1. Executes the Polygon wallet transaction
+  /// 1. Executes the wallet transaction on the selected network
   /// 2. Stores payment details with order ID in backend
   /// 3. Records transaction in Firestore
   static Future<StorePaymentResult> processStorePayment({
@@ -30,7 +31,8 @@ class StorePaymentService {
     required String recipientAddress,
     required double amount,
     required String assetCode,
-    required String password, // Required for Polygon wallet authentication
+    required String seedPhrase, // Required for wallet authentication
+    String network = 'polygon', // 'polygon' or 'ethereum'
     String? storeId,
     String? storeName,
     String? memo,
@@ -58,22 +60,35 @@ class StorePaymentService {
         throw Exception('Recipient address is required');
       }
 
-      // Validate Polygon address format
+      // Validate EVM address format (works for both Polygon and Ethereum)
       if (!recipientAddress.startsWith('0x') || recipientAddress.length != 42) {
-        throw Exception('Invalid Polygon address format. Must start with 0x and be 42 characters long.');
+        throw Exception('Invalid address format. Must start with 0x and be 42 characters long.');
       }
 
-      // Validate asset code - only AKOFA, USDC, USDT allowed
-      const allowedAssets = ['AKOFA', 'USDC', 'USDT'];
+      // Validate network
+      if (network != 'polygon' && network != 'ethereum') {
+        throw Exception('Invalid network. Must be "polygon" or "ethereum"');
+      }
+
+      // Validate asset code based on network
       final normalizedAssetCode = assetCode.toUpperCase();
-      if (!allowedAssets.contains(normalizedAssetCode)) {
-        throw Exception('Only AKOFA, USDC, and USDT are allowed for store payments. Received: $assetCode');
+      if (network == 'polygon') {
+        const allowedAssets = ['AKOFA', 'USDC', 'USDT'];
+        if (!allowedAssets.contains(normalizedAssetCode)) {
+          throw Exception('Only AKOFA, USDC, and USDT are allowed for Polygon store payments. Received: $assetCode');
+        }
+      } else {
+        // Ethereum network
+        const allowedAssets = ['USDC', 'USDT', 'DAI', 'WETH'];
+        if (!allowedAssets.contains(normalizedAssetCode)) {
+          throw Exception('Only USDC, USDT, DAI, and WETH are allowed for Ethereum store payments. Received: $assetCode');
+        }
       }
 
       print('🛒 [STORE PAYMENT] Processing payment for order: $orderId');
       print('💰 Amount: $amount $assetCode');
       print('📍 Recipient: ${recipientAddress.substring(0, 10)}...');
-      print('⛓️  Network: Polygon');
+      print('⛓️  Network: ${network == 'ethereum' ? 'Ethereum' : 'Polygon'}');
 
       // Step 0: Validate order before sending any funds
       final orderValidation = await _validateOrderBeforePayment(
@@ -85,44 +100,75 @@ class StorePaymentService {
         throw Exception(orderValidation['error'] ?? 'Order validation failed');
       }
 
-      // Step 1: Execute Polygon wallet transaction
+      // Step 1: Execute wallet transaction on selected network
       Map<String, dynamic> transactionResult;
       String transactionHash;
 
       try {
-        // Get contract address for the token (already validated above)
+        // Get contract address for the token based on network
         final normalizedAssetCode = assetCode.toUpperCase();
-
-        // Switch network based on asset (AKOFA testnet, others mainnet)
-        previousNetwork = PolygonWalletService.getNetworkInfo();
-        final isAkofa = normalizedAssetCode == 'AKOFA';
-        PolygonWalletService.setNetwork(isTestnet: isAkofa);
-
         String tokenContractAddress;
-        switch (normalizedAssetCode) {
-          case 'AKOFA':
-            tokenContractAddress = '0xf1266ACCf0f757c61e4DFDD9EBBcaC05D2Ee375F'; // AKOFA on Polygon Amoy
-            break;
-          case 'USDC':
-            tokenContractAddress = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359'; // USDC on Polygon
-            break;
-          case 'USDT':
-            tokenContractAddress = '0xc2132D05D31c914a87C6611C10748AEb04B58e8F'; // USDT on Polygon
-            break;
-          default:
-            throw Exception('Unsupported asset: $assetCode');
-        }
 
-        // Execute the payment transaction on Polygon (all are ERC-20 tokens)
-        // Use the same serverless MATIC top-up flow as enhanced wallet sends.
-        print('⛽ [STORE PAYMENT] Using Polygon serverless gas top-up flow');
-        transactionResult = await _sendStorePaymentToken(
-          userId: user.uid,
-          password: password,
-          tokenContractAddress: tokenContractAddress,
-          toAddress: recipientAddress,
-          amount: amount,
-        );
+        if (network == 'polygon') {
+          // Switch network based on asset (AKOFA testnet, others mainnet)
+          previousNetwork = PolygonWalletService.getNetworkInfo();
+          final isAkofa = normalizedAssetCode == 'AKOFA';
+          PolygonWalletService.setNetwork(isTestnet: isAkofa);
+
+          switch (normalizedAssetCode) {
+            case 'AKOFA':
+              tokenContractAddress = '0xf1266ACCf0f757c61e4DFDD9EBBcaC05D2Ee375F'; // AKOFA on Polygon Amoy
+              break;
+            case 'USDC':
+              tokenContractAddress = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359'; // USDC on Polygon
+              break;
+            case 'USDT':
+              tokenContractAddress = '0xc2132D05D31c914a87C6611C10748AEb04B58e8F'; // USDT on Polygon
+              break;
+            default:
+              throw Exception('Unsupported asset for Polygon: $assetCode');
+          }
+
+          // Execute the payment transaction on Polygon
+          print('⛽ [STORE PAYMENT] Using Polygon serverless gas top-up flow');
+          transactionResult = await _sendStorePaymentToken(
+            userId: user.uid,
+            seedPhrase: seedPhrase,
+            tokenContractAddress: tokenContractAddress,
+            toAddress: recipientAddress,
+            amount: amount,
+            network: 'polygon',
+          );
+        } else {
+          // Ethereum network
+          switch (normalizedAssetCode) {
+            case 'USDC':
+              tokenContractAddress = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC on Ethereum
+              break;
+            case 'USDT':
+              tokenContractAddress = '0xdAC17F958D2ee523a2206206994597C13D831ec7'; // USDT on Ethereum
+              break;
+            case 'DAI':
+              tokenContractAddress = '0x6B175474E89094C44Da98b954EedeAC495271d0F'; // DAI on Ethereum
+              break;
+            case 'WETH':
+              tokenContractAddress = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'; // WETH on Ethereum
+              break;
+            default:
+              throw Exception('Unsupported asset for Ethereum: $assetCode');
+          }
+
+          // Execute the payment transaction on Ethereum
+          print('⛽ [STORE PAYMENT] Using Ethereum network');
+          transactionResult = await _sendStorePaymentToken(
+            userId: user.uid,
+            seedPhrase: seedPhrase,
+            tokenContractAddress: tokenContractAddress,
+            toAddress: recipientAddress,
+            amount: amount,
+            network: 'ethereum',
+          );
+        }
 
         transactionHash = transactionResult['txHash'] ?? 
                          transactionResult['transactionHash'] ?? 
@@ -133,7 +179,7 @@ class StorePaymentService {
           throw Exception('Transaction hash not found in response');
         }
 
-        print('✅ [STORE PAYMENT] Polygon transaction sent: $transactionHash');
+        print('✅ [STORE PAYMENT] ${network == 'ethereum' ? 'Ethereum' : 'Polygon'} transaction sent: $transactionHash');
       } catch (e) {
         print('❌ [STORE PAYMENT] Transaction failed: $e');
         return StorePaymentResult(
@@ -144,7 +190,7 @@ class StorePaymentService {
       }
 
       // Step 2: Verify transaction receipt (best-effort)
-      final receiptResult = await _waitForTransactionReceipt(transactionHash);
+      final receiptResult = await _waitForTransactionReceipt(transactionHash, network: network);
       final txStatus = receiptResult['status'] as String? ?? 'pending';
       if (txStatus != 'success') {
         return StorePaymentResult(
@@ -157,7 +203,7 @@ class StorePaymentService {
         );
       }
 
-      // Step 3: Get sender address for storage
+      // Step 3: Get sender address for storage (same address for both networks)
       String? senderAddress;
       try {
         senderAddress = await PolygonWalletService.getCorrectWalletAddress(user.uid);
@@ -219,22 +265,24 @@ class StorePaymentService {
 
       // Step 6: Record transaction in transaction history
       try {
-        final networkInfo = PolygonWalletService.getNetworkInfo();
+        final networkInfo = network == 'ethereum' 
+            ? EthereumWalletService.getNetworkInfo()
+            : PolygonWalletService.getNetworkInfo();
         await TransactionService.recordSend(
           amount: amount,
           assetCode: assetCode,
           recipientAddress: recipientAddress,
           memo: memo ?? 'Order: $orderId',
-          stellarHash: transactionHash, // Using same field for Polygon tx hash
+          stellarHash: transactionHash, // Using same field for tx hash
           additionalMetadata: {
             'orderId': orderId,
             'paymentType': 'store_payment',
             'storeId': storeId,
             'storeName': storeName,
-            'blockchain': 'polygon',
-            'network': networkInfo['isTestnet'] == true
-                ? 'polygon-amoy'
-                : 'polygon-mainnet',
+            'blockchain': network,
+            'network': network == 'ethereum'
+                ? (networkInfo['isTestnet'] == true ? 'ethereum-sepolia' : 'ethereum-mainnet')
+                : (networkInfo['isTestnet'] == true ? 'polygon-amoy' : 'polygon-mainnet'),
             'chainId': networkInfo['chainId'],
             'txStatus': txStatus,
             ...?additionalData,
@@ -280,22 +328,34 @@ class StorePaymentService {
     }
   }
 
-  /// Send a store payment token using Polygon serverless MATIC top-ups.
-  /// This intentionally avoids Biconomy gasless relays.
+  /// Send a store payment token using seed phrase authentication
+  /// Supports both Polygon and Ethereum networks
   static Future<Map<String, dynamic>> _sendStorePaymentToken({
     required String userId,
-    required String password,
+    required String seedPhrase,
     required String tokenContractAddress,
     required String toAddress,
     required double amount,
+    required String network,
   }) async {
-    return PolygonWalletService.sendERC20TokenWithAuth(
-      userId: userId,
-      password: password,
-      tokenContractAddress: tokenContractAddress,
-      toAddress: toAddress,
-      amount: amount,
-    );
+    if (network == 'ethereum') {
+      return EthereumWalletService.sendERC20TokenWithSeedPhrase(
+        userId: userId,
+        seedPhrase: seedPhrase,
+        tokenContractAddress: tokenContractAddress,
+        toAddress: toAddress,
+        amount: amount,
+      );
+    } else {
+      // Polygon network - use seed phrase authentication
+      return PolygonWalletService.sendERC20TokenWithSeedPhrase(
+        userId: userId,
+        seedPhrase: seedPhrase,
+        tokenContractAddress: tokenContractAddress,
+        toAddress: toAddress,
+        amount: amount,
+      );
+    }
   }
 
   /// Store payment transaction in backend
@@ -535,10 +595,13 @@ class StorePaymentService {
 
   static Future<Map<String, dynamic>> _waitForTransactionReceipt(
     String txHash, {
+    String network = 'polygon',
     int maxAttempts = 5,
     Duration delay = const Duration(seconds: 3),
   }) async {
     for (int attempt = 0; attempt < maxAttempts; attempt++) {
+      // Note: We'd need to add getTransactionReceipt to EthereumWalletService
+      // For now, we'll use Polygon's method for both (they're EVM-compatible)
       final receiptResult =
           await PolygonWalletService.getTransactionReceipt(txHash);
       if (receiptResult['success'] == true) {

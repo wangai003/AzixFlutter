@@ -22,45 +22,27 @@ class WalletAuthDialog extends StatefulWidget {
 }
 
 class _WalletAuthDialogState extends State<WalletAuthDialog> {
-  final TextEditingController _passwordController = TextEditingController();
-  bool _obscurePassword = true;
+  final TextEditingController _seedPhraseController = TextEditingController();
+  bool _obscureSeedPhrase = true;
   bool _isAuthenticating = false;
   String? _error;
-  bool _usePassword = false; // Start with biometric if available
+  bool _useSeedPhrase = true; // Always use seed phrase for authentication
 
   @override
   void initState() {
     super.initState();
-    // Try biometric authentication first if enabled
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final sessionProvider = Provider.of<WalletSessionProvider>(
-        context,
-        listen: false,
-      );
-      
-      if (widget.showBiometricOption && 
-          sessionProvider.biometricsEnabled && 
-          !_usePassword) {
-        _authenticateWithBiometric();
-      } else {
-        // Show password input
-        setState(() => _usePassword = true);
-      }
-    });
+    // Always show seed phrase input
+    setState(() => _useSeedPhrase = true);
   }
 
   @override
   void dispose() {
-    _passwordController.dispose();
+    _seedPhraseController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final sessionProvider = Provider.of<WalletSessionProvider>(context);
-    final showBiometric = widget.showBiometricOption && 
-                          sessionProvider.biometricsEnabled;
-
     return WillPopScope(
       onWillPop: () async => false, // Prevent dismissing without authentication
       child: Dialog(
@@ -87,7 +69,7 @@ class _WalletAuthDialogState extends State<WalletAuthDialog> {
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  _usePassword ? Icons.lock : Icons.fingerprint,
+                  Icons.vpn_key,
                   color: AppTheme.primaryGold,
                   size: 48,
                 ),
@@ -117,145 +99,109 @@ class _WalletAuthDialogState extends State<WalletAuthDialog> {
               
               const SizedBox(height: 24),
               
-              // Authentication UI
-              if (_usePassword) ...[
-                // Password Input
-                TextField(
-                  controller: _passwordController,
-                  obscureText: _obscurePassword,
-                  enabled: !_isAuthenticating,
-                  style: TextStyle(color: AppTheme.white),
-                  decoration: InputDecoration(
-                    labelText: 'Wallet Password',
-                    labelStyle: TextStyle(color: AppTheme.grey),
-                    hintText: 'Enter your wallet password',
-                    hintStyle: TextStyle(color: AppTheme.grey.withOpacity(0.5)),
-                    filled: true,
-                    fillColor: AppTheme.black.withOpacity(0.3),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: AppTheme.primaryGold.withOpacity(0.3),
-                      ),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: AppTheme.primaryGold.withOpacity(0.3),
-                      ),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: AppTheme.primaryGold),
-                    ),
-                    prefixIcon: Icon(Icons.lock, color: AppTheme.grey),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        _obscurePassword
-                            ? Icons.visibility_off
-                            : Icons.visibility,
-                        color: AppTheme.grey,
-                      ),
-                      onPressed: () {
-                        setState(() => _obscurePassword = !_obscurePassword);
-                      },
-                    ),
-                  ),
-                  onSubmitted: (_) => _authenticateWithPassword(),
-                ),
-                
-                const SizedBox(height: 24),
-                
-                // Authenticate Button
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _isAuthenticating ? null : _authenticateWithPassword,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primaryGold,
-                      foregroundColor: AppTheme.black,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: _isAuthenticating
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: AppTheme.black,
-                            ),
-                          )
-                        : Text(
-                            'Authenticate',
-                            style: AppTheme.bodyLarge.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                  ),
-                ),
-              ] else ...[
-                // Biometric Authentication UI
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: AppTheme.black.withOpacity(0.3),
+              // Seed Phrase Input
+              TextField(
+                controller: _seedPhraseController,
+                obscureText: _obscureSeedPhrase,
+                enabled: !_isAuthenticating,
+                maxLines: _obscureSeedPhrase ? 1 : 4,
+                style: TextStyle(color: AppTheme.white),
+                decoration: InputDecoration(
+                  labelText: 'Seed Phrase',
+                  labelStyle: TextStyle(color: AppTheme.grey),
+                  hintText: 'Enter your 12-word recovery phrase',
+                  hintStyle: TextStyle(color: AppTheme.grey.withOpacity(0.5)),
+                  filled: true,
+                  fillColor: AppTheme.black.withOpacity(0.3),
+                  border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    children: [
-                      if (_isAuthenticating) ...[
-                        const CircularProgressIndicator(
-                          color: AppTheme.primaryGold,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Waiting for biometric authentication...',
-                          style: AppTheme.bodySmall.copyWith(
-                            color: AppTheme.grey,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ] else ...[
-                        Icon(
-                          Icons.fingerprint,
-                          color: AppTheme.primaryGold,
-                          size: 64,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Touch sensor to authenticate',
-                          style: AppTheme.bodyMedium.copyWith(
-                            color: AppTheme.white,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                
-                const SizedBox(height: 16),
-                
-                // Retry Biometric Button
-                if (!_isAuthenticating)
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton(
-                      onPressed: _authenticateWithBiometric,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppTheme.primaryGold,
-                        side: BorderSide(color: AppTheme.primaryGold),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text('Try Again'),
+                    borderSide: BorderSide(
+                      color: AppTheme.primaryGold.withOpacity(0.3),
                     ),
                   ),
-              ],
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(
+                      color: AppTheme.primaryGold.withOpacity(0.3),
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: AppTheme.primaryGold),
+                  ),
+                  prefixIcon: Icon(Icons.vpn_key, color: AppTheme.grey),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscureSeedPhrase
+                          ? Icons.visibility_off
+                          : Icons.visibility,
+                      color: AppTheme.grey,
+                    ),
+                    onPressed: () {
+                      setState(() => _obscureSeedPhrase = !_obscureSeedPhrase);
+                    },
+                  ),
+                ),
+                onSubmitted: (_) => _authenticateWithSeedPhrase(),
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Info text
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.black.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, color: AppTheme.primaryGold, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Enter your 12-word recovery phrase to access your wallet',
+                        style: AppTheme.bodySmall.copyWith(
+                          color: AppTheme.grey,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              const SizedBox(height: 24),
+              
+              // Authenticate Button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _isAuthenticating ? null : _authenticateWithSeedPhrase,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryGold,
+                    foregroundColor: AppTheme.black,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: _isAuthenticating
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppTheme.black,
+                          ),
+                        )
+                      : Text(
+                          'Authenticate',
+                          style: AppTheme.bodyLarge.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                ),
+              ),
               
               // Error Message
               if (_error != null) ...[
@@ -286,35 +232,6 @@ class _WalletAuthDialogState extends State<WalletAuthDialog> {
                 ),
               ],
               
-              // Switch Authentication Method
-              if (showBiometric) ...[
-                const SizedBox(height: 16),
-                TextButton(
-                  onPressed: _isAuthenticating
-                      ? null
-                      : () {
-                          setState(() {
-                            _usePassword = !_usePassword;
-                            _error = null;
-                          });
-                          
-                          // If switching to biometric, try authentication immediately
-                          if (!_usePassword) {
-                            _authenticateWithBiometric();
-                          }
-                        },
-                  child: Text(
-                    _usePassword
-                        ? 'Use Biometric Authentication'
-                        : 'Use Password Instead',
-                    style: TextStyle(
-                      color: AppTheme.primaryGold,
-                      decoration: TextDecoration.underline,
-                    ),
-                  ),
-                ),
-              ],
-              
               const SizedBox(height: 8),
               
               // Cancel Button (goes back to main app)
@@ -338,10 +255,20 @@ class _WalletAuthDialogState extends State<WalletAuthDialog> {
     );
   }
 
-  Future<void> _authenticateWithPassword() async {
-    if (_passwordController.text.trim().isEmpty) {
+  Future<void> _authenticateWithSeedPhrase() async {
+    final seedPhrase = _seedPhraseController.text.trim();
+    if (seedPhrase.isEmpty) {
       setState(() {
-        _error = 'Please enter your password';
+        _error = 'Please enter your seed phrase';
+      });
+      return;
+    }
+
+    // Validate seed phrase format (should be 12 or 24 words)
+    final words = seedPhrase.split(RegExp(r'\s+'));
+    if (words.length != 12 && words.length != 24) {
+      setState(() {
+        _error = 'Seed phrase must be 12 or 24 words';
       });
       return;
     }
@@ -357,13 +284,11 @@ class _WalletAuthDialogState extends State<WalletAuthDialog> {
         listen: false,
       );
 
-      final result = await sessionProvider.authenticateWithPassword(
-        _passwordController.text,
-      );
+      final result = await sessionProvider.authenticateWithSeedPhrase(seedPhrase);
 
       if (result['success'] == true) {
-        // Clear password
-        _passwordController.clear();
+        // Clear seed phrase
+        _seedPhraseController.clear();
         
         // Close dialog with success
         if (mounted) {
@@ -383,49 +308,6 @@ class _WalletAuthDialogState extends State<WalletAuthDialog> {
     }
   }
 
-  Future<void> _authenticateWithBiometric() async {
-    setState(() {
-      _isAuthenticating = true;
-      _error = null;
-    });
-
-    try {
-      final sessionProvider = Provider.of<WalletSessionProvider>(
-        context,
-        listen: false,
-      );
-
-      final result = await sessionProvider.authenticateWithBiometrics();
-
-      if (result['success'] == true) {
-        // Close dialog with success
-        if (mounted) {
-          Navigator.of(context).pop(true);
-        }
-      } else {
-        setState(() {
-          _error = result['error'] ?? 'Biometric authentication failed';
-          _isAuthenticating = false;
-          
-          // Auto-switch to password if biometric fails
-          Future.delayed(const Duration(seconds: 2), () {
-            if (mounted) {
-              setState(() {
-                _usePassword = true;
-                _error = 'Biometric authentication failed. Please use password.';
-              });
-            }
-          });
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _error = 'Authentication error: $e';
-        _isAuthenticating = false;
-        _usePassword = true; // Fall back to password
-      });
-    }
-  }
 }
 
 /// Show wallet authentication dialog
