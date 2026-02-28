@@ -2,6 +2,7 @@ const THIRDWEB_API_BASE = 'https://bridge.thirdweb.com/v1';
 const NATIVE_TOKEN_ADDRESS = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 const POLYGON_USDC_TOKEN_ADDRESS = '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359';
 const ETHEREUM_USDC_TOKEN_ADDRESS = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
+const MAX_ONRAMP_AMOUNT_USD = 30000;
 
 function normalizeStatus(status) {
   const normalized = (status || '').toString().toUpperCase();
@@ -29,6 +30,12 @@ function getDefaultTokenAddress(chainId) {
   return NATIVE_TOKEN_ADDRESS;
 }
 
+function normalizeOnrampAmount(amount) {
+  const parsed = Number(amount);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.min(parsed, MAX_ONRAMP_AMOUNT_USD).toString();
+}
+
 async function prepareOnramp(req, res) {
   try {
     const { walletAddress, amount, chainId, tokenAddress, onramp } = req.body || {};
@@ -41,6 +48,13 @@ async function prepareOnramp(req, res) {
     }
     if (!chainId) {
       return res.status(400).json({ success: false, error: 'chainId is required' });
+    }
+    const normalizedAmount = normalizeOnrampAmount(amount);
+    if (!normalizedAmount) {
+      return res.status(400).json({
+        success: false,
+        error: 'amount must be a positive numeric value in USD',
+      });
     }
 
     if (!process.env.THIRDWEB_SECRET_KEY) {
@@ -68,7 +82,7 @@ async function prepareOnramp(req, res) {
         onramp: onramp || 'stripe',
         chainId: effectiveChainId,
         tokenAddress: effectiveTokenAddress,
-        amount: amount.toString(),
+        amount: normalizedAmount,
         receiver: walletAddress,
         currency: 'USD',
       }),
@@ -119,6 +133,7 @@ async function prepareOnramp(req, res) {
       quoteId,
       id: quoteId, // compatibility for clients that expect "id"
       chainId: effectiveChainId,
+      amountUSD: normalizedAmount,
     });
   } catch (error) {
     console.error('❌ [THIRDWEB ONRAMP] prepareOnramp failed:', error);
